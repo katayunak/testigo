@@ -1,0 +1,10 @@
+{
+  // Three entry points. Following only the API handler would miss the webhook
+  // path, which is exactly where double-credit bugs live.
+  "patterns": ["./..."],
+  "entries": [
+    { "pkg": "example.com/paysvc/api",     "symbol": "(*Server).CreatePayment", "label": "API create" },
+    { "pkg": "example.com/paysvc/webhook", "symbol": "(*Handler).PSPCallback",  "label": "PSP webhook" },
+    { "pkg": "example.com/paysvc/recon",   "symbol": "(*Job).Reconcile",        "label": "reconciliation job" }
+  ]
+}

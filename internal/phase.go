@@ -1,4 +1,4 @@
-package models
+package internal
 
 type Phase string
 
