@@ -103,7 +103,7 @@ func (g *graph) isLocal(fn *ssa.Function) bool {
 	return g.local[o.Pkg.Pkg.Path()]
 }
 
-func (g *graph) walk(root string, entries []flowEntity.EntryPoint, flow *flowEntity.Flow) error {
+func (g *graph) discover(root string, entries []flowEntity.EntryPoint, flow *flowEntity.Flow) error {
 	if len(entries) == 0 {
 		return fmt.Errorf("no entry points configured: a payment flow has several " +
 			"(API handler, provider webhook, reconciliation job, queue consumer) and " +
@@ -121,8 +121,8 @@ func (g *graph) walk(root string, entries []flowEntity.EntryPoint, flow *flowEnt
 		seeds = append(seeds, fn)
 	}
 
-	seen := map[*ssa.Function]bool{}
-	queue := append([]*ssa.Function{}, seeds...)
+	seen := map[*ssa.Function]bool{} // used for graph traversal
+	worklist := append([]*ssa.Function{}, seeds...)
 	for _, f := range seeds {
 		seen[f] = true
 	}
@@ -141,9 +141,9 @@ func (g *graph) walk(root string, entries []flowEntity.EntryPoint, flow *flowEnt
 	// and that question only exists if the steps have an order.
 	calls := map[string][]orderedCall{}
 	seenEdge := map[string]bool{}
-	for len(queue) > 0 {
-		fn := queue[0]
-		queue = queue[1:]
+	for len(worklist) > 0 {
+		fn := worklist[0]
+		worklist = worklist[1:]
 		from := g.idOf[owner(fn)]
 		n := g.callGraph.Nodes[fn]
 		if n == nil {
@@ -169,7 +169,7 @@ func (g *graph) walk(root string, entries []flowEntity.EntryPoint, flow *flowEnt
 
 			if !seen[callee] {
 				seen[callee] = true
-				queue = append(queue, callee)
+				worklist = append(worklist, callee)
 			}
 		}
 	}

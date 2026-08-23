@@ -87,6 +87,7 @@ func extractStateMachines(pkgs []*packages.Package, root string, local map[strin
 
 	writes := map[string][]flowEntity.StateWrite{}
 	fields := map[string]string{}
+	isLifecycleType := func(key string) bool { _, ok := cands[key]; return ok }
 	for _, p := range pkgs {
 		if !local[p.PkgPath] || p.TypesInfo == nil {
 			continue
@@ -133,19 +134,49 @@ func extractStateMachines(pkgs []*packages.Package, root string, local map[strin
 							In: fns.at(kv.Pos()), To: to, Line: pos.Line,
 						})
 					}
+				case *ast.ReturnStmt:
+					// `return StatusFailed, nil` produces a state just as
+					// surely as `p.Status = StatusFailed` does — the caller
+					// stores what it is handed. Walking only AssignStmt and
+					// CompositeLit made every status that a function RETURNS
+					// look dead, and returning a status is ordinary Go.
+					//
+					// Call ARGUMENTS are deliberately not here, though they
+					// look like the same case. A status passed to a function is
+					// ambiguous: it is as likely to be a query filter as a
+					// write. The fixture proves it —
+					//
+					//   QueryContext(ctx, "... WHERE status = $1", StatusPending)
+					//
+					// reads payments in a state; it does not put one there.
+					// Counting that would not just inflate the count, it would
+					// record the WRONG FUNCTION as the write site, and the
+					// transitions prompt hands those write sites to an agent as
+					// fact. A missed write costs one noisy finding. A false
+					// write teaches the agent something untrue.
+					for _, r := range t.Results {
+						addWrite(p, fns, isLifecycleType, writes, relativeTo, r)
+					}
 				case *ast.AssignStmt:
 					for i, lhs := range t.Lhs {
-						tv, ok := p.TypesInfo.Types[lhs]
-						if !ok {
-							continue
-						}
-						key := types.TypeString(tv.Type, relativeTo)
-						if _, isCand := cands[key]; !isCand {
-							continue
-						}
 						if i >= len(t.Rhs) {
 							continue
 						}
+
+						// The left side of a short declaration is a DEFINITION,
+						// so go/types files it under Defs and TypesInfo.Types
+						// has nothing for it. That made `kind := StatusPending`
+						// invisible while `p.Status = StatusPending` was seen —
+						// same statement, two spellings, one of them ignored.
+						//
+						// Falling back to the right-hand side covers both, and
+						// covers assignment through an alias as a bonus.
+						tv, ok := p.TypesInfo.Types[lhs]
+						if !ok || !isLifecycleType(types.TypeString(tv.Type, relativeTo)) {
+							addWrite(p, fns, isLifecycleType, writes, relativeTo, t.Rhs[i])
+							continue
+						}
+						key := types.TypeString(tv.Type, relativeTo)
 						to := "<dynamic>"
 						if rv, ok := p.TypesInfo.Types[t.Rhs[i]]; ok && rv.Value != nil {
 							to = constName(p, t.Rhs[i], rv.Value.String())
@@ -220,14 +251,30 @@ func extractStateMachines(pkgs []*packages.Package, root string, local map[strin
 // demanding evidence would drop real machines in repositories that keep their
 // transitions in one place. A weak name has to show both behaviours.
 func isLifecycle(qualified, simple, field string, writes []flowEntity.StateWrite) (string, bool) {
-	if patterns.IsStateType(simple) {
-		return "", true
-	}
-
 	distinct := map[string]bool{}
 	for _, w := range writes {
 		distinct[w.In.ID()] = true
 	}
+
+	// A strong name skips the storage and two-writer rules, because a type
+	// called PaymentStatus is a lifecycle even in a package that only sets it
+	// once. It does NOT skip this one.
+	//
+	// A type that nothing anywhere ever assigns is not a lifecycle whatever it
+	// is called. testigo's own `Phase` is the example: two constants, a
+	// lifecycle-sounding name, and the only thing the code does with them is
+	// print them. Admitting it produced a state machine with zero write sites,
+	// a STATE-NEVER-SET finding for each constant, and a round-1 prompt asking
+	// an agent which transitions between phases are legal — which is the
+	// ErrorCode mistake this package exists to avoid, arriving through the one
+	// door that skips the checks.
+	if patterns.IsStateType(simple) {
+		if len(writes) == 0 {
+			return "named like a lifecycle, but nothing in this module ever assigns it, so nothing moves through it", false
+		}
+		return "", true
+	}
+
 	switch {
 	case field == "":
 		return "never stored in a struct field, so it does not survive between requests", false
@@ -303,4 +350,37 @@ func relPath(fset *token.FileSet, pos token.Pos, root string) string {
 		return filepath.ToSlash(rel)
 	}
 	return filepath.ToSlash(p.Filename)
+}
+
+// addWrite records one expression as a site that produces a lifecycle state.
+//
+// Shared by the return, call-argument and composite-literal cases so all three
+// agree on what counts and how it is named. An expression whose value the type
+// checker cannot fold to a constant is recorded as <dynamic>: the state was
+// produced, we just cannot say which one, and that is still not "never".
+func addWrite(
+	p *packages.Package,
+	fns funcTable,
+	isLifecycleType func(string) bool,
+	writes map[string][]flowEntity.StateWrite,
+	relativeTo types.Qualifier,
+	e ast.Expr,
+) {
+	tv, ok := p.TypesInfo.Types[e]
+	if !ok {
+		return
+	}
+	key := types.TypeString(tv.Type, relativeTo)
+	if !isLifecycleType(key) {
+		return
+	}
+
+	to := "<dynamic>"
+	if tv.Value != nil {
+		to = constName(p, e, tv.Value.String())
+	}
+	pos := p.Fset.Position(e.Pos())
+	writes[key] = append(writes[key], flowEntity.StateWrite{
+		In: fns.at(e.Pos()), To: to, Line: pos.Line,
+	})
 }

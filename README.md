@@ -1,5 +1,4 @@
 # TESTIGO
-
 Test your *GO Fintech* code with some help from your *AGENT!!*
 
 ## Install and run
@@ -20,70 +19,77 @@ $EDITOR ~/work/payments/testigo.json          # declare your entry points
 ./testigo collect ~/work/payments   # read the answers back and validate them
 ./testigo ask --round 2 ~/work/payments   # generate tests from those answers
 ```
+## Entry points — do this first
 
-## Entry points
+Nothing works until you have declared at least one. `testigo init` writes the
+file; you fill it in.
 
-**Run `testigo init` first.** It writes `testigo.json`, and nothing else works
-until you have declared at least one entry point.
+```json
+{
+  // Every function where a payment flow can START.
+  //
+  // Symbol syntax:  Func  |  Type.Method  |  (*Type).Method
 
-You can add entry points with command line:
+  "entries": [
+    { "pkg": "example.com/pay/internal/api",
+      "symbol": "(*Server).CreatePayment",
+      "label": "API create" },
+
+    { "pkg": "example.com/pay/internal/webhook",
+      "symbol": "(*Handler).ProviderCallback",
+      "label": "provider webhook" },
+
+    { "pkg": "example.com/pay/internal/recon",
+      "symbol": "(*Job).Reconcile",
+      "label": "reconciliation job" },
+
+    { "pkg": "example.com/pay/internal/consumer",
+      "symbol": "(*Consumer).HandleSettlement",
+      "label": "settlement queue" }
+  ]
+}
+```
+
+Edit that by hand, or append from the command line:
 
 ```sh
 ./testigo entry . add example.com/pay/internal/api#'(*Server).CreatePayment' "API create"
 ```
 
-or edit the `testigo.json` by hand:
+**testigo does not guess entry points, and will not.** It used to — anything
+named Pay, Charge, Webhook or Handle came back in a ranked list — and that was
+deleted, along with the `patterns/entryPoint.go` table behind it.
 
-```json
-{
-  // Every function where a payment flow can START is an entry point.
-  // symbol is receiver + function name
+An entry point is a *declaration*, not a discovery. Which functions start a
+payment flow is something your team knows and the code does not say: a handler
+called `ProcessRequest` may be the entire flow, and one called `CreatePayment`
+may be a wrapper nobody has called in a year. A generated list invites someone to
+accept it without reading, and an entry point accepted without reading is a whole
+path through the system that silently never gets analysed. A tool that is quietly
+wrong is worse than a tool that asks.
 
-  "entries": [
-    {
-      "pkg": "example.com/pay/internal/api",
-      "symbol": "(*Server).CreatePayment",
-      "label": "API create"
-    },
-    {
-      "pkg": "example.com/pay/internal/webhook",
-      "symbol": "(*Handler).ProviderCallback",
-      "label": "provider webhook"
-    },
-    {
-      "pkg": "example.com/pay/internal/recon",
-      "symbol": "(*Job).Reconcile",
-      "label": "reconciliation job"
-    },
-    {
-      "pkg": "example.com/pay/internal/consumer",
-      "symbol": "(*Consumer).HandleSettlement",
-      "label": "settlement queue"
-    }
-  ]
-}
-```
+So `testigo scan` fails on an empty list rather than analysing nothing and
+reporting success.
 
-List all of them. A payment flow has more than one: the API handler starts it,
-but the provider webhook, the reconciliation job and the queue consumer all
+List **all** of them. A payment flow has more than one: the API handler starts
+it, but the provider webhook, the reconciliation job and the queue consumer all
 rejoin the same state machine, and following only the first hides exactly the
 bugs worth finding.
 
-## PHASE ONE: ScanningTheFlow
 
+## PHASE ONE: ScanningTheFlow
 Testigo saves tokens as much as possible, therefore first phase requires NO AGENT.
 It uses the source code facts && GO's powerful tools like *SSA(Static Single Assignment)* && *AST(Abstact Syntax Tree)*
 to create a *sidecar file*. You'll find this file as .testigo/flow.json.
 
 ### GO's Actual Analysis Pipeline
-
 `GO source code`
 → `go/ast`
 → `go/types`
 → `go/ssa`
 → `callgraph`
 
-**go/ast** → Testigo uses this for source structure
+**go/ast** → Testigo uses this for source structure 
 
 **go/ssa** → Testigo uses this for control/data-flow analysis
 
@@ -91,8 +97,8 @@ to create a *sidecar file*. You'll find this file as .testigo/flow.json.
 
 ### How the sidecar gets built
 
-Six steps, in order. Everything here is a fact from the compiler except the last
-two, which are clearly marked as guesses.
+Six steps, in order. Everything here is a fact the compiler handed over, except
+the last one, which matches names against a table and is a heuristic.
 
 **1. Load.** `go/packages` type-checks the whole module. A package that fails to
 compile is reported and skipped, not fatal — real repos usually have one.
@@ -107,53 +113,41 @@ assumes any implementing type could receive an interface call. That means extra
 edges, never a missing one — and for a payment flow, a missed path is the
 expensive mistake.
 
-**4. Walk it — depth first, from every entry point, in source order.**
+**4. Discover what the entry points reach.** The entry points are *read from
+`testigo.json`*, never searched for — see above. An empty list is an error, not
+an empty result.
 
 ```
-walk(fn, depth):
-    if already seen fn:  return          # recursion, or a shared helper
-    mark seen, record it as a step at this depth
-    for each callee, IN CALL-SITE LINE ORDER:
-        if callee is outside this module:  skip it
-        walk(callee, depth + 1)
+worklist = [entry points]
+while worklist is not empty:
+    fn = take one
+    for each callee of fn:
+        if callee is outside this module:   skip it
+        record the edge  fn -> callee, WITH THE LINE NUMBER of the call site
+        if callee not seen:  mark seen, add to worklist
 ```
 
-The line-order detail is the point. A call graph only says "process can call
-Authorize", but every call site has a line number, and within one function that
-is the order the code is written in — as close to execution order as static
-analysis gets. Depth-first then keeps the nesting, so the flow reads as
+This step computes a **set**, not a sequence. Every reachable function is
+processed exactly once and emits all its edges when it is, so the order the
+worklist is drained in cannot be observed in the output — swap the queue for a
+stack and `flow.json` comes out byte-identical. There is no traversal decision to
+defend here.
 
-```
-CreatePayment
-  process
-    alreadySeen     line 43
-    BeginTx         line 52
-    Authorize       line 64
-    Post            line 73
-    Commit          line 76
-```
+The ordering data is the **line number on each edge** — the position of the call
+expression *inside the caller's body*, not the position of the callee's
+declaration. Two things get called "order" here and only one is used:
 
-which shows the thing that matters most about this flow: the provider call and
-the ledger write happen INSIDE the transaction. Breadth-first would list all six
-at the same level and lose that.
+| | | used? |
+|---|---|---|
+| declaration order | where `func A` sits in the file | **no, never** |
+| call-site order | where the call sits inside a body | **yes** |
 
-This is source order, not execution order, and every prompt says so — a branch
-may skip a call, a loop may repeat one, and `go` runs one alongside the rest.
+Go allows forward references at package level, so declaration order means
+nothing. Statement order inside a body does mean something: those statements run
+in that sequence. `Node.Calls` is stored sorted by it, and
+`TestDeclarationOrderIsIgnored` writes a package declared in reverse to prove it.
 
-Three more things make the walk correct rather than merely reachable:
-
-- **It starts from every entry point, not one.** The API handler, the provider
-  webhook, the reconciliation job and the queue consumer all rejoin the same
-  state machine. Following only the first hides exactly the bugs worth finding.
-- **It stops at the module boundary.** Your code is walked; `database/sql` is
-  not. Without that bound, CHA drags in the whole standard library and the graph
-  stops meaning anything.
-- **Closures belong to the function that holds them.** Payment code puts real
-  work inside `db.Transaction(func(tx) error {...})`, and a report listing those
-  as separate anonymous steps would be unreadable.
-
-Callees are visited in sorted order, so the same repository always produces the
-same file. A sidecar that reshuffles itself between runs cannot be diffed.
+Three things make the discovery correct rather than merely reachable:
 
 **5. Extract facts per function.** From the SSA instructions: does it open a
 transaction, commit, roll back, leave the process, read the clock, generate an
@@ -169,9 +163,7 @@ Then `.testigo/flow.json` is written atomically: temp file, then rename, so a
 crash never leaves half a file behind.
 
 ### The sidecar file
-
 This file stores everything Testigo discovered about your payment flow scan, such as:
-
 * functions (Nodes)
 * what they call
 * compiler/SSA facts
@@ -189,19 +181,21 @@ Your GO source stays untouched; flow.json stores Testigo's knowledge about it.
 in seconds and costs nothing. Do **commit** `.testigo/knowledge.json`: that one
 holds the agent answers, and those cost real money to produce.
 
+
+
 ## What it finds today
 
-| id                    | severity | what                                                           |
-|-----------------------|----------|----------------------------------------------------------------|
-| `MONEY-FLOAT`         | critical | money in a `float32`/`float64` field, parameter or result      |
-| `MONEY-DIV`           | high     | money divided with no stated rounding rule                     |
-| `MONEY-NO-CURRENCY`   | medium   | a bare integer amount with no currency beside it               |
-| `TX-NET-CALL`         | critical | a network call inside a database transaction                   |
-| `TX-NO-ROLLBACK`      | high     | `BeginTx` with no rollback in the same function                |
-| `SEAM-CONCRETE`       | high     | I/O on a concrete type — faults cannot be injected             |
-| `STATE-NEVER-SET`     | medium   | a declared status constant nothing ever assigns                |
+| id | severity | what |
+|---|---|---|
+| `MONEY-FLOAT` | critical | money in a `float32`/`float64` field, parameter or result |
+| `MONEY-DIV` | high | money divided with no stated rounding rule |
+| `MONEY-NO-CURRENCY` | medium | a bare integer amount with no currency beside it |
+| `TX-NET-CALL` | critical | a network call inside a database transaction |
+| `TX-NO-ROLLBACK` | high | `BeginTx` with no rollback in the same function |
+| `SEAM-CONCRETE` | high | I/O on a concrete type — faults cannot be injected |
+| `STATE-NEVER-SET` | medium | a declared status constant nothing ever assigns |
 | `IDEM-KEY-NOT-UNIQUE` | critical | an idempotency key field with no UNIQUE index in any migration |
-| `LOAD-ERROR`          | info     | a package did not type-check; its results are partial          |
+| `LOAD-ERROR` | info | a package did not type-check; its results are partial |
 
 `IDEM-KEY-NOT-UNIQUE` is worth a note. It compares two files that never mention
 each other: a Go struct with a key field, and the migrations. If nothing makes
@@ -260,12 +254,12 @@ Phase 2 asks about that, in two rounds.
 
 **Round 1 collects context. It writes no code.**
 
-| Question       | What it settles                                                             |
-|----------------|-----------------------------------------------------------------------------|
-| binding        | which type is money, which call commits it, where the idempotency key lives |
-| transitions    | which state changes are impossible, and which states are final              |
-| externalEffect | what each outside call does to the world, and whether a rollback undoes it  |
-| notes          | what each step means in business terms                                      |
+| Question | What it settles |
+|---|---|
+| binding | which type is money, which call commits it, where the idempotency key lives |
+| transitions | which state changes are impossible, and which states are final |
+| externalEffect | what each outside call does to the world, and whether a rollback undoes it |
+| notes | what each step means in business terms |
 
 **Round 2 asks for tests**, using round 1's answers as given.
 
@@ -391,11 +385,17 @@ pruning, so depending on it pulls in its whole test dependency graph —
 check.v1, kr/pretty, kr/text. Eight lines of comment-stripping was the better
 trade for a ten-line config file.
 
+
 ## One hazard worth knowing
 
 `go list` finds a `go.work` by walking **up** from the target directory. If your
 payment repo sits anywhere under an unrelated workspace file, packages outside
 that workspace vanish from the load and the only symptom is "entry point not
-found". `scan.Options.Env` exists for this — pass `GOWORK=off` and the
-repository is analysed on its own terms. This bit me while building the fixture,
-which is why there is a comment about it in the code.
+found".
+
+testigo therefore loads every repository with `GOWORK=off`, always. It is not an
+option you can pass, because there is no situation in which inheriting a
+workspace file from some parent directory is the behaviour you wanted — the repo
+under test is analysed on its own terms or the result is not about that repo.
+This bit me while building the fixture, which is why the line in `scan.go` has a
+comment on it.

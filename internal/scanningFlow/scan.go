@@ -11,7 +11,6 @@ import (
 
 	"github.com/katayunak/testigo/internal/codeRef"
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
-	"github.com/katayunak/testigo/internal/scanningFlow/patterns"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -109,7 +108,7 @@ func Scan(opts Options) (*Result, error) {
 		return nil, err
 	}
 
-	if err := g.walk(opts.Root, opts.Entries, flow); err != nil {
+	if err := g.discover(opts.Root, opts.Entries, flow); err != nil {
 		return nil, err
 	}
 
@@ -250,8 +249,8 @@ func stateFindings(ms []flowEntity.StateMachine) []flowEntity.Finding {
 		for _, st := range m.NeverAssigned {
 			out = append(out, flowEntity.Finding{
 				ID: "STATE-NEVER-SET", Severity: flowEntity.SevMedium,
-				Title:  m.Type + "." + st + " is declared but never assigned in this module",
-				Detail: "Either it is dead, or something outside this code — a migration, a manual fix, another service — puts payments into it. If the second, every read path has to handle a state no write path here produces, and no test currently covers that.",
+				Title:  m.Type + "." + st + " is declared but nothing in this module produces it",
+				Detail: "No assignment, struct literal, return statement or call argument anywhere in the scanned packages produces this state. Either it is dead, or something outside this code — a migration, a manual fix, another service — puts payments into it. If the second, every read path has to handle a state no write path here produces, and no test currently covers that.",
 				Ref:    codeRef.CodeRef{Pkg: pkgOf(m.Type), Symbol: "const " + st},
 			})
 		}
@@ -294,7 +293,21 @@ func infraFindings(pkgs []*packages.Package, f *flowEntity.Flow, root string) []
 				}
 				for _, fld := range st.Fields.List {
 					for _, nm := range fld.Names {
-						if !patterns.IdempotencyField.MatchString(nm.Name) {
+						// Ask the scorer, not the name.
+						//
+						// This used to be a regex on nm.Name, which made the
+						// loudest finding in the tool disagree with the most
+						// careful analysis in it: TraceID scored -3 ("generated
+						// in this process, so a retry produces a different
+						// value") and was still reported as a critical missing
+						// unique index. Two detectors, one opinion each, and
+						// the wrong one had the megaphone.
+						//
+						// Now a finding needs the same evidence a decision
+						// needs. A field that only matched the vocabulary
+						// scores 1 and says nothing.
+						cand, scored := f.IdempotencyKeys.Find(spec.Name.Name, nm.Name)
+						if !scored || !cand.Credible() {
 							continue
 						}
 						col := columnOf(fld, nm.Name)
@@ -305,7 +318,7 @@ func infraFindings(pkgs []*packages.Package, f *flowEntity.Flow, root string) []
 						out = append(out, flowEntity.Finding{
 							ID: "IDEM-KEY-NOT-UNIQUE", Severity: flowEntity.SevCritical,
 							Title:  spec.Name.Name + "." + nm.Name + " is an idempotency key with no unique constraint behind it",
-							Detail: "The migrations in " + strings.Join(f.Infra.MigrationDirs, ", ") + " create no UNIQUE index covering column \"" + col + "\". Whatever prevents duplicates in Go is therefore a read followed by a write, and two requests arriving together can both pass the read before either writes. Add a unique index and let the database refuse the second one.",
+							Detail: "The migrations in " + strings.Join(f.Infra.MigrationDirs, ", ") + " create no UNIQUE index covering column \"" + col + "\". Whatever prevents duplicates in Go is therefore a read followed by a write, and two requests arriving together can both pass the read before either writes. Add a unique index and let the database refuse the second one.\n\nWhy this field: " + strings.Join(cand.Evidence, "; ") + ".",
 							Ref:    flowEntity.CodeRefOf(p.PkgPath, spec.Name.Name, relPath(p.Fset, fld.Pos(), root), pos.Line),
 							Line:   pos.Line,
 						})

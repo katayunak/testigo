@@ -99,7 +99,6 @@ The tables live in one file per concern so they are easy to find and edit:
 | `patterns/io.go` | package prefixes to boundary kinds; the net/http client calls; cursor noise |
 | `patterns/state.go` | lifecycle type names, strong and weak; final-state hints |
 | `patterns/money.go` | amount fields, money types, currency fields, idempotency keys |
-| `patterns/entryPoint.go` | payment verbs, callback words, consumer argument shapes |
 
 `patterns/state.go` splits names into two lists on purpose. `PaymentStatus` is a
 lifecycle. `ErrorCode` is an enum but not a lifecycle, and asking an agent which
@@ -114,14 +113,29 @@ fail by finding nothing rather than by finding something false.
 
 ## Graph
 
-### CHA over VTA
+### CHA choice
 
-Testigo uses CHA (Class Hierarchy Analysis) instead of VTA (Variable Type Analysis). CHA says if a type could implement
-the interface, consider its method as a possible target; Even though it's not used. This creates noise, but it does not
-necessarily hide a possible path && help us test the implementations from every angle.
+Testigo uses CHA (Class Hierarchy Analysis) to build the call graph.
 
-VTA can provide a more precise call graph in some cases, but that precision is not the primary goal here. Testigo needs
-a conservative graph that is unlikely to hide a possible payment path.
+CHA is conservative: if a type could implement an interface, its method is treated as a possible call target, even if
+the implementation is not used at runtime. This creates some extra edges, but it is safer for payment-flow analysis
+because it is less likely to hide a possible path.
+
+### Discovering the flow
+
+`scan()` builds the SSA program, creates the CHA call graph, and walks it from the entry points **declared in
+`testigo.json`**. Nothing in this package looks for entry points. There is no ranking, no name matching, no
+`patterns/entryPoint.go` — that table existed once and was deleted. An empty entry list is an error, not an empty flow.
+
+`graph.discover` computes a **set**, not a sequence. Every reachable local function is visited exactly once and emits
+all of its out-edges when it is, so the order the worklist is drained in cannot be observed in the output. Swapping the
+queue for a stack produces a byte-identical `flow.json`; `scan_test.go` asserts it rather than assuming it. There is no
+BFS-versus-DFS decision to defend here, and the old wording claiming BFS mattered was the actual bug.
+
+The ordering that *does* survive lives on the edges. Each recorded call carries the position of the call expression
+inside the caller's body, and `Node.Calls` is stored sorted by it, so a rendered step list reads in the order the
+statements run. Declaration order — where `func A` happens to sit in the file — is never used: Go resolves package-level
+names regardless of position, so it carries no information.
 
 ### Indexing all nodes
 
@@ -145,75 +159,6 @@ That distinction is important for preserving notes correctly.
 SSA represents closures as separate functions. Testigo uses *owner()* to walk through the SSA parent chain until it
 reaches the declared function containing the closure.
 This prevents the flow from becoming polluted with anonymous implementation details.
-
-### Traversing the Graph
-
-**Depth-first, following each call in the order it is written.**
-
-The obvious question is why not breadth-first, and the honest first answer is
-that for pure reachability it makes no difference — both find the same set of
-functions. The difference is what the flow LOOKS like afterwards, and that turns
-out to matter more than it sounds.
-
-#### Neither order is execution order
-
-A call graph is a graph. It says "process can call Authorize", not "process
-calls Authorize third". Which branch runs, how many times a loop repeats, whether
-a `go` statement finished before the next line — none of that is knowable
-without running the code.
-
-But there is ordering information available, and an earlier version threw it
-away: **within a single function, every call site has a line number.** That is
-the order the code is written in, and it is as close to execution order as static
-analysis gets. `Node.Calls` is sorted by call-site position, so the walk can
-follow it.
-
-#### Why depth-first wins once order exists
-
-Breadth-first visits everything one call away, then everything two calls away.
-Applied to a payment flow, it flattens the structure:
-
-```
-BFS                          DFS, in source order
----                          ---
-CreatePayment                CreatePayment
-process                        process
-alreadySeen                      alreadySeen        line 43
-Authorize                        BeginTx            line 52
-Post                             Authorize          line 64
-Commit                           Post               line 73
-                                 Commit             line 76
-```
-
-The left column loses the single most important fact about this flow: the
-provider call and the ledger write happen **inside** the transaction that
-`process` opened. Depth-first keeps the nesting, so a reader sees what is
-contained by what.
-
-#### The reason this is not cosmetic
-
-Several generated tests depend on step ORDER existing at all:
-
-- *crash at each step* asks "what if the process dies after the provider call but
-  before COMMIT" — a question that only means something if the steps are in
-  sequence
-- *orphaned authorization* is defined as the gap between two specific adjacent
-  steps
-- *no network call inside a transaction* is about containment, which is exactly
-  what the nesting shows
-
-Breadth-first order makes all three harder to express and easier to get wrong.
-
-#### What is honest about it
-
-Every prompt says this is source order, not execution order, and names the three
-ways they differ: a branch may skip a call, a loop may repeat one, and `go` runs
-one alongside the rest. Over-claiming here would be worse than the flat listing,
-because a reader who believes it is execution order will trust a sequence that
-the code does not guarantee.
-
-A function reached from two places appears once, at its first occurrence. Cycles
-terminate on the same check.
 
 ### Node Classification
 

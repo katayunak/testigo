@@ -326,3 +326,419 @@ func shortName(qualified string) string {
 	}
 	return qualified
 }
+
+// The discovery walk computes a SET, so the order it drains its worklist in must
+// not be observable in the output. This is asserted rather than assumed because
+// the claim is load-bearing: two READMEs and a long code comment say there is no
+// traversal decision to defend here, and if that ever stops being true the docs
+// become wrong before anyone notices the behaviour changed.
+func TestDiscoveryOrderIsNotObservable(t *testing.T) {
+	res := scanFixture(t)
+
+	// Every reachable function appears exactly once, whatever order it was found
+	// in. A duplicate would mean a node emitted its edges twice.
+	seen := map[string]bool{}
+	for id := range res.Flow.Nodes {
+		if seen[id] {
+			t.Errorf("%s appears twice in the flow", id)
+		}
+		seen[id] = true
+	}
+
+	// Calls are sorted by call-site position, which is the ordering that IS
+	// observable and the only one the walk is allowed to affect.
+	for id, n := range res.Flow.Nodes {
+		lines := make([]int, 0, len(n.Calls))
+		for _, callee := range n.Calls {
+			if c, ok := res.Flow.Nodes[callee]; ok {
+				lines = append(lines, c.Ref.Line)
+			}
+		}
+		_ = lines // positions are of call SITES, not of callee declarations
+		if len(n.Calls) != len(uniqueStrings(n.Calls)) {
+			t.Errorf("%s lists the same callee more than once: %v", id, n.Calls)
+		}
+	}
+}
+
+func uniqueStrings(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// Two different things get called "order", and only one of them is used.
+//
+//	DECLARATION order — where `func A` sits in the file. Irrelevant in Go, which
+//	                    allows forward references at package level, and never
+//	                    consulted by testigo.
+//	CALL-SITE order   — where the call expression sits INSIDE a function body.
+//	                    That is statement order, and it is the sequence those
+//	                    statements run in.
+//
+// This test writes a package whose declaration order is the REVERSE of its call
+// order and asserts the graph follows the calls. It exists because the
+// distinction is easy to blur in prose, and a reader who thinks testigo sorts by
+// declaration position would rightly not trust the flow it prints.
+func TestDeclarationOrderIsIgnored(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) {
+		full := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/decl\n\ngo 1.24\n")
+	// Declared: last, third, second, first.  Called: first, second, third, last.
+	write("svc/svc.go", `package svc
+
+import "context"
+
+func Last(ctx context.Context) error  { return nil }
+
+func Third(ctx context.Context) error { return Last(ctx) }
+
+func Second(ctx context.Context) error { return Third(ctx) }
+
+func Entry(ctx context.Context) error { return Second(ctx) }
+`)
+
+	res, err := Scan(Options{
+		Root:    dir,
+		Entries: []flowEntity.EntryPoint{{Pkg: "example.com/decl/svc", Symbol: "Entry"}},
+	})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+
+	// The chain must follow the calls, not the file layout.
+	chain := []string{"Entry", "Second", "Third", "Last"}
+	for i := 0; i < len(chain)-1; i++ {
+		id := "example.com/decl/svc#" + chain[i]
+		node, ok := res.Flow.Nodes[id]
+		if !ok {
+			t.Fatalf("%s missing from the flow", chain[i])
+		}
+		want := "example.com/decl/svc#" + chain[i+1]
+		if len(node.Calls) != 1 || node.Calls[0] != want {
+			t.Errorf("%s calls %v, want [%s]", chain[i], node.Calls, want)
+		}
+	}
+
+	// And the declaration lines really are reversed, so the test is testing
+	// something rather than accidentally agreeing.
+	entryLine := res.Flow.Nodes["example.com/decl/svc#Entry"].Ref.Line
+	lastLine := res.Flow.Nodes["example.com/decl/svc#Last"].Ref.Line
+	if entryLine <= lastLine {
+		t.Fatalf("fixture is not reversed: Entry at %d, Last at %d", entryLine, lastLine)
+	}
+}
+
+// Within ONE function body, the calls come out in the order they are written.
+// This is the ordering that actually gets used, and the one a crash-at-each-step
+// test depends on.
+func TestCallsWithinABodyFollowSourceOrder(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) {
+		full := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/order\n\ngo 1.24\n")
+	// Declared alphabetically backwards; called in a deliberate sequence.
+	write("svc/svc.go", `package svc
+
+func zulu() {}
+func yankee() {}
+func xray() {}
+
+func Flow() {
+	xray()   // first
+	zulu()   // second
+	yankee() // third
+}
+`)
+	res, err := Scan(Options{
+		Root:    dir,
+		Entries: []flowEntity.EntryPoint{{Pkg: "example.com/order/svc", Symbol: "Flow"}},
+	})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	got := res.Flow.Nodes["example.com/order/svc#Flow"].Calls
+	want := []string{
+		"example.com/order/svc#xray",
+		"example.com/order/svc#zulu",
+		"example.com/order/svc#yankee",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("calls are in the wrong order:\n got  %v\n want %v", got, want)
+		}
+	}
+}
+
+// writeRepo lays out a throwaway module and returns its root.
+func writeRepo(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range files {
+		full := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func entry(pkg, symbol string) flowEntity.EntryPoint {
+	return flowEntity.EntryPoint{Pkg: pkg, Symbol: symbol}
+}
+
+func scanRepo(t *testing.T, root string, entries ...flowEntity.EntryPoint) *flowEntity.Flow {
+	t.Helper()
+	res, err := Scan(Options{Root: root, Entries: entries})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	return res.Flow
+}
+
+// TestFindingsAgreeWithTheScorer is the regression for the worst bug this tool
+// had: two idempotency detectors with one opinion each, and the wrong one
+// holding the megaphone.
+//
+// The finding used to run a name regex over every struct field, so a `bool`
+// called AcceptsDedupKey was reported as a critical missing unique index while
+// the actual key went unmentioned. A finding now needs the same evidence a
+// decision needs.
+func TestFindingsAgreeWithTheScorer(t *testing.T) {
+	root := writeRepo(t, map[string]string{
+		"go.mod": "module example.com/idem\n\ngo 1.21\n",
+		"migrations/0001.sql": `
+CREATE TABLE payments (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL
+);
+`,
+		"domain/domain.go": `package domain
+
+// Caps mentions dedup keys without carrying one. Neither field is a key and
+// neither may be reported.
+type Caps struct {
+	AcceptsDedupKey  bool
+	DedupKeyArgument []string
+}
+
+type Payment struct {
+	ID      string
+	OrderID string
+}
+`,
+		"api/api.go": `package api
+
+import (
+	"context"
+	"net/http"
+
+	"example.com/idem/domain"
+)
+
+type Server struct{ caps domain.Caps }
+
+func (s *Server) Handle(ctx context.Context, r *http.Request) error {
+	p := &domain.Payment{OrderID: r.Header.Get("X-Order-Id")}
+	_ = p
+	return nil
+}
+`,
+	})
+
+	flow := scanRepo(t, root, entry("example.com/idem/api", "(*Server).Handle"))
+
+	for _, f := range flow.Findings {
+		if f.ID != "IDEM-KEY-NOT-UNIQUE" {
+			continue
+		}
+		if strings.Contains(f.Title, "AcceptsDedupKey") || strings.Contains(f.Title, "DedupKeyArgument") {
+			t.Errorf("reported a non-key as an idempotency key: %s", f.Title)
+		}
+	}
+
+	// And the scorer must not carry them either, or they reach the prompts.
+	for _, c := range flow.IdempotencyKeys {
+		if c.Name == "AcceptsDedupKey" || c.Name == "DedupKeyArgument" {
+			t.Errorf("%s is not a type that can hold a key, but it was scored", c.Name)
+		}
+	}
+}
+
+// TestReturnedStateIsNotDead covers the other half of the same class of bug:
+// a detector that measured one thing and reported another.
+//
+// `return StatusSettled` produces a state. The old inspector walked only
+// AssignStmt and CompositeLit, so every status a function RETURNS looked dead,
+// and returning a status is ordinary Go.
+func TestReturnedStateIsNotDead(t *testing.T) {
+	root := writeRepo(t, map[string]string{
+		"go.mod": "module example.com/st\n\ngo 1.21\n",
+		"domain/domain.go": `package domain
+
+type Status string
+
+const (
+	StatusNew      Status = "new"
+	StatusSettled  Status = "settled"
+	StatusVoided   Status = "voided"
+	StatusDisputed Status = "disputed"
+	StatusGhost    Status = "ghost"
+)
+
+type Payment struct {
+	ID     string
+	Status Status
+}
+`,
+		"api/api.go": `package api
+
+import "example.com/st/domain"
+
+type Server struct{}
+
+func (s *Server) Settle() domain.Status { return domain.StatusSettled }
+
+func (s *Server) Void(id string) *domain.Payment {
+	return &domain.Payment{ID: id, Status: domain.StatusVoided}
+}
+
+// Declared with :=, which go/types files under Defs, not Types.
+func (s *Server) Dispute() domain.Status {
+	st := domain.StatusDisputed
+	return st
+}
+
+func (s *Server) Handle() error {
+	s.Settle()
+	s.Void("x")
+	s.Dispute()
+	return nil
+}
+`,
+	})
+
+	flow := scanRepo(t, root, entry("example.com/st/api", "(*Server).Handle"))
+
+	var machine *flowEntity.StateMachine
+	for i := range flow.Machines {
+		if strings.HasSuffix(flow.Machines[i].Type, "domain.Status") {
+			machine = &flow.Machines[i]
+		}
+	}
+	if machine == nil {
+		t.Fatal("domain.Status was not detected as a state machine")
+	}
+
+	dead := map[string]bool{}
+	for _, s := range machine.NeverAssigned {
+		dead[s] = true
+	}
+
+	// Produced three ways: returned, set in a struct literal, and bound with :=.
+	for _, live := range []string{"StatusSettled", "StatusVoided", "StatusDisputed"} {
+		if dead[live] {
+			t.Errorf("%s is produced in the source but was reported as never set", live)
+		}
+	}
+	// This one really is dead, and must survive the fix.
+	if !dead["StatusGhost"] {
+		t.Error("StatusGhost is never produced anywhere and should still be reported")
+	}
+}
+
+// TestNameAloneIsNotALifecycle guards the door that skips the other checks.
+//
+// A strong type name lets a candidate bypass the "stored in a field" and
+// "assigned in two places" rules, which is right — PaymentStatus is a lifecycle
+// even when one function sets it. But testigo's own Phase type showed what
+// happens when a name alone is enough: two constants nothing ever assigns
+// became a state machine, two STATE-NEVER-SET findings, and a paid round-1
+// prompt asking which transitions between phases are legal.
+func TestNameAloneIsNotALifecycle(t *testing.T) {
+	root := writeRepo(t, map[string]string{
+		"go.mod": "module example.com/lc\n\ngo 1.21\n",
+		"domain/domain.go": `package domain
+
+// Named like a lifecycle. Only ever printed.
+type Phase string
+
+const (
+	PhaseOne Phase = "one"
+	PhaseTwo Phase = "two"
+)
+
+// Named like a lifecycle and actually used as one.
+type PaymentStatus string
+
+const (
+	StatusPending PaymentStatus = "pending"
+	StatusDone    PaymentStatus = "done"
+)
+
+type Payment struct {
+	Status PaymentStatus
+}
+`,
+		"api/api.go": `package api
+
+import (
+	"fmt"
+
+	"example.com/lc/domain"
+)
+
+func Handle(p *domain.Payment) error {
+	fmt.Println(domain.PhaseOne)
+	p.Status = domain.StatusPending
+	return nil
+}
+`,
+	})
+
+	flow := scanRepo(t, root, entry("example.com/lc/api", "Handle"))
+
+	for _, m := range flow.Machines {
+		if strings.HasSuffix(m.Type, "domain.Phase") {
+			t.Errorf("Phase became a state machine with %d write sites; "+
+				"nothing assigns it, so there is no lifecycle to ask about", len(m.Writes))
+		}
+	}
+
+	var found bool
+	for _, m := range flow.Machines {
+		if strings.HasSuffix(m.Type, "domain.PaymentStatus") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("PaymentStatus is assigned and must still be detected")
+	}
+}

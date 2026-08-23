@@ -69,5 +69,3 @@ Current repository
    ┌────┼────┐
    ▼    ▼    ▼
  byID byHash nodes
-```
-Scan creates a new flow and initialize the index in repositories packages and entry points at the start.

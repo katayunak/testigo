@@ -103,7 +103,12 @@ func cmdInit(root string) error {
 	if err := os.WriteFile(p, []byte(config.Example), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("wrote %s — edit the entries, then run 'testigo entries' for candidates\n", p)
+	// No candidate list follows this. testigo does not guess entry points; the
+	// user declares them, and scan refuses to run on an empty list.
+	fmt.Printf("wrote %s\n", p)
+	fmt.Println("declare your entry points in it before scanning:")
+	fmt.Println("  edit the \"entries\" array by hand, or")
+	fmt.Println("  testigo entry . add <pkg>#<Symbol> [label]")
 
 	return nil
 }
