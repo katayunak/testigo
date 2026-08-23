@@ -5,8 +5,6 @@ import (
 	"go/parser"
 	"go/token"
 	"testing"
-
-	"github.com/katayunak/testigo/internal/models"
 )
 
 func parseFunc(t *testing.T, src string) *ast.FuncDecl {
@@ -113,17 +111,17 @@ func TestResolveMovedOnRename(t *testing.T) {
 	old := parseFunc(t, "func Debit(acct string, cents int64) error "+body)
 	renamed := parseFunc(t, "func Withdraw(acct string, cents int64) error "+body)
 
-	saved := models.CodeRef{Pkg: "pay/ledger", Symbol: Symbol(old)}
+	saved := CodeRef{Pkg: "pay/ledger", Symbol: Symbol(old)}
 	saved.BodyHash, _ = StructuralHash(old)
 
 	ix := NewIndex()
-	cur := models.CodeRef{Pkg: "pay/ledger", Symbol: Symbol(renamed)}
+	cur := CodeRef{Pkg: "pay/ledger", Symbol: Symbol(renamed)}
 	var size int
 	cur.BodyHash, size = StructuralHash(renamed)
 	ix.Add(cur, size)
 
 	got, res := Resolve(ix, saved)
-	if res != models.Moved {
+	if res != Moved {
 		t.Fatalf("want Moved, got %s", res)
 	}
 	if got.Symbol != "Withdraw" {
@@ -136,14 +134,14 @@ func TestResolveOutcomes(t *testing.T) {
 	if id == "" { return errNoID }
 	return storage.Lock(id)
 }`)
-	a := models.CodeRef{Pkg: "pay", Symbol: Symbol(fn)}
+	a := CodeRef{Pkg: "pay", Symbol: Symbol(fn)}
 	var size int
 	a.BodyHash, size = StructuralHash(fn)
 
 	t.Run("fresh", func(t *testing.T) {
 		ix := NewIndex()
 		ix.Add(a, size)
-		if _, res := Resolve(ix, a); res != models.Fresh {
+		if _, res := Resolve(ix, a); res != Fresh {
 			t.Fatalf("want Fresh, got %s", res)
 		}
 	})
@@ -153,13 +151,13 @@ func TestResolveOutcomes(t *testing.T) {
 		changed := a
 		changed.BodyHash = "deadbeef"
 		ix.Add(changed, size)
-		if _, res := Resolve(ix, a); res != models.Stale {
+		if _, res := Resolve(ix, a); res != Stale {
 			t.Fatalf("want Stale, got %s", res)
 		}
 	})
 
 	t.Run("orphaned", func(t *testing.T) {
-		if _, res := Resolve(NewIndex(), a); res != models.Orphaned {
+		if _, res := Resolve(NewIndex(), a); res != Orphaned {
 			t.Fatalf("want Orphaned, got %s", res)
 		}
 	})
@@ -171,16 +169,16 @@ func TestTinyBodiesAreNotMoveCandidates(t *testing.T) {
 	oldFn := parseFunc(t, `func ID() string { return s.id }`)
 	newFn := parseFunc(t, `func Ref() string { return s.id }`)
 
-	saved := models.CodeRef{Pkg: "pay", Symbol: Symbol(oldFn)}
+	saved := CodeRef{Pkg: "pay", Symbol: Symbol(oldFn)}
 	saved.BodyHash, _ = StructuralHash(oldFn)
 
 	ix := NewIndex()
-	cur := models.CodeRef{Pkg: "pay", Symbol: Symbol(newFn)}
+	cur := CodeRef{Pkg: "pay", Symbol: Symbol(newFn)}
 	var size int
 	cur.BodyHash, size = StructuralHash(newFn)
 	ix.Add(cur, size)
 
-	if _, res := Resolve(ix, saved); res != models.Orphaned {
+	if _, res := Resolve(ix, saved); res != Orphaned {
 		t.Fatalf("want Orphaned for a trivial body, got %s", res)
 	}
 }

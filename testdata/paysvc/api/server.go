@@ -20,7 +20,10 @@ type Server struct {
 
 func (s *Server) CreatePayment(w http.ResponseWriter, r *http.Request) {
 	p := &domain.Payment{
-		ID:             r.Header.Get("X-Request-Id"),
+		ID:             uuid(),
+		ReferenceID:    uuid(),
+		TraceID:        uuid(),
+		OrderID:        r.URL.Query().Get("order"),
 		IdempotencyKey: r.Header.Get("Idempotency-Key"),
 		Amount:         12.34,
 		CreatedAt:      time.Now(),
@@ -32,6 +35,8 @@ func (s *Server) CreatePayment(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
+func uuid() string { return "generated" }
+
 func (s *Server) process(ctx context.Context, p *domain.Payment) error {
 	seen, err := s.alreadySeen(ctx, p.IdempotencyKey)
 	if err != nil {
@@ -42,6 +47,7 @@ func (s *Server) process(ctx context.Context, p *domain.Payment) error {
 	}
 
 	p.Status = domain.StatusPending
+	p.Mode = domain.ModeQueued
 
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {

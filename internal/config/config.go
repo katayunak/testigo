@@ -7,32 +7,23 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/models"
+	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
 const FileName = "testigo.json"
 
+// Config is the entry points, and nothing else.
+//
+// There used to be a `patterns` field here, holding Go package patterns so a
+// large repository could load less. It is gone, and the reason is worth keeping:
+// narrowing the load is a knob whose misuse is SILENT. Exclude a package the
+// flow actually calls into and that call becomes invisible — the graph simply
+// stops there, and the report looks complete. Trading a correct answer for
+// twenty seconds is a bad trade for a tool whose only product is trust.
+//
+// If scan time ever becomes a real problem, the fix is caching what did not
+// change, not looking at less code.
 type Config struct {
-	// Patterns limits which packages are loaded. Defaults to ["./..."].
-	//
-	// Q: what is this?
-	// A: These are Go package patterns — the same strings you type after
-	//    `go build` or `go list`. "./..." means "this module and everything
-	//    under it".
-	//
-	//    It exists for speed. testigo type-checks and builds SSA for every
-	//    package it loads, and on a large service most of them have nothing to
-	//    do with payments. Narrowing the set is the difference between a scanningFlow
-	//    that takes four seconds and one that takes two minutes:
-	//
-	//        "patterns": ["./service/...", "./domain/...", "./client/..."]
-	//
-	//    Be careful narrowing it too far. If you exclude a package the flow
-	//    actually calls into, that call becomes invisible — the function is not
-	//    "local" any more, so the graph stops there and you get a flow that
-	//    looks complete but is not. Start with ./... and only narrow once you
-	//    know which packages the flow touches.
-	Patterns []string `json:"patterns,omitempty"`
 	// Entries are the starting points of the payment flow. Plural on purpose.
 	Entries []Entry `json:"entries"`
 }
@@ -52,9 +43,10 @@ func Load(root string) (*Config, error) {
 	if err := json.Unmarshal(stripComments(b), &c); err != nil {
 		return nil, fmt.Errorf("%s: %w", FileName, err)
 	}
-	if len(c.Entries) == 0 {
-		return nil, fmt.Errorf("%s: no entries configured", FileName)
-	}
+	// An empty list is valid on disk: `testigo init` writes one, and
+	// `testigo entry add` exists to fill it. Only the commands that need to WALK
+	// the flow require entries, and they say so themselves.
+
 	for i, e := range c.Entries {
 		if e.Pkg == "" || e.Symbol == "" {
 			return nil, fmt.Errorf("%s: entry %d needs both pkg and symbol", FileName, i)
@@ -73,10 +65,29 @@ func stripComments(b []byte) []byte {
 	return []byte(strings.Join(lines, "\n"))
 }
 
-func (c *Config) EntryPoints() []models.EntryPoint {
-	out := make([]models.EntryPoint, 0, len(c.Entries))
+func Save(root string, c *Config) error {
+	b, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(filepath.Join(root, FileName), append(b, '\n'), 0o644)
+}
+
+func (c *Config) RequireEntries() error {
+	if len(c.Entries) == 0 {
+		return fmt.Errorf("%s has no entry points\n\n"+
+			"Declare at least one:\n\n"+
+			"  testigo entry . add <import-path>#<Symbol> \"label\"\n\n"+
+			"or edit %s by hand. The template is in the file.", FileName, FileName)
+	}
+	return nil
+}
+
+func (c *Config) EntryPoints() []flowEntity.EntryPoint {
+	out := make([]flowEntity.EntryPoint, 0, len(c.Entries))
 	for _, e := range c.Entries {
-		out = append(out, models.EntryPoint{Pkg: e.Pkg, Symbol: e.Symbol, Label: e.Label})
+		out = append(out, flowEntity.EntryPoint{Pkg: e.Pkg, Symbol: e.Symbol, Label: e.Label})
 	}
 	return out
 }
@@ -84,18 +95,35 @@ func (c *Config) EntryPoints() []models.EntryPoint {
 // Example is written by `testigo init` so a first-time user has something to
 // edit rather than a blank file and a manual to read.
 const Example = `{
-  // A payment flow has more than one entry point. The API handler starts it,
-  // but the provider webhook, the reconciliation job and the queue consumer all
-  // rejoin the same state machine. Listing only the first one hides the bugs
-  // that live in the others.
+  // Every function where a payment flow can START.
   //
-  // Symbol syntax: Func, Type.Method, or (*Type).Method
-  // Run 'testigo entries' to see candidates found in this repository.
+  // testigo does not guess these. Which functions begin a flow is something you
+  // know and the code does not say: a handler called ProcessRequest may be the
+  // whole flow, and one called CreatePayment may be a wrapper nobody calls any
+  // more. A guessed list invites someone to accept it without reading, and an
+  // entry point accepted without reading is a whole path through the system that
+  // silently never gets analysed.
+  //
+  // List ALL of them. A payment flow usually has several, and they rejoin the
+  // same state machine:
+  //
+  //   { "pkg": "example.com/pay/internal/api",
+  //     "symbol": "(*Server).CreatePayment", "label": "API create" },
+  //
+  //   { "pkg": "example.com/pay/internal/webhook",
+  //     "symbol": "(*Handler).ProviderCallback", "label": "provider webhook" },
+  //
+  //   { "pkg": "example.com/pay/internal/recon",
+  //     "symbol": "(*Job).Reconcile", "label": "reconciliation job" },
+  //
+  //   { "pkg": "example.com/pay/internal/consumer",
+  //     "symbol": "(*Consumer).HandleSettlement", "label": "settlement queue" }
+  //
+  // Symbol syntax:  Func  |  Type.Method  |  (*Type).Method
+  //
+  // Add them here, or from the command line:
+  //   testigo entry . add example.com/pay/internal/api#'(*Server).CreatePayment' "API create"
 
-  "patterns": ["./..."],
-
-  "entries": [
-    { "pkg": "example.com/pay/internal/api", "symbol": "(*Server).CreatePayment", "label": "API create" }
-  ]
+  "entries": []
 }
 `

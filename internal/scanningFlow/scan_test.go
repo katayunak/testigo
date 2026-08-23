@@ -1,12 +1,12 @@
 package scanningFlow
 
 import (
+	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
-
-	"github.com/katayunak/testigo/internal/models"
 )
 
 // fixtureRoot is a deliberately broken payment service. Every defect in it was
@@ -42,12 +42,12 @@ var (
 func scanFixture(t *testing.T) *Result {
 	t.Helper()
 	root := fixtureRoot(t)
-	// The fixture is a self-contained module living inside testigo's own tree.
-	// Without this, a go.work at the testigo root would put `go list` into
-	// workspace mode and the fixture's packages would not load at all.
-	env := append(os.Environ(), "GOWORK=off")
+	// The fixture is a self-contained module living inside testigo's own tree,
+	// so it is also the case that proves GOWORK=off has to be unconditional: a
+	// go.work at the testigo root would otherwise hide the fixture's packages
+	// entirely. Scan sets it internally now, which is why nothing is passed.
 	fixtureOnce.Do(func() {
-		fixtureRes, fixtureErr = scanFixtureOnce(root, env)
+		fixtureRes, fixtureErr = scanFixtureOnce(root)
 	})
 	if fixtureErr != nil {
 		t.Fatalf("scanningFlow: %v", fixtureErr)
@@ -55,11 +55,10 @@ func scanFixture(t *testing.T) *Result {
 	return fixtureRes
 }
 
-func scanFixtureOnce(root string, env []string) (*Result, error) {
+func scanFixtureOnce(root string) (*Result, error) {
 	return Scan(Options{
 		Root: root,
-		Env:  env,
-		Entries: []models.EntryPoint{
+		Entries: []flowEntity.EntryPoint{
 			{Pkg: "example.com/paysvc/api", Symbol: "(*Server).CreatePayment"},
 			{Pkg: "example.com/paysvc/webhook", Symbol: "(*Handler).PSPCallback"},
 			{Pkg: "example.com/paysvc/recon", Symbol: "(*Job).Reconcile"},
@@ -73,16 +72,16 @@ func TestFindsPlantedDefects(t *testing.T) {
 	type want struct {
 		id   string
 		file string
-		sev  models.Severity
+		sev  flowEntity.Severity
 	}
 	wants := []want{
-		{"MONEY-FLOAT", "domain/payment.go", models.SevCritical},     // Payment.Amount is a float64
-		{"MONEY-FLOAT", "api/server.go", models.SevCritical},         // applyDiscount takes a float
-		{"MONEY-DIV", "api/server.go", models.SevHigh},               // splitFee truncates the remainder
-		{"MONEY-NO-CURRENCY", "domain/payment.go", models.SevMedium}, // FeeCents with no currency
-		{"TX-NET-CALL", "api/server.go", models.SevCritical},         // PSP call inside the transaction
-		{"TX-NO-ROLLBACK", "api/server.go", models.SevHigh},          // BeginTx with no rollback
-		{"STATE-NEVER-SET", "", models.SevMedium},                    // StatusRefunded / StatusAbandoned
+		{"MONEY-FLOAT", "domain/payment.go", flowEntity.SevCritical},     // Payment.Amount is a float64
+		{"MONEY-FLOAT", "api/server.go", flowEntity.SevCritical},         // applyDiscount takes a float
+		{"MONEY-DIV", "api/server.go", flowEntity.SevHigh},               // splitFee truncates the remainder
+		{"MONEY-NO-CURRENCY", "domain/payment.go", flowEntity.SevMedium}, // FeeCents with no currency
+		{"TX-NET-CALL", "api/server.go", flowEntity.SevCritical},         // PSP call inside the transaction
+		{"TX-NO-ROLLBACK", "api/server.go", flowEntity.SevHigh},          // BeginTx with no rollback
+		{"STATE-NEVER-SET", "", flowEntity.SevMedium},                    // StatusRefunded / StatusAbandoned
 	}
 	for _, w := range wants {
 		found := false
@@ -129,7 +128,7 @@ func TestDoesNotReportNoise(t *testing.T) {
 // at all, so it gets its own assertions rather than being checked by count.
 func TestInjectabilityIsCorrect(t *testing.T) {
 	res := scanFixture(t)
-	byTarget := map[string]models.Seam{}
+	byTarget := map[string]flowEntity.Seam{}
 	for _, s := range res.Flow.Seams {
 		byTarget[s.Target] = s
 	}
@@ -154,10 +153,28 @@ func TestInjectabilityIsCorrect(t *testing.T) {
 
 func TestStateMachineExtraction(t *testing.T) {
 	res := scanFixture(t)
-	if len(res.Flow.Machines) != 1 {
-		t.Fatalf("want 1 state machine, got %d", len(res.Flow.Machines))
+	// PaymentStatus by its name, SettlementMode by its behaviour. DeclineCode is
+	// also a named string with constants and must NOT be here: it is returned
+	// and compared, never stored and never advanced, so it is an enum and not a
+	// lifecycle. Asking an agent which of its transitions are illegal would be
+	// nonsense that costs money.
+	byType := map[string]flowEntity.StateMachine{}
+	for _, m := range res.Flow.Machines {
+		byType[shortName(m.Type)] = m
 	}
-	m := res.Flow.Machines[0]
+	for _, want := range []string{"PaymentStatus", "SettlementMode"} {
+		if _, ok := byType[want]; !ok {
+			t.Errorf("%s should have been recognised as a lifecycle", want)
+		}
+	}
+	if _, ok := byType["DeclineCode"]; ok {
+		t.Error("DeclineCode is an enum, not a lifecycle: it is never stored and never advanced")
+	}
+
+	m, ok := byType["PaymentStatus"]
+	if !ok {
+		t.Fatal("PaymentStatus machine missing")
+	}
 	if m.Field != "Status" {
 		t.Errorf("field: got %q want %q", m.Field, "Status")
 	}
@@ -202,14 +219,14 @@ func TestStateMachineExtraction(t *testing.T) {
 // a test that the plural entry points actually work.
 func TestAllEntryPointsAreFollowed(t *testing.T) {
 	res := scanFixture(t)
-	want := map[string]models.NodePosition{
-		"example.com/paysvc/api#(*Server).CreatePayment":    models.NodePositionEntry,
-		"example.com/paysvc/webhook#(*Handler).PSPCallback": models.NodePositionEntry,
-		"example.com/paysvc/recon#(*Job).Reconcile":         models.NodePositionEntry,
-		"example.com/paysvc/api#(*Server).process":          models.NodePositionInternal,
-		"example.com/paysvc/webhook#(*Handler).capture":     models.NodePositionInternal,
-		"example.com/paysvc/ledger#(*SQLLedger).Post":       models.NodePositionLeaf,
-		"example.com/paysvc/psp#(*HTTPGateway).Authorize":   models.NodePositionLeaf,
+	want := map[string]flowEntity.NodePosition{
+		"example.com/paysvc/api#(*Server).CreatePayment":    flowEntity.NodePositionEntry,
+		"example.com/paysvc/webhook#(*Handler).PSPCallback": flowEntity.NodePositionEntry,
+		"example.com/paysvc/recon#(*Job).Reconcile":         flowEntity.NodePositionEntry,
+		"example.com/paysvc/api#(*Server).process":          flowEntity.NodePositionInternal,
+		"example.com/paysvc/webhook#(*Handler).capture":     flowEntity.NodePositionInternal,
+		"example.com/paysvc/ledger#(*SQLLedger).Post":       flowEntity.NodePositionLeaf,
+		"example.com/paysvc/psp#(*HTTPGateway).Authorize":   flowEntity.NodePositionLeaf,
 	}
 	for id, kind := range want {
 		n, ok := res.Flow.Nodes[id]
@@ -217,8 +234,8 @@ func TestAllEntryPointsAreFollowed(t *testing.T) {
 			t.Errorf("node %s missing from the flow", id)
 			continue
 		}
-		if n.Kind != kind {
-			t.Errorf("%s: kind %s, want %s", id, n.Kind, kind)
+		if n.Position != kind {
+			t.Errorf("%s: kind %s, want %s", id, n.Position, kind)
 		}
 	}
 	// The webhook spawns a goroutine before responding, so the caller gets a
@@ -227,7 +244,7 @@ func TestAllEntryPointsAreFollowed(t *testing.T) {
 	if n := res.Flow.Nodes["example.com/paysvc/webhook#(*Handler).PSPCallback"]; n == nil || !n.Facts.SpawnsGoroutine {
 		t.Error("PSPCallback should be marked as spawning a goroutine")
 	}
-	// Facts from a closure belong to the function a human would name.
+	// flowEntity.Facts from a closure belong to the function a human would name.
 	if n := res.Flow.Nodes["example.com/paysvc/api#(*Server).process"]; n != nil {
 		if !n.Facts.OpensTx || !n.Facts.CommitsTx || n.Facts.RollsBackTx {
 			t.Errorf("process tx facts wrong: %+v", n.Facts)
@@ -301,4 +318,11 @@ func TestNodeCodeRefsHaveFilePaths(t *testing.T) {
 			t.Errorf("%s: file path %q is absolute; code references must be repo-relative to survive being checked in", id, n.Ref.File)
 		}
 	}
+}
+
+func shortName(qualified string) string {
+	if i := strings.LastIndex(qualified, "."); i >= 0 {
+		return qualified[i+1:]
+	}
+	return qualified
 }

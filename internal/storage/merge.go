@@ -2,13 +2,13 @@ package storage
 
 import (
 	"github.com/katayunak/testigo/internal/codeRef"
-	"github.com/katayunak/testigo/internal/models"
+	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
 // Merge carries the previous run's NOTES onto a freshly scanned flow.
 // Facts are never merged — they are recomputed from source on every run and the
 // new ones always win. Only Notes travel.
-func Merge(prev, fresh *models.Flow, ix *codeRef.Index) MergeStats {
+func Merge(prev, fresh *flowEntity.Flow, ix *codeRef.Index) MergeStats {
 	var mergeStats MergeStats
 	if prev == nil {
 		for _, node := range fresh.Nodes {

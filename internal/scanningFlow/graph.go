@@ -8,23 +8,31 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/katayunak/testigo/internal/codeRef"
+	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/callgraph/cha"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/ssa/ssautil"
-
-	"github.com/katayunak/testigo/internal/codeRef"
 )
+
+// orderedCall is one edge with the position of the call site that created it.
+type orderedCall struct {
+	to string
+	at token.Pos
+}
 
 type graph struct {
 	prog      *ssa.Program // SSA representation of the Go program
 	callGraph *callgraph.Graph
-	local     map[string]bool          // skipping dependencies nodes through this
-	byID      map[string]*ssa.Function // reference ID -> function
-	idOf      map[*ssa.Function]string
-	reach     map[*ssa.Function]kindSet
-	refs      map[string]codeRef.CodeRef
+	local     map[string]bool // skipping dependencies nodes through this
+
+	byID map[string]*ssa.Function // reference ID -> function
+	idOf map[*ssa.Function]string
+
+	reach map[*ssa.Function]kindSet
+	refs  map[string]codeRef.CodeRef
 }
 
 func buildGraph(pkgs []*packages.Package, local map[string]bool) (*graph, error) {
@@ -35,6 +43,7 @@ func buildGraph(pkgs []*packages.Package, local map[string]bool) (*graph, error)
 	}
 	prog.Build()
 
+	// CHA
 	cg := cha.CallGraph(prog)
 	// compiler-generated functions are not steps in the business flow.
 	// Deleting them REROUTES their edges so the graph keeps its shape
@@ -94,8 +103,7 @@ func (g *graph) isLocal(fn *ssa.Function) bool {
 	return g.local[o.Pkg.Pkg.Path()]
 }
 
-// walk performs reachability from the entry points and fills the flow
-func (g *graph) walk(root string, entries []EntryPoint, flow *Flow) error {
+func (g *graph) walk(root string, entries []flowEntity.EntryPoint, flow *flowEntity.Flow) error {
 	if len(entries) == 0 {
 		return fmt.Errorf("no entry points configured: a payment flow has several " +
 			"(API handler, provider webhook, reconciliation job, queue consumer) and " +
@@ -107,7 +115,7 @@ func (g *graph) walk(root string, entries []EntryPoint, flow *Flow) error {
 		id := e.Pkg + "#" + e.Symbol
 		fn, ok := g.byID[id]
 		if !ok {
-			return fmt.Errorf("entry point %q not found; %s", id, g.suggest(e))
+			return fmt.Errorf("entry point %q not found", id)
 		}
 
 		seeds = append(seeds, fn)
@@ -124,7 +132,15 @@ func (g *graph) walk(root string, entries []EntryPoint, flow *Flow) error {
 		entrySet[g.idOf[f]] = true
 	}
 
-	calls := map[string]map[string]bool{}
+	// Ordered by the position of the CALL SITE, not by discovery order.
+	// line number within a single function IS the order the code is written in — which
+	// is as close to execution order as static analysis gets.
+	//
+	// Keeping it matters for more than readability. The crash-at-each-step test
+	// asks "what if the process dies after the provider call but before COMMIT",
+	// and that question only exists if the steps have an order.
+	calls := map[string][]orderedCall{}
+	seenEdge := map[string]bool{}
 	for len(queue) > 0 {
 		fn := queue[0]
 		queue = queue[1:]
@@ -142,12 +158,13 @@ func (g *graph) walk(root string, entries []EntryPoint, flow *Flow) error {
 			}
 
 			to := g.idOf[owner(callee)]
-			if from != "" && to != "" && from != to {
-				if calls[from] == nil {
-					calls[from] = map[string]bool{}
+			if from != "" && to != "" && from != to && !seenEdge[from+">"+to] {
+				seenEdge[from+">"+to] = true
+				pos := token.NoPos
+				if e.Site != nil {
+					pos = e.Site.Pos()
 				}
-
-				calls[from][to] = true
+				calls[from] = append(calls[from], orderedCall{to: to, at: pos})
 			}
 
 			if !seen[callee] {
@@ -170,22 +187,29 @@ func (g *graph) walk(root string, entries []EntryPoint, flow *Flow) error {
 		a := g.refs[id]
 		a.File = relFile(g.prog.Fset, fn, root)
 		facts, seams := g.factsFor(fn, a)
-		kind := NodePositionInternal
+
+		kind := flowEntity.NodePositionInternal
 		switch {
 		case entrySet[id]:
-			kind = NodePositionEntry
+			kind = flowEntity.NodePositionEntry
 
 		case len(calls[id]) == 0:
-			kind = NodePositionLeaf
+			kind = flowEntity.NodePositionLeaf
 		}
 
-		var out []string
-		for to := range calls[id] {
-			out = append(out, to)
+		// Sorted by source position, so the flow reads the way it is written.
+		ordered := calls[id]
+		sort.SliceStable(ordered, func(i, j int) bool {
+			if ordered[i].at != ordered[j].at {
+				return ordered[i].at < ordered[j].at
+			}
+			return ordered[i].to < ordered[j].to // stable when position is unknown
+		})
+		out := make([]string, 0, len(ordered))
+		for _, c := range ordered {
+			out = append(out, c.to)
 		}
-
-		sort.Strings(out)
-		flow.Nodes[id] = &Node{Ref: a, Kind: kind, Calls: out, Facts: facts}
+		flow.Nodes[id] = &flowEntity.Node{Ref: a, Position: kind, Calls: out, Facts: facts}
 		flow.Seams = append(flow.Seams, seams...)
 	}
 
@@ -197,29 +221,6 @@ func (g *graph) walk(root string, entries []EntryPoint, flow *Flow) error {
 	})
 
 	return nil
-}
-
-// suggest turns a missed entry point into an actionable message instead of a
-// bare "not found". Getting the receiver syntax wrong is the common mistake.
-func (g *graph) suggest(e EntryPoint) string {
-	var same []string
-	for id := range g.byID {
-		pkg, sym, _ := strings.Cut(id, "#")
-		if pkg == e.Pkg {
-			same = append(same, sym)
-		}
-	}
-
-	if len(same) == 0 {
-		return fmt.Sprintf("package %q has no functions in the loaded set (is it inside the module?)", e.Pkg)
-	}
-
-	sort.Strings(same)
-	if len(same) > 12 {
-		same = append(same[:12], "...")
-	}
-
-	return fmt.Sprintf("package %q declares: %s (methods use the form (*Type).Method)", e.Pkg, strings.Join(same, ", "))
 }
 
 func relFile(fset *token.FileSet, fn *ssa.Function, root string) string {

@@ -1,10 +1,11 @@
 package scanningFlow
 
 import (
+	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/testigo/internal/scanningFlow/patterns"
 	"go/ast"
 	"go/token"
 	"go/types"
-	"regexp"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -12,10 +13,6 @@ import (
 
 	"github.com/katayunak/testigo/internal/codeRef"
 )
-
-var moneyName = regexp.MustCompile(`(?i)(amount|balance|subtotal|total|price|fee|cost|tax|discount|refund|payout|credit|debit|charge|money|cents|principal|premium|commission)`)
-
-var moneyTypeName = regexp.MustCompile(`(?i)^(money|amount|currency|decimal|cents|minor(units)?)$`)
 
 func isFloat(t types.Type) bool {
 	b, ok := t.Underlying().(*types.Basic)
@@ -29,8 +26,8 @@ func isInteger(t types.Type) bool {
 
 // moneyFindings runs the checks that need no agent, no call graph and no
 // running code
-func moneyFindings(pkgs []*packages.Package, root string) []Finding {
-	var out []Finding
+func moneyFindings(pkgs []*packages.Package, root string) []flowEntity.Finding {
+	var out []flowEntity.Finding
 	for _, p := range pkgs {
 		fns := funcIndex(p, root)
 		for _, f := range p.Syntax {
@@ -61,8 +58,8 @@ func moneyFindings(pkgs []*packages.Package, root string) []Finding {
 					}
 
 					a := fns.at(t.Pos())
-					out = append(out, Finding{
-						ID: "MONEY-DIV", Severity: SevHigh,
+					out = append(out, flowEntity.Finding{
+						ID: "MONEY-DIV", Severity: flowEntity.SevHigh,
 						Title:  "money divided with no stated rounding rule",
 						Detail: "Integer division truncates toward zero. Splitting a charge, prorating a subscription or computing a percentage fee this way silently loses the remainder, and the lost cents do not appear in any single test — they show up as a ledger that will not balance at month end. Decide the rounding direction explicitly and give the remainder an owner.",
 						Ref:    a, Line: p.Fset.Position(t.Pos()).Line,
@@ -79,23 +76,23 @@ func moneyFindings(pkgs []*packages.Package, root string) []Finding {
 func isMoneyExpr(p *packages.Package, e ast.Expr) bool {
 	switch x := e.(type) {
 	case *ast.Ident:
-		return moneyName.MatchString(x.Name)
+		return patterns.MoneyField.MatchString(x.Name)
 
 	case *ast.SelectorExpr:
-		return moneyName.MatchString(x.Sel.Name)
+		return patterns.MoneyField.MatchString(x.Sel.Name)
 	}
 
 	if tv, ok := p.TypesInfo.Types[e]; ok {
 		if n, isNamed := tv.Type.(*types.Named); isNamed {
-			return moneyTypeName.MatchString(n.Obj().Name())
+			return patterns.MoneyType.MatchString(n.Obj().Name())
 		}
 	}
 
 	return false
 }
 
-func checkStruct(p *packages.Package, root, typeName string, st *ast.StructType) []Finding {
-	var out []Finding
+func checkStruct(p *packages.Package, root, typeName string, st *ast.StructType) []flowEntity.Finding {
+	var out []flowEntity.Finding
 	hasCurrency := false
 	for _, fld := range st.Fields.List {
 		for _, nm := range fld.Names {
@@ -112,21 +109,21 @@ func checkStruct(p *packages.Package, root, typeName string, st *ast.StructType)
 		}
 
 		for _, nm := range fld.Names {
-			if !moneyName.MatchString(nm.Name) {
+			if !patterns.MoneyField.MatchString(nm.Name) {
 				continue
 			}
 			a := codeRef.CodeRef{Pkg: p.PkgPath, Symbol: "type " + typeName, File: relPath(p.Fset, fld.Pos(), root), Line: p.Fset.Position(fld.Pos()).Line}
 			if isFloat(tv.Type) {
-				out = append(out, Finding{
-					ID: "MONEY-FLOAT", Severity: SevCritical,
+				out = append(out, flowEntity.Finding{
+					ID: "MONEY-FLOAT", Severity: flowEntity.SevCritical,
 					Title:  typeName + "." + nm.Name + " stores money in a float",
 					Detail: "Binary floating point cannot represent 0.10 exactly. Summing a thousand line items drifts, comparisons that should be equal are not, and the error is invisible in any test that checks a single transaction. Store minor units in an integer (int64 cents) or use a fixed-point decimal type.",
 					Ref:    a, Line: a.Line,
 				})
 
 			} else if isInteger(tv.Type) && !hasCurrency && isBasicNamed(tv.Type) {
-				out = append(out, Finding{
-					ID: "MONEY-NO-CURRENCY", Severity: SevMedium,
+				out = append(out, flowEntity.Finding{
+					ID: "MONEY-NO-CURRENCY", Severity: flowEntity.SevMedium,
 					Title:  typeName + "." + nm.Name + " is a bare integer with no currency alongside it",
 					Detail: "An amount without a currency is not money, it is a number. Nothing stops a caller adding EUR minor units to USD minor units, and the type system will not object. Pair the amount with a currency in one type so the compiler can refuse the mistake.",
 					Ref:    a, Line: a.Line,
@@ -145,8 +142,8 @@ func isBasicNamed(t types.Type) bool {
 	return isBasic
 }
 
-func checkSignature(p *packages.Package, root string, fd *ast.FuncDecl) []Finding {
-	var out []Finding
+func checkSignature(p *packages.Package, root string, fd *ast.FuncDecl) []flowEntity.Finding {
+	var out []flowEntity.Finding
 	check := func(fl *ast.FieldList, what string) {
 		if fl == nil {
 			return
@@ -157,11 +154,11 @@ func checkSignature(p *packages.Package, root string, fd *ast.FuncDecl) []Findin
 				continue
 			}
 			for _, nm := range fld.Names {
-				if !moneyName.MatchString(nm.Name) {
+				if !patterns.MoneyField.MatchString(nm.Name) {
 					continue
 				}
-				out = append(out, Finding{
-					ID: "MONEY-FLOAT", Severity: SevCritical,
+				out = append(out, flowEntity.Finding{
+					ID: "MONEY-FLOAT", Severity: flowEntity.SevCritical,
 					Title:  codeRef.Symbol(fd) + " takes money as a float in " + what + " " + nm.Name,
 					Detail: "Every caller now has to round, and they will not all round the same way. Take minor units as an integer at the boundary and convert once, where the conversion can be tested.",
 					Ref:    codeRef.CodeRef{Pkg: p.PkgPath, Symbol: codeRef.Symbol(fd), File: relPath(p.Fset, fld.Pos(), root), Line: p.Fset.Position(fld.Pos()).Line},
@@ -193,14 +190,14 @@ func (g *graph) moneyTypesIn(fn *ssa.Function) []string {
 			}
 			break
 		}
-		if n, ok := t.(*types.Named); ok && moneyTypeName.MatchString(n.Obj().Name()) {
+		if n, ok := t.(*types.Named); ok && patterns.MoneyType.MatchString(n.Obj().Name()) {
 			seen[types.TypeString(t, relativeTo)] = true
 		}
 	}
 	for i := 0; i < sig.Params().Len(); i++ {
 		p := sig.Params().At(i)
 		consider(p.Type())
-		if moneyName.MatchString(p.Name()) {
+		if patterns.MoneyField.MatchString(p.Name()) {
 			seen[p.Name()+" "+types.TypeString(p.Type(), relativeTo)] = true
 		}
 	}

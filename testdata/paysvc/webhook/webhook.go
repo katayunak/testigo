@@ -24,6 +24,7 @@ func (h *Handler) PSPCallback(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) capture(ctx context.Context, p *domain.Payment) error {
 	p.Status = domain.StatusCaptured
+	p.Mode = domain.ModeAccepted
 	if _, err := h.DB.ExecContext(ctx,
 		"update payments set status=$1 where id=$2", p.Status, p.ID); err != nil {
 		return err

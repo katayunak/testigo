@@ -1,11 +1,12 @@
 package scanningFlow
 
 import (
+	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/testigo/internal/scanningFlow/patterns"
 	"go/ast"
 	"go/token"
 	"go/types"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -13,8 +14,6 @@ import (
 
 	"github.com/katayunak/testigo/internal/codeRef"
 )
-
-var stateTypeName = regexp.MustCompile(`(?i)(status|state|phase|stage)$`)
 
 // extractStateMachines recovers the payment state machine from source.
 //
@@ -30,8 +29,8 @@ var stateTypeName = regexp.MustCompile(`(?i)(status|state|phase|stage)$`)
 // of these transitions should be impossible?" — instead of the open-ended and
 // far less reliable "explain this code to me". Every illegal transition the
 // agent names becomes a generated test.
-func extractStateMachines(pkgs []*packages.Package, root string, local map[string]bool) []StateMachine {
-	var out []StateMachine
+func extractStateMachines(pkgs []*packages.Package, root string, local map[string]bool) []flowEntity.StateMachine {
+	var out []flowEntity.StateMachine
 	type cand struct {
 		named  *types.Named
 		states map[string]bool
@@ -45,7 +44,12 @@ func extractStateMachines(pkgs []*packages.Package, root string, local map[strin
 		scope := p.Types.Scope()
 		for _, name := range scope.Names() {
 			tn, ok := scope.Lookup(name).(*types.TypeName)
-			if !ok || !stateTypeName.MatchString(name) {
+			if !ok {
+				continue
+			}
+			// Both lists are collected. The weak ones have to earn their place
+			// further down, on evidence rather than on their name.
+			if !patterns.IsStateType(name) && !patterns.IsWeakStateType(name) {
 				continue
 			}
 			named, ok := tn.Type().(*types.Named)
@@ -81,7 +85,7 @@ func extractStateMachines(pkgs []*packages.Package, root string, local map[strin
 		}
 	}
 
-	writes := map[string][]StateWrite{}
+	writes := map[string][]flowEntity.StateWrite{}
 	fields := map[string]string{}
 	for _, p := range pkgs {
 		if !local[p.PkgPath] || p.TypesInfo == nil {
@@ -125,7 +129,7 @@ func extractStateMachines(pkgs []*packages.Package, root string, local map[strin
 							to = constName(p, kv.Value, tv.Value.String())
 						}
 						pos := p.Fset.Position(kv.Pos())
-						writes[key] = append(writes[key], StateWrite{
+						writes[key] = append(writes[key], flowEntity.StateWrite{
 							In: fns.at(kv.Pos()), To: to, Line: pos.Line,
 						})
 					}
@@ -147,7 +151,7 @@ func extractStateMachines(pkgs []*packages.Package, root string, local map[strin
 							to = constName(p, t.Rhs[i], rv.Value.String())
 						}
 						pos := p.Fset.Position(t.Pos())
-						writes[key] = append(writes[key], StateWrite{
+						writes[key] = append(writes[key], flowEntity.StateWrite{
 							In: fns.at(t.Pos()), To: to, Line: pos.Line,
 						})
 					}
@@ -159,6 +163,10 @@ func extractStateMachines(pkgs []*packages.Package, root string, local map[strin
 
 	for key, cd := range cands {
 		if len(cd.states) == 0 {
+			continue
+		}
+		if why, ok := isLifecycle(key, cd.named.Obj().Name(), fields[key], writes[key]); !ok {
+			_ = why // reported through the weak list, not as a machine
 			continue
 		}
 		states := make([]string, 0, len(cd.states))
@@ -183,12 +191,50 @@ func extractStateMachines(pkgs []*packages.Package, root string, local map[strin
 				never = append(never, st)
 			}
 		}
-		out = append(out, StateMachine{
-			Type: key, Field: fields[key], States: states, Writes: w, Terminal: never,
+		out = append(out, flowEntity.StateMachine{
+			Type: key, Field: fields[key], States: states, Writes: w, NeverAssigned: never,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Type < out[j].Type })
 	return out
+}
+
+// isLifecycle decides whether an enum is a STATE MACHINE or just an enum.
+//
+// A named string or integer type with declared constants is how Go writes an
+// enum, and payment lifecycles are written that way. So is everything else:
+// ErrorCode, TransactionKind, SettlementMode. Asking an agent which transitions
+// of an ErrorCode are illegal is nonsense that costs money, and never asking
+// about SettlementMode misses a real machine in some repositories.
+//
+// The name alone cannot separate them, so the name is only the tiebreaker. What
+// actually separates a lifecycle from an enum is BEHAVIOUR:
+//
+//   - a lifecycle is PERSISTED. It lives in a struct field, because the whole
+//     point is that it survives between requests.
+//   - a lifecycle is REASSIGNED, in more than one place. A payment moves from
+//     pending to authorised in one function and to captured in another. An
+//     ErrorCode is returned and compared, rarely stored and updated.
+//
+// A strong name passes on its own, because "PaymentStatus" is not ambiguous and
+// demanding evidence would drop real machines in repositories that keep their
+// transitions in one place. A weak name has to show both behaviours.
+func isLifecycle(qualified, simple, field string, writes []flowEntity.StateWrite) (string, bool) {
+	if patterns.IsStateType(simple) {
+		return "", true
+	}
+
+	distinct := map[string]bool{}
+	for _, w := range writes {
+		distinct[w.In.ID()] = true
+	}
+	switch {
+	case field == "":
+		return "never stored in a struct field, so it does not survive between requests", false
+	case len(distinct) < 2:
+		return "assigned in fewer than two places, so nothing moves through it", false
+	}
+	return "", true
 }
 
 // constName prefers the constant's identifier over its literal value, because

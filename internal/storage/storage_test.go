@@ -5,26 +5,26 @@ import (
 	"testing"
 
 	"github.com/katayunak/testigo/internal/codeRef"
-	"github.com/katayunak/testigo/internal/models"
+	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-func node(pkg, sym, hash, step string) *models.Node {
-	n := &models.Node{Ref: models.CodeRef{Pkg: pkg, Symbol: sym, BodyHash: hash}}
+func node(pkg, sym, hash, step string) *flowEntity.Node {
+	n := &flowEntity.Node{Ref: codeRef.CodeRef{Pkg: pkg, Symbol: sym, BodyHash: hash}}
 	if step != "" {
-		n.Notes = &models.Notes{Step: step, ForHash: hash}
+		n.Notes = &flowEntity.Notes{Step: step, ForHash: hash}
 	}
 	return n
 }
 
-func flowOf(ns ...*models.Node) *models.Flow {
-	f := models.NewFlow("example.com/pay")
+func flowOf(ns ...*flowEntity.Node) *flowEntity.Flow {
+	f := flowEntity.NewFlow("example.com/pay")
 	for _, n := range ns {
 		f.Nodes[n.Ref.ID()] = n
 	}
 	return f
 }
 
-func indexOf(ns ...*models.Node) *codeRef.Index {
+func indexOf(ns ...*flowEntity.Node) *codeRef.Index {
 	ix := codeRef.NewIndex()
 	for _, n := range ns {
 		ix.Add(n.Ref, 500) // large enough to be move-eligible
@@ -107,7 +107,7 @@ func TestDeletedCodeIsQuarantinedNotDropped(t *testing.T) {
 func TestSaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	f := flowOf(node("pay/api", "(*S).Create", "h1", "accept request"))
-	f.Seams = []models.Seam{{Kind: models.SeamDB, Target: "(*sql.DB).Exec", Injectable: false}}
+	f.Seams = []flowEntity.Seam{{Kind: flowEntity.SeamDB, Target: "(*sql.DB).Exec", Injectable: false}}
 
 	if err := Save(dir, f); err != nil {
 		t.Fatal(err)

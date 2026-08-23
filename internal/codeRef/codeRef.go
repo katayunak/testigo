@@ -10,19 +10,18 @@ import (
 
 // CodeRef identifies a function in the repository and lets us check whether
 // the function has changed since the last scanningFlow.
-
+//
 // Pkg + Symbol identify the function. Together, they are its stable address:
-// they tell us which function we are talking about. They change if
-// the function is RENAMED or MOVED to another package.
-
+// they tell us which function we are talking about. They change if the
+// function is RENAMED or MOVED to another package.
+//
 // BodyHash tells us whether the function's CODE has changed. It hashes the
 // function's structure rather than its source text, so comments and formatting
 // changes do not change the hash.
-
+//
 // File and Line are only hints for displaying the function to the user. They
 // are not part of its identity because edits elsewhere in the file can change
 // the line number.
-
 type CodeRef struct {
 	Pkg      string `json:"pkg"`
 	Symbol   string `json:"symbol"`
@@ -57,7 +56,7 @@ func NewCodeRef(pkgPath, repoRoot string, fset *token.FileSet, decl *ast.FuncDec
 // these functions commonly share same naming convictions and structures
 
 // for more precise understanding of moved/renamed, only functions having minMovableNodes
-// which is referring to AST nodes would be eligible for moved/rename scans
+// which is referring to AST nodeCounts would be eligible for moved/rename scans
 const minMovableNodes = 40
 
 func Resolve(ix *Index, saved CodeRef) (CodeRef, MatchingStatus) {
@@ -71,7 +70,7 @@ func Resolve(ix *Index, saved CodeRef) (CodeRef, MatchingStatus) {
 
 	// The symbol at this point is gone, it may have been renamed or moved to another package
 	if cands := ix.byHash[saved.BodyHash]; len(cands) == 1 {
-		if ix.nodes[cands[0].ID()] >= minMovableNodes {
+		if ix.nodeCounts[cands[0].ID()] >= minMovableNodes {
 			return cands[0], Moved
 		}
 	}

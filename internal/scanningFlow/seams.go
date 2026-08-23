@@ -5,13 +5,15 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/testigo/internal/scanningFlow/patterns"
+
 	"github.com/katayunak/testigo/internal/codeRef"
 	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/ssa"
 )
 
-// kindSet is a bitmask of seam kinds, used so the reachability fixpoint below
-// is a cheap OR over integers rather than map merging on every iteration.
+// one kindSet can represent several kinds at the same time
 type kindSet uint8
 
 const (
@@ -25,14 +27,14 @@ const (
 
 var kindOrder = []struct {
 	bit  kindSet
-	kind SeamKind
+	kind flowEntity.SeamKind
 }{
-	{ksDB, SeamDB}, {ksHTTP, SeamHTTP}, {ksQueue, SeamQueue},
-	{ksCache, SeamCache}, {ksClock, SeamClock}, {ksRandom, SeamRandom},
+	{ksDB, flowEntity.SeamDB}, {ksHTTP, flowEntity.SeamHTTP}, {ksQueue, flowEntity.SeamQueue},
+	{ksCache, flowEntity.SeamCache}, {ksClock, flowEntity.SeamClock}, {ksRandom, flowEntity.SeamRandom},
 }
 
-func (k kindSet) list() []SeamKind {
-	var out []SeamKind
+func (k kindSet) list() []flowEntity.SeamKind {
+	var out []flowEntity.SeamKind
 	for _, e := range kindOrder {
 		if k&e.bit != 0 {
 			out = append(out, e.kind)
@@ -41,67 +43,25 @@ func (k kindSet) list() []SeamKind {
 	return out
 }
 
-// ioPrefixes maps package path prefixes to the kind of boundary they represent.
-// This is a lookup table on purpose: it is the piece most likely to need
-// extending for a given shop's stack, and a table is easier to review and
-// extend than a chain of conditionals buried in the analysis.
-var ioPrefixes = []struct {
-	prefix string
-	kind   kindSet
-}{
-	{"database/sql", ksDB},
-	{"github.com/jackc/pgx", ksDB},
-	{"github.com/lib/pq", ksDB},
-	{"github.com/jmoiron/sqlx", ksDB},
-	{"gorm.io/", ksDB},
-	{"entgo.io/", ksDB},
-	{"go.mongodb.org/", ksDB},
-	{"github.com/uptrace/bun", ksDB},
-	{"google.golang.org/grpc", ksHTTP},
-	{"github.com/go-resty/resty", ksHTTP},
-	{"github.com/segmentio/kafka-go", ksQueue},
-	{"github.com/IBM/sarama", ksQueue},
-	{"github.com/Shopify/sarama", ksQueue},
-	{"github.com/nats-io/", ksQueue},
-	{"github.com/rabbitmq/", ksQueue},
-	{"github.com/streadway/amqp", ksQueue},
-	{"github.com/redis/", ksCache},
-	{"github.com/go-redis/", ksCache},
-	{"github.com/bradfitz/gomemcache", ksCache},
-	{"github.com/google/uuid", ksRandom},
-	{"github.com/oklog/ulid", ksRandom},
-	{"math/rand", ksRandom},
-	{"crypto/rand", ksRandom},
-}
-
-// netHTTPClient lists the outbound calls in net/http by FULL name.
-//
-// Matching on the bare method name was a bug: net/http.Header.Get is not an
-// outbound request, and neither is net/http.Error, but both are called "Get"
-// and "Error" on a package path of net/http. A payment service is full of
-// server-side net/http types, and misclassifying them buries the two provider
-// calls that actually matter under fifty that do not.
-var netHTTPClient = map[string]bool{
-	"net/http.Get": true, "net/http.Post": true, "net/http.PostForm": true, "net/http.Head": true,
-	"(*net/http.Client).Do": true, "(*net/http.Client).Get": true, "(*net/http.Client).Post": true,
-	"(*net/http.Client).Head": true, "(*net/http.Client).PostForm": true,
-	"(*net/http.Transport).RoundTrip": true,
-}
-
-// cursorNoise are result-set mechanics rather than boundaries worth injecting
-// a fault at. They do perform I/O in some drivers, but a report that lists
-// Rows.Next alongside the provider authorization call has buried the signal.
-// The query is the seam; iterating its result is not.
-var cursorNoise = map[string]bool{
-	"Next": true, "Scan": true, "Err": true, "Close": true, "Columns": true,
-	"ColumnTypes": true, "NextResultSet": true, "LastInsertId": true, "RowsAffected": true,
-}
-
-// timeSeamFuncs are the reads that make behaviour depend on wall-clock time.
-// Expiries, idempotency-key windows and retry backoff all hinge on these, and
-// a test cannot exercise them without an injectable clock.
-var timeSeamFuncs = map[string]bool{
-	"Now": true, "Since": true, "Until": true, "Sleep": true, "After": true, "Tick": true,
+// fromSeamKind bridges the reviewable table in patterns to the bitmask this file
+// uses internally. The table is written in terms a person edits; the bitmask is
+// written in terms a fixpoint iterates cheaply.
+func fromSeamKind(k flowEntity.SeamKind) kindSet {
+	switch k {
+	case flowEntity.SeamDB:
+		return ksDB
+	case flowEntity.SeamHTTP:
+		return ksHTTP
+	case flowEntity.SeamQueue:
+		return ksQueue
+	case flowEntity.SeamCache:
+		return ksCache
+	case flowEntity.SeamClock:
+		return ksClock
+	case flowEntity.SeamRandom:
+		return ksRandom
+	}
+	return 0
 }
 
 func pkgPathOf(fn *ssa.Function) string {
@@ -135,23 +95,23 @@ func directKind(fn *ssa.Function) kindSet {
 	name := fn.Name()
 	switch path {
 	case "net/http":
-		if netHTTPClient[fn.String()] {
+		if patterns.NetHTTPClient[fn.String()] {
 			return ksHTTP
 		}
 		return 0
 	case "time":
-		if timeSeamFuncs[name] {
+		if patterns.TimeSeamFuncs[name] {
 			return ksClock
 		}
 		return 0
 	}
 	var k kindSet
-	for _, e := range ioPrefixes {
-		if strings.HasPrefix(path, e.prefix) {
-			k |= e.kind
+	for _, e := range patterns.IOPrefixes {
+		if strings.HasPrefix(path, e.Prefix) {
+			k |= fromSeamKind(e.Kind)
 		}
 	}
-	if k&ksDB != 0 && cursorNoise[name] {
+	if k&ksDB != 0 && patterns.CursorNoise[name] {
 		return 0
 	}
 	return k
@@ -219,9 +179,9 @@ func computeReach(cg *callgraph.Graph, isLocal func(*ssa.Function) bool) map[*ss
 
 // factsFor extracts everything provable about one declared function, including
 // the closures nested inside it.
-func (g *graph) factsFor(fn *ssa.Function, a codeRef.CodeRef) (Facts, []Seam) {
-	var facts Facts
-	var seams []Seam
+func (g *graph) factsFor(fn *ssa.Function, a codeRef.CodeRef) (flowEntity.Facts, []flowEntity.Seam) {
+	var facts flowEntity.Facts
+	var seams []flowEntity.Seam
 
 	sites := g.sitesOf(fn)
 	var visit func(f *ssa.Function)
@@ -245,17 +205,17 @@ func (g *graph) factsFor(fn *ssa.Function, a codeRef.CodeRef) (Facts, []Seam) {
 				applyTxFacts(&facts, target, isDefer)
 				for _, k := range kinds.list() {
 					switch k {
-					case SeamDB:
+					case flowEntity.SeamDB:
 						facts.TouchesDB = true
-					case SeamHTTP, SeamQueue:
+					case flowEntity.SeamHTTP, flowEntity.SeamQueue:
 						facts.TouchesNet = true
-					case SeamClock:
+					case flowEntity.SeamClock:
 						facts.ReadsClock = true
-					case SeamRandom:
+					case flowEntity.SeamRandom:
 						facts.Randomness = true
 					}
 					pos := g.prog.Fset.Position(instr.Pos())
-					seams = append(seams, Seam{
+					seams = append(seams, flowEntity.Seam{
 						In: a, Kind: k, Target: target, Line: pos.Line,
 						Injectable: injectable, Iface: iface,
 					})
@@ -386,7 +346,7 @@ func guessFromName(iface, method string) kindSet {
 
 var txOpen = map[string]bool{"Begin": true, "BeginTx": true, "Beginx": true, "Transaction": true}
 
-func applyTxFacts(f *Facts, target string, isDefer bool) {
+func applyTxFacts(f *flowEntity.Facts, target string, isDefer bool) {
 	name := target
 	if i := strings.LastIndex(name, "."); i >= 0 {
 		name = name[i+1:]
@@ -405,7 +365,7 @@ func applyTxFacts(f *Facts, target string, isDefer bool) {
 	}
 }
 
-func dedupeSeams(in []Seam) []Seam {
+func dedupeSeams(in []flowEntity.Seam) []flowEntity.Seam {
 	seen := map[string]bool{}
 	out := in[:0]
 	for _, s := range in {

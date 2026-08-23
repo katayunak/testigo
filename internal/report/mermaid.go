@@ -5,10 +5,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/models"
+	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-func Flowchart(f *models.Flow) string {
+func Flowchart(f *flowEntity.Flow) string {
 	var b strings.Builder
 	b.WriteString("flowchart TD\n")
 
@@ -18,7 +18,7 @@ func Flowchart(f *models.Flow) string {
 	}
 	sort.Strings(ids)
 
-	seamsBy := map[string][]models.Seam{}
+	seamsBy := map[string][]flowEntity.Seam{}
 	for _, s := range f.Seams {
 		seamsBy[s.In.ID()] = append(seamsBy[s.In.ID()], s)
 	}
@@ -47,7 +47,7 @@ func Flowchart(f *models.Flow) string {
 		}
 		shape := "[\"%s\"]"
 		switch {
-		case n.Kind == models.NodePositionEntry:
+		case n.Position == flowEntity.NodePositionEntry:
 			shape = "([\"%s\"])"
 		case n.Facts.TouchesDB:
 			shape = "[(\"%s\")]"
@@ -83,7 +83,7 @@ func Flowchart(f *models.Flow) string {
 
 	b.WriteString("  classDef entry stroke-width:2px\n")
 	for _, id := range ids {
-		if f.Nodes[id].Kind == models.NodePositionEntry {
+		if f.Nodes[id].Position == flowEntity.NodePositionEntry {
 			fmt.Fprintf(&b, "  class %s entry\n", mid(id))
 		}
 	}
@@ -95,7 +95,7 @@ func Flowchart(f *models.Flow) string {
 // Only transitions the compiler can prove are drawn. Which of them SHOULD be
 // possible is a business rule, and the diagram deliberately does not guess: a
 // confident wrong arrow is worse than a missing one.
-func StateDiagram(m models.StateMachine) string {
+func StateDiagram(m flowEntity.StateMachine) string {
 	var b strings.Builder
 	b.WriteString("stateDiagram-v2\n")
 	written := map[string]bool{}

@@ -9,7 +9,7 @@ import (
 )
 
 // StructuralHash hashes the shape and semantic content of a function's
-// signature and body. It returns the hash and the number of AST nodes walked,
+// signature and body. It returns the hash and the number of AST nodeCounts walked,
 // which callers use to decide whether the function is distinctive enough to be
 // tracked across a rename
 
