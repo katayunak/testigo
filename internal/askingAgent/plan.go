@@ -51,6 +51,19 @@ func planUnderstand(f *flowEntity.Flow, paths []prompts.Path) []askEntity.Ask {
 		Prompt: prompts.Binding(f, paths, unresolved),
 	})
 
+	// Which entity the flow moves, and which of its several IDs a retry
+	// repeats. Asked only when the repository has a lifecycle entity carrying
+	// more than one identifier — one candidate is not a question, and no
+	// lifecycle means there is no entity to ask about.
+	if entities := prompts.Entities(f, f.Entities); needsEntityQuestion(entities) {
+		asks = append(asks, askEntity.Ask{
+			Kind:   askEntity.KindMainEntity,
+			Round:  askEntity.RoundUnderstand,
+			Title:  entityTitle(entities),
+			Prompt: prompts.MainEntity(f, entities),
+		})
+	}
+
 	for _, m := range f.Machines {
 		asks = append(asks, askEntity.Ask{
 			Kind:    askEntity.KindTransitions,
@@ -96,6 +109,21 @@ func planUnderstand(f *flowEntity.Flow, paths []prompts.Path) []askEntity.Ask {
 		// Fresh notes describe code that has not changed. Asking again would
 		// pay for an answer we already have.
 		if node.Notes != nil && node.Notes.ForHash == node.Ref.BodyHash {
+			continue
+		}
+
+		// A function the compiler proved nothing about has no business meaning
+		// to describe. On a real payment service 43 of 73 reachable functions
+		// were in this category — protobuf getters, logger constructors,
+		// wrappers — and each one bought a prompt asking an agent for the
+		// "purpose", "effects" and "caller assumptions" of code with no
+		// effects and no assumptions.
+		//
+		// The bar is deliberately low: any proved fact at all, or being an
+		// entry point. A function that opens a transaction, leaves the process,
+		// touches money, reads the clock or sets a status is worth a sentence.
+		// One that does none of those is a name.
+		if !worthDescribing(node) {
 			continue
 		}
 		ids = append(ids, id)
@@ -365,4 +393,52 @@ func slug(s string) string {
 		out = strings.Trim(out[len(out)-72:], "-")
 	}
 	return out
+}
+
+// needsEntityQuestion is false when the evidence already settled it: no
+// lifecycle entity at all, or a single identifier on a single entity, which is
+// not a choice.
+func needsEntityQuestion(entities []prompts.Entity) bool {
+	if len(entities) == 0 {
+		return false
+	}
+	if len(entities) == 1 && len(entities[0].IDs) < 2 {
+		return false
+	}
+	return true
+}
+
+func entityTitle(entities []prompts.Entity) string {
+	ids := 0
+	for _, e := range entities {
+		ids += len(e.IDs)
+	}
+	if len(entities) == 1 {
+		return fmt.Sprintf("Which of %s's %d identifiers is the idempotency key?", entities[0].Name, ids)
+	}
+	return fmt.Sprintf("Which struct does this flow move, and which of its %d identifiers is the idempotency key?", ids)
+}
+
+// Preamble is the text every prompt in a round shares, written once into
+// PREAMBLE.md instead of into all of them.
+func Preamble(f *flowEntity.Flow, round askEntity.Round) string {
+	switch round {
+	case askEntity.RoundUnderstand:
+		return prompts.UnderstandPreamble(prompts.Paths(f))
+	case askEntity.RoundGenerate:
+		return prompts.Preamble
+	}
+	return ""
+}
+
+// worthDescribing reports whether a function has anything an agent could say
+// something useful about.
+func worthDescribing(n *flowEntity.Node) bool {
+	if n.Position == flowEntity.NodePositionEntry {
+		return true
+	}
+	f := n.Facts
+	return f.OpensTx || f.CommitsTx || f.RollsBackTx || f.TouchesNet || f.TouchesDB ||
+		f.ReadsClock || f.Randomness || f.SpawnsGoroutine || f.HandlesMoney ||
+		f.HasDeferredTx || len(f.WritesStatus) > 0 || len(f.MoneyTypes) > 0
 }

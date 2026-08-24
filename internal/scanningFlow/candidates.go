@@ -45,6 +45,8 @@ const (
 func idempotencyCandidates(pkgs []*packages.Package, f *flowEntity.Flow, root string, local map[string]bool) flowEntity.Candidates {
 	origins := fieldOrigins(pkgs, local)
 	queried := fieldsPassedToQueries(pkgs, local)
+	entities := mainEntities(pkgs, f, local)
+	f.Entities = entities
 
 	var out flowEntity.Candidates
 	for _, p := range pkgs {
@@ -63,7 +65,7 @@ func idempotencyCandidates(pkgs []*packages.Package, f *flowEntity.Flow, root st
 				}
 				for _, fld := range st.Fields.List {
 					for _, nm := range fld.Names {
-						c, ok := scoreIdempotency(p, root, spec.Name.Name, nm, fld, origins, queried, f)
+						c, ok := scoreIdempotency(p, root, spec.Name.Name, nm, fld, origins, queried, f, entities)
 						if ok {
 							out = append(out, c)
 						}
@@ -78,7 +80,7 @@ func idempotencyCandidates(pkgs []*packages.Package, f *flowEntity.Flow, root st
 }
 
 func scoreIdempotency(p *packages.Package, root, owner string, nm *ast.Ident, fld *ast.Field,
-	origins map[string]origin, queried map[string]bool, f *flowEntity.Flow) (flowEntity.Candidate, bool) {
+	origins map[string]origin, queried map[string]bool, f *flowEntity.Flow, entities map[string]string) (flowEntity.Candidate, bool) {
 
 	nameMatch := patterns.IdempotencyField.MatchString(nm.Name)
 	key := owner + "." + nm.Name
@@ -112,7 +114,38 @@ func scoreIdempotency(p *packages.Package, root, owner string, nm *ast.Ident, fl
 
 	if nameMatch {
 		c.Score++
+		c.Declarative = true
 		c.Evidence = append(c.Evidence, "the name is in the idempotency-key vocabulary")
+	}
+
+	// Which struct the field sits on is the strongest structural signal there
+	// is, and it was being ignored.
+	//
+	// In a payment system the entity that carries the lifecycle state IS the
+	// business object: the thing whose change is the event. Its identity fields
+	// are the ones a retry has to match. A field on a config struct or a
+	// notification DTO is not a candidate for anything, however it flows.
+	//
+	// On a real recharge service this one signal separated entity.Order — which
+	// carries Status through 122 write sites — from HealthCheck, RetryConfig
+	// and Service, all of which had scored an identical 6 on behaviour alone.
+	switch {
+	case entities[owner] != "" && c.Declarative:
+		// Membership AMPLIFIES a declaration; it does not manufacture one.
+		// "OrderID on the struct that carries Status" is a far stronger key
+		// candidate than the same name on a DTO. "Phone on the struct that
+		// carries Status" is still just a phone number — being on the right
+		// struct does not make an attribute into an identifier.
+		c.Score += 4
+		c.Evidence = append(c.Evidence,
+			"the field is on "+owner+", which carries this flow's state machine, so it is the entity a retry has to match")
+	case entities[owner] != "":
+		c.Against = append(c.Against,
+			"it sits on the flow's entity but nothing names it a key, so it reads as an attribute of the order rather than an identifier for it")
+	default:
+		c.Score -= 2
+		c.Against = append(c.Against,
+			owner+" carries no lifecycle state, so it is a message or a config rather than the entity the flow moves")
 	}
 	switch org {
 	case originExternal:
@@ -128,6 +161,7 @@ func scoreIdempotency(p *packages.Package, root, owner string, nm *ast.Ident, fl
 	}
 	if unique {
 		c.Score += 2
+		c.Declarative = true
 		c.Evidence = append(c.Evidence, "a migration puts a UNIQUE constraint on column \""+col+"\", so the database refuses a duplicate")
 	} else if nameMatch {
 		c.Against = append(c.Against, "no migration makes column \""+col+"\" unique, so nothing stops two concurrent inserts")
@@ -449,4 +483,64 @@ func canHoldAKey(p *packages.Package, fld *ast.Field) bool {
 		return false
 	}
 	return basic.Info()&(types.IsString|types.IsInteger) != 0
+}
+
+// mainEntities is the set of struct names that carry one of the flow's
+// lifecycle states.
+//
+// This is what "main entity" means in a payment system, and testigo can derive
+// it rather than ask: scanningFlow already proved which named types are
+// lifecycles, so any struct with a field of one of those types is an object the
+// flow moves through its states. Its identity fields are the ones a retry has
+// to match.
+//
+// The signal is worth having because behaviour alone could not tell these
+// apart. On a real recharge service, HealthCheck.Name, RetryConfig.Name,
+// Service.Name and Order.Phone all scored an identical 6 on "arrives from
+// outside" plus "passed to a database call". Only one of those structs is the
+// thing the payment flow actually moves.
+func mainEntities(pkgs []*packages.Package, f *flowEntity.Flow, local map[string]bool) map[string]string {
+	lifecycle := map[string]string{}
+	for _, m := range f.Machines {
+		// Machines are named fully qualified; the field type in source is
+		// written unqualified inside its own package and qualified outside it,
+		// so both spellings have to match.
+		lifecycle[m.Type] = m.Type
+		if i := strings.LastIndex(m.Type, "/"); i >= 0 {
+			lifecycle[m.Type[i+1:]] = m.Type
+		}
+		if i := strings.LastIndex(m.Type, "."); i >= 0 {
+			lifecycle[m.Type[i+1:]] = m.Type
+		}
+	}
+	if len(lifecycle) == 0 {
+		return nil
+	}
+
+	out := map[string]string{}
+	for _, p := range pkgs {
+		if !local[p.PkgPath] {
+			continue
+		}
+		for _, file := range p.Syntax {
+			ast.Inspect(file, func(n ast.Node) bool {
+				spec, ok := n.(*ast.TypeSpec)
+				if !ok {
+					return true
+				}
+				st, ok := spec.Type.(*ast.StructType)
+				if !ok {
+					return true
+				}
+				for _, fld := range st.Fields.List {
+					if state, ok := lifecycle[types.ExprString(fld.Type)]; ok {
+						out[spec.Name.Name] = state
+						return false
+					}
+				}
+				return true
+			})
+		}
+	}
+	return out
 }

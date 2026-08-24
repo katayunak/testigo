@@ -92,6 +92,23 @@ func apply(ask askEntity.Ask, raw []byte, f *flowEntity.Flow, k *askEntity.Knowl
 		}
 		k.Binding = &a
 
+	case askEntity.KindMainEntity:
+		var a askEntity.MainEntityAnswer
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return fmt.Errorf("not valid JSON: %w", err)
+		}
+		if err := a.Validate(); err != nil {
+			return err
+		}
+		k.MainEntity = &a
+
+		// Feed it forward. Round two plans replay and concurrency tests around
+		// the key, and an answer nobody reads is an answer nobody paid for.
+		if k.Binding != nil && a.IdempotencyKey.Field != "" && k.Binding.Idempotency.KeyField == "" {
+			k.Binding.Idempotency.KeyField = a.IdempotencyKey.Field
+			k.Binding.Idempotency.Evidence = a.IdempotencyKey.Evidence
+		}
+
 	case askEntity.KindTransitions:
 		var a askEntity.TransitionsAnswer
 		if err := json.Unmarshal(raw, &a); err != nil {

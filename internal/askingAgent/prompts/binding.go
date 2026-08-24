@@ -116,7 +116,7 @@ job is to CHECK its work on the parts it could not decide, not to redo it.
 
 	b.WriteString("Entry points and what they reach:\n\n")
 	for _, p := range paths {
-		b.WriteString(indent(p.Render(), "  "))
+		b.WriteString(indent(p.RenderHeader(), "  "))
 	}
 
 	b.WriteString("## OPEN QUESTIONS\n\n")

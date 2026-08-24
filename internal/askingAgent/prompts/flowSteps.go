@@ -189,3 +189,15 @@ func factTags(f flowEntity.Facts) []string {
 	}
 	return tags
 }
+
+// RenderHeader names the entry point and points at PREAMBLE.md instead of
+// reprinting the steps.
+//
+// Every round-one prompt used to carry the whole step list. On a real service
+// that is 34 KB, and with 105 prompts in the pack it was paid for 105 times.
+// The steps have not moved: they are in PREAMBLE.md, once, and the agent has
+// already read them by the time it opens a question.
+func (p Path) RenderHeader() string {
+	return fmt.Sprintf("ENTRY POINT: %s\n  %s#%s\n  %d step(s) — the full list is in PREAMBLE.md\n",
+		p.Label, p.Entry.Pkg, p.Entry.Symbol, len(p.Steps))
+}

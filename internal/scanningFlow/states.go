@@ -29,7 +29,7 @@ import (
 // of these transitions should be impossible?" — instead of the open-ended and
 // far less reliable "explain this code to me". Every illegal transition the
 // agent names becomes a generated test.
-func extractStateMachines(pkgs []*packages.Package, root string, local map[string]bool) []flowEntity.StateMachine {
+func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[string]bool) []flowEntity.StateMachine {
 	var out []flowEntity.StateMachine
 	type cand struct {
 		named  *types.Named
@@ -52,6 +52,16 @@ func extractStateMachines(pkgs []*packages.Package, root string, local map[strin
 			if !patterns.IsStateType(name) && !patterns.IsWeakStateType(name) {
 				continue
 			}
+			// A protobuf enum is not a lifecycle. ActionType, EventType,
+			// SchedulingType and PushState all pass the name test and all come
+			// out of a .proto, where the states are a wire format rather than
+			// something a payment moves through. On a real gRPC service six of
+			// the ten machines found this way were generated, and each one would
+			// have bought a round-1 prompt asking which transitions are legal.
+			if gen[relPath(p.Fset, tn.Pos(), root)] {
+				continue
+			}
+
 			named, ok := tn.Type().(*types.Named)
 			if !ok {
 				continue

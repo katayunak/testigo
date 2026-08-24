@@ -31,20 +31,17 @@ func main() {
 
 const usage = `testigo — test your Go fintech flows
 
-phase 1 · ScanningTheFlow
-
-  testigo init    [dir]   write a starter testigo.json
+  testigo init    [dir]   write a starter testigo/config.json
   testigo entry   [dir]   add <pkg>#<Symbol> [label]
-                          append an entry point to testigo.json
-  testigo scan    [dir]   run ScanningTheFlow, write .testigo/flow.json
+                          append an entry point to testigo/config.json
+  testigo scan    [dir]   run ScanningTheFlow, write testigo/flow.json
   testigo flow    [dir]   print the flow as a Mermaid diagram
 
   testigo ask     [dir]   write the prompt pack for your agent (--round 1 or 2)
   testigo collect [dir]   read the answers back, validate them, apply them
   testigo cases   [dir]   list the test plan and what it would cost, spending nothing
-  testigo rules   [dir]   write a starter testigo.rules.json: what money movement means here
+  testigo rules   [dir]   write a starter testigo/rules.json: what money movement means here
 
-Phase 1 (ScanningTheFlow) reads only. Nothing is written into your source files.
 `
 
 func run(args []string) error {
@@ -95,11 +92,14 @@ func run(args []string) error {
 
 // cmdInit initialized the file for scanning the flow
 func cmdInit(root string) error {
-	p := filepath.Join(root, config.FileName)
+	p := config.Path(root)
 	if _, err := os.Stat(p); err == nil {
 		return fmt.Errorf("%s already exists", p)
 	}
 
+	if err := os.MkdirAll(config.Dir(root), 0o755); err != nil {
+		return err
+	}
 	if err := os.WriteFile(p, []byte(config.Example), 0o644); err != nil {
 		return err
 	}
@@ -109,6 +109,9 @@ func cmdInit(root string) error {
 	fmt.Println("declare your entry points in it before scanning:")
 	fmt.Println("  edit the \"entries\" array by hand, or")
 	fmt.Println("  testigo entry . add <pkg>#<Symbol> [label]")
+	fmt.Println()
+	fmt.Printf("everything testigo writes lives in %s/ — add it to .gitignore,\n", config.DirName)
+	fmt.Printf("except %s/knowledge.json, which holds the agent answers and is worth committing\n", config.DirName)
 
 	return nil
 }
@@ -173,6 +176,12 @@ func printSummary(f *flowEntity.Flow, stats storage.MergeStats, path string) {
 		fmt.Printf("states      %s: %d states, %d write sites\n", m.Type, len(m.States), len(m.Writes))
 	}
 	fmt.Printf("notes       %s\n", stats)
+	if f.GeneratedFiles > 0 {
+		// Said out loud on purpose. A filter nobody mentions reads as an empty
+		// result, and on a gRPC service this one is doing a lot of work.
+		fmt.Printf("generated   %d file(s) marked DO NOT EDIT; %d finding(s) from them not reported\n",
+			f.GeneratedFiles, f.GeneratedFindings)
+	}
 
 	if len(f.Findings) > 0 {
 		counts := map[flowEntity.Severity]int{}
@@ -260,7 +269,7 @@ func cmdAsk(root string, roundNum int) error {
 		fmt.Println("nothing to ask — every question for this round is already answered")
 		return nil
 	}
-	pack, err := askingAgent.Write(storage.Dir(root), round, asks)
+	pack, err := askingAgent.Write(storage.Dir(root), round, asks, askingAgent.Preamble(flow, round))
 	if err != nil {
 		return err
 	}
@@ -281,7 +290,7 @@ func cmdAsk(root string, roundNum int) error {
 			fmt.Printf("              %-16s %d\n", k, byKind[k])
 		}
 	}
-	cost := askingAgent.Estimate(round, asks)
+	cost := askingAgent.Estimate(round, asks, askingAgent.Preamble(flow, round))
 	fmt.Printf("est. cost   ~%s tokens across %d prompt(s)\n", thousands(cost.EstTokens), cost.Prompts)
 	if cost.SavedByShared > 0 {
 		fmt.Printf("            ~%s saved by hoisting the shared rules into PREAMBLE.md\n", thousands(cost.SavedByShared))
@@ -490,7 +499,7 @@ func cmdCases(root string) error {
 	}
 
 	asks := askingAgent.Plan(flow, knowledge, askEntity.RoundGenerate)
-	cost := askingAgent.Estimate(askEntity.RoundGenerate, asks)
+	cost := askingAgent.Estimate(askEntity.RoundGenerate, asks, askingAgent.Preamble(flow, askEntity.RoundGenerate))
 	fmt.Printf("\ngenerating these would cost roughly %s tokens of input\n", thousands(cost.EstTokens))
 	return nil
 }
@@ -502,7 +511,10 @@ func cmdCases(root string) error {
 // that assumed one definition would generate confident wrong tests for the other
 // two. Two minutes writing this down removes a whole class of noise.
 func cmdRules(root string) error {
-	p := filepath.Join(root, config.RulesFileName)
+	if err := os.MkdirAll(config.Dir(root), 0o755); err != nil {
+		return err
+	}
+	p := filepath.Join(config.Dir(root), config.RulesFileName)
 	if _, err := os.Stat(p); err == nil {
 		return fmt.Errorf("%s already exists", p)
 	}

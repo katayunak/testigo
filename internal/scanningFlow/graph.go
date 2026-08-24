@@ -33,6 +33,11 @@ type graph struct {
 
 	reach map[*ssa.Function]kindSet
 	refs  map[string]codeRef.CodeRef
+
+	// imports is what each package can actually reach through its own imports.
+	// It is how a call the compiler could never resolve gets thrown out. See
+	// imports.go.
+	imports map[string]map[string]bool
 }
 
 func buildGraph(pkgs []*packages.Package, local map[string]bool) (*graph, error) {
@@ -52,9 +57,10 @@ func buildGraph(pkgs []*packages.Package, local map[string]bool) (*graph, error)
 
 	g := &graph{
 		prog: prog, callGraph: cg, local: local,
-		byID: map[string]*ssa.Function{},
-		idOf: map[*ssa.Function]string{},
-		refs: map[string]codeRef.CodeRef{},
+		byID:    map[string]*ssa.Function{},
+		idOf:    map[*ssa.Function]string{},
+		refs:    map[string]codeRef.CodeRef{},
+		imports: importClosure(pkgs),
 	}
 
 	for fn := range ssautil.AllFunctions(prog) {
@@ -158,6 +164,15 @@ func (g *graph) discover(root string, entries []flowEntity.EntryPoint, flow *flo
 			}
 
 			to := g.idOf[owner(callee)]
+
+			// CHA proposes edges by type. The import graph decides which of
+			// them the compiler could ever have resolved, and it is not close:
+			// on a real service a single `defer cancel()` proposed 1,463
+			// callees, most of them in packages the caller does not import.
+			if to != "" && !g.canCall(pkgOfID(from), pkgOfID(to)) {
+				continue
+			}
+
 			if from != "" && to != "" && from != to && !seenEdge[from+">"+to] {
 				seenEdge[from+">"+to] = true
 				pos := token.NoPos
@@ -234,4 +249,13 @@ func relFile(fset *token.FileSet, fn *ssa.Function, root string) string {
 	}
 
 	return filepath.ToSlash(pos.Filename)
+}
+
+// pkgOfID splits a reference ID back into its package path. IDs are built as
+// "<pkg>#<Symbol>", so everything before the separator is the package.
+func pkgOfID(id string) string {
+	if i := strings.Index(id, "#"); i >= 0 {
+		return id[:i]
+	}
+	return id
 }

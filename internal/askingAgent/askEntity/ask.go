@@ -59,6 +59,14 @@ const (
 	// both rounds depends on this, so it is asked first and asked alone.
 	KindBinding Kind = "binding"
 
+	// KindMainEntity asks which struct the flow actually moves, and which of its
+	// several identifiers a client repeats on a retry.
+	//
+	// It exists because the scanner narrows this question well and cannot close
+	// it. Which value two systems agreed to repeat is a contract, not a
+	// property of the syntax.
+	KindMainEntity Kind = "mainEntity"
+
 	// KindNotes asks what one function does in business terms.
 	KindNotes Kind = "notes"
 

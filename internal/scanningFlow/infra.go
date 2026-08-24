@@ -30,7 +30,7 @@ func Infra(root string) flowEntity.Infra {
 		name := d.Name()
 		if d.IsDir() {
 			switch name {
-			case ".git", "vendor", "node_modules", ".testigo", "_to_delete":
+			case ".git", "vendor", "node_modules", ".testigo", "testigo", "_to_delete":
 				return filepath.SkipDir
 			}
 			return nil

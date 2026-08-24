@@ -3,11 +3,11 @@ package askingAgent
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/katayunak/testigo/internal/askingAgent/askEntity"
-	"github.com/katayunak/testigo/internal/askingAgent/prompts"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/katayunak/testigo/internal/askingAgent/askEntity"
 )
 
 const (
@@ -36,17 +36,17 @@ type Cost struct {
 	SavedByShared int
 }
 
-func Estimate(round askEntity.Round, asks []askEntity.Ask) Cost {
+func Estimate(round askEntity.Round, asks []askEntity.Ask, preamble string) Cost {
 	c := Cost{Prompts: len(asks)}
 	for _, a := range asks {
 		c.Chars += len(a.Prompt)
 	}
-	if round == askEntity.RoundGenerate {
-		c.SharedChars = len(prompts.Preamble)
-		// What repeating the shared rules inside every prompt would have cost.
-		if len(asks) > 1 {
-			c.SavedByShared = len(prompts.Preamble) * (len(asks) - 1) / 4
-		}
+	// Both rounds hoist. Round one hoists the flow map, which is far larger than
+	// round two's shared rules and was the whole reason a 73-function service
+	// cost a million tokens to ask about.
+	c.SharedChars = len(preamble)
+	if len(asks) > 1 {
+		c.SavedByShared = len(preamble) * (len(asks) - 1) / 4
 	}
 	c.EstTokens = (c.Chars + c.SharedChars) / 4
 	return c
@@ -61,7 +61,7 @@ func Estimate(round askEntity.Round, asks []askEntity.Ask) Cost {
 // and the answers are plain JSON a person can hand-write when the agent gets one
 // wrong. Every other transport can be added later behind the same two
 // directories.
-func Write(sidecarDir string, round askEntity.Round, asks []askEntity.Ask) (*Pack, error) {
+func Write(sidecarDir string, round askEntity.Round, asks []askEntity.Ask, preamble string) (*Pack, error) {
 	adir := filepath.Join(sidecarDir, asksDir)
 	rdir := filepath.Join(sidecarDir, answersDir)
 	for _, d := range []string{adir, rdir} {
@@ -98,8 +98,10 @@ func Write(sidecarDir string, round askEntity.Round, asks []askEntity.Ask) (*Pac
 	if err := os.WriteFile(filepath.Join(adir, "INSTRUCTIONS.md"), []byte(instructions(round, asks)), 0o644); err != nil {
 		return nil, err
 	}
-	if round == askEntity.RoundGenerate {
-		if err := os.WriteFile(filepath.Join(adir, "PREAMBLE.md"), []byte(prompts.Preamble), 0o644); err != nil {
+	// Both rounds get a preamble now. Round one's carries the flow map, which
+	// used to be pasted into all 105 prompts.
+	if preamble != "" {
+		if err := os.WriteFile(filepath.Join(adir, "PREAMBLE.md"), []byte(preamble), 0o644); err != nil {
 			return nil, err
 		}
 	}
@@ -143,10 +145,43 @@ markdown fence, no explanation. Each prompt ends with the exact shape expected.
 
 `, int(round), round, len(asks), int(round))
 
-	for i, a := range asks {
-		fmt.Fprintf(&b, "%2d. `asks/%s.md`  →  `answers/%s`\n    %s\n\n", i+1, a.ID(), a.AnswerFile(), a.Title)
+	// Grouped by kind, not listed one by one.
+	//
+	// This used to print all 106 questions with their titles: 21 KB of file
+	// names in a file whose job is to explain the procedure. manifest.json
+	// already holds the list in a form a program can read, and `ls asks/` holds
+	// it in a form a person can read. A prose index of a directory is the
+	// directory, retyped and paid for.
+	byKind := map[askEntity.Kind][]askEntity.Ask{}
+	var order []askEntity.Kind
+	for _, a := range asks {
+		if _, seen := byKind[a.Kind]; !seen {
+			order = append(order, a.Kind)
+		}
+		byKind[a.Kind] = append(byKind[a.Kind], a)
+	}
+	for _, k := range order {
+		group := byKind[k]
+		fmt.Fprintf(&b, "**%s** — %d question(s)\n", k, len(group))
+		// Name one so the shape of the filename is obvious, then stop.
+		fmt.Fprintf(&b, "  `asks/%s.md`  →  `answers/%s`\n", group[0].ID(), group[0].AnswerFile())
+		if len(group) > 1 {
+			fmt.Fprintf(&b, "  ...and %d more of the same shape. `manifest.json` lists them all.\n", len(group)-1)
+		}
+		b.WriteString("\n")
 	}
 
+	b.WriteString(`## Read PREAMBLE.md once, then keep it in front of you
+
+Every question below is written to be short because the shared half — the flow
+map, the rules for each kind of question, the JSON shapes — lives in
+PREAMBLE.md instead of being repeated in all of them.
+
+If your tooling caches prompt prefixes, put PREAMBLE.md FIRST and identical in
+every call, and the question last. The preamble is then paid for once rather
+than once per question, and on a pack this size that is most of the bill.
+
+`)
 	b.WriteString("## When you are done\n\nRun:\n\n```sh\ntestigo collect\n```\n\n")
 	b.WriteString(`It validates every answer against the facts — that the states you listed are
 the states the compiler found, that named symbols carry evidence, that nothing

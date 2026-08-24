@@ -9,7 +9,8 @@ import (
 	"strings"
 )
 
-const RulesFileName = "testigo.rules.json"
+// RulesFileName is the rules file, inside config.DirName.
+const RulesFileName = "rules.json"
 
 // Rules is what this repository means by moving money.
 //
@@ -117,7 +118,7 @@ type SkipRule struct {
 
 // LoadRules reads testigo.rules.json. A missing file is normal, not an error.
 func LoadRules(root string) (*Rules, error) {
-	b, err := os.ReadFile(filepath.Join(root, RulesFileName))
+	b, err := os.ReadFile(filepath.Join(Dir(root), RulesFileName))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -140,7 +141,7 @@ func (r *Rules) Skipped(scenario string) (string, bool) {
 		if strings.EqualFold(s.Scenario, scenario) {
 			why := s.Why
 			if why == "" {
-				why = "turned off in " + RulesFileName
+				why = "turned off in " + DirName + "/" + RulesFileName
 			}
 			return why, true
 		}

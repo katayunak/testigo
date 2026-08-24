@@ -29,6 +29,7 @@ type Knowledge struct {
 	SchemaVersion   int                              `json:"schema_version"`
 	GeneratedAt     string                           `json:"generated_at,omitempty"`
 	Binding         *BindingAnswer                   `json:"binding,omitempty"`
+	MainEntity      *MainEntityAnswer                `json:"main_entity,omitempty"`
 	Transitions     map[string]*TransitionsAnswer    `json:"transitions,omitempty"`
 	ExternalEffects map[string]*ExternalEffectAnswer `json:"external_effects,omitempty"`
 }
@@ -484,4 +485,66 @@ func join(bad []string) error {
 		return nil
 	}
 	return fmt.Errorf("%d problem(s):\n  - %s", len(bad), strings.Join(bad, "\n  - "))
+}
+
+// MainEntityAnswer names the struct the flow moves and the field that
+// identifies a repeat of the same request.
+type MainEntityAnswer struct {
+	MainEntity struct {
+		Struct   string `json:"struct"`
+		Package  string `json:"package"`
+		Evidence string `json:"evidence"`
+		Why      string `json:"why"`
+	} `json:"main_entity"`
+
+	IdempotencyKey struct {
+		Field            string          `json:"field"`
+		Evidence         string          `json:"evidence"`
+		SuppliedBy       string          `json:"supplied_by"`
+		ReadBeforeActing json.RawMessage `json:"read_before_acting"`
+		Confidence       string          `json:"confidence"`
+	} `json:"idempotency_key"`
+
+	OtherIdentifiers []struct {
+		Field      string `json:"field"`
+		Purpose    string `json:"purpose"`
+		CouldBeKey bool   `json:"could_be_key"`
+	} `json:"other_identifiers"`
+
+	NoKeyReason string `json:"no_key_reason"`
+	Notes       string `json:"notes"`
+}
+
+// Validate refuses the two answers that would do damage downstream: a named
+// entity with nothing behind it, and a missing key reported as if nothing were
+// missing.
+func (a *MainEntityAnswer) Validate() error {
+	var bad []string
+
+	if a.MainEntity.Struct == "" {
+		bad = append(bad, "main_entity.struct is empty: the flow moves something, name it")
+	} else if a.MainEntity.Evidence == "" {
+		bad = append(bad, "main_entity was named but has no evidence: every claim needs a file:line")
+	}
+
+	switch {
+	case a.IdempotencyKey.Field == "" && a.NoKeyReason == "":
+		// The important one. "No key" is a legitimate and serious answer, and
+		// it must arrive as a statement rather than as an empty field, because
+		// downstream cannot tell an admitted absence from an unanswered
+		// question — and the two lead to opposite tests.
+		bad = append(bad, "no idempotency key was named and no_key_reason is empty: "+
+			"if there is no deduplication key, say what stops duplicates instead, or say that nothing does")
+	case a.IdempotencyKey.Field != "" && a.IdempotencyKey.Evidence == "":
+		bad = append(bad, "idempotency_key.field was named but has no evidence: "+
+			"name the line it arrives on and the line it is read back on")
+	case a.IdempotencyKey.Field != "" && a.IdempotencyKey.SuppliedBy == "generated":
+		bad = append(bad, "a value this process generates cannot deduplicate anything, "+
+			"because a retry produces a different one")
+	}
+
+	if len(bad) > 0 {
+		return fmt.Errorf("%d problem(s):\n  - %s", len(bad), strings.Join(bad, "\n  - "))
+	}
+	return nil
 }

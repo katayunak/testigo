@@ -65,61 +65,11 @@ retry anything. You are being asked what is TRUE about the call.
 
 	b.WriteString("## Where it sits in the flow\n\n")
 	for _, p := range paths {
-		b.WriteString(indent(p.Render(), "  "))
+		b.WriteString(indent(p.RenderHeader(), "  "))
 	}
 
-	b.WriteString(`## The four questions that matter
-
-**1. Does it change state outside this process?**
-A read does not. A write to another system does. A message published to a broker
-does, the moment it is delivered.
-
-**2. Does a database ROLLBACK undo it?**
-For anything that left the machine the answer is no, and that is the point. This
-is the property that makes a crash between two steps dangerous.
-
-**3. Can the outcome be checked afterwards?**
-This is the question people forget, and it changes everything. If the provider
-has a status endpoint, a timeout is recoverable: ask, then decide. If it does
-not, a timeout is a permanent unknown, and the only safe design is to make the
-call deduplicating before you make it at all.
-
-**4. Does the far side deduplicate on a key you send?**
-Passing a key is different from being naturally safe to repeat. It breaks the
-moment somebody regenerates the key on the second attempt.
-
-## Output
-
-Reply with one JSON object and nothing else.
-
-` + "```" + `
-{
-  "changes_external_state": true | false | "unknown",
-  "reversible_by_rollback": true | false | "unknown",
-  "outcome_observable":     true | false | "unknown",
-  "accepts_dedup_key":      true | false | "unknown",
-  "dedup_key_argument": "the parameter carrying the key, or null",
-  "moves_money": true | false | "unknown",
-  "undo": { "exists": false, "symbol": null, "evidence": "" },
-  "failure_modes": ["timeout", "5xx", "connection_reset", "duplicate_response"],
-  "basis": "read_implementation" | "vendor_documentation" | "inference",
-  "notes": ""
-}
-` + "```" + `
-
-On ` + "`moves_money`" + `: use THIS repository's meaning, which is not always a
-transfer between accounts. In a service-activation system the money moves when a
-status is reported to a settlement provider. In a wallet, it moves when the
-balance row changes. If ` + "`testigo.rules.json`" + ` defines it, follow that; otherwise say
-what you observed and explain your reading in ` + "`notes`" + `.
-
-The timeout case deserves its own thought. A call that times out has an
-UNKNOWN outcome, not a failed one. The far side may have processed it. If this call can
-time out, and question 3 is false, say so plainly in ` + "`notes`" + `. That combination is
-the most expensive shape in payments and it is invisible to every test that only
-exercises clean success and clean failure.
-`)
-	return b.String()
+	b.WriteString("The four questions, the JSON shape and the timeout note are in\nPREAMBLE.md, under \"externalEffect\".\n")
+		return b.String()
 }
 
 // SeamTargets picks the calls where "is a retry free?" is a real question.

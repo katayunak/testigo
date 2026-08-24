@@ -112,16 +112,39 @@ func Scan(opts Options) (*Result, error) {
 		return nil, err
 	}
 
+	// Machine-written files keep their place in the graph but lose the right to
+	// raise findings or contribute patterns. See generated.go for why.
+	gen := generatedFiles(pkgs, opts.Root)
+
 	flow.Infra = Infra(opts.Root)
 	flow.Docs = FindDocs(opts.Root)
+	// Machines FIRST. The candidate scorers ask which structs carry a lifecycle
+	// state, and a struct that carries one is the entity the flow moves — the
+	// single strongest signal either scorer has. Computing candidates first left
+	// that set empty and silently threw the signal away.
+	flow.Machines = extractStateMachines(pkgs, opts.Root, local, gen)
+	linkStateWritesToNodes(flow)
+
 	flow.IdempotencyKeys = idempotencyCandidates(pkgs, flow, opts.Root, local)
 	flow.MoneyTypes = moneyCandidates(pkgs, flow, opts.Root, local)
-	flow.Machines = extractStateMachines(pkgs, opts.Root, local)
-	linkStateWritesToNodes(flow)
+
+	// A candidate from a .pb.go is a protobuf request field, not a decision this
+	// repository made. Dropping them here rather than at the finding keeps them
+	// out of the round-1 prompts too, which is where they would have cost money.
+	fileOfCandidate := func(c flowEntity.Candidate) string { return c.File }
+	flow.IdempotencyKeys, _ = withoutGenerated(flow.IdempotencyKeys, gen, fileOfCandidate)
+	flow.MoneyTypes, _ = withoutGenerated(flow.MoneyTypes, gen, fileOfCandidate)
+
 	flow.Findings = append(flow.Findings, stateFindings(flow.Machines)...)
 	flow.Findings = append(flow.Findings, moneyFindings(pkgs, opts.Root)...)
 	flow.Findings = append(flow.Findings, structuralFindings(flow)...)
 	flow.Findings = append(flow.Findings, infraFindings(pkgs, flow, opts.Root)...)
+
+	flow.Findings, flow.GeneratedFindings = withoutGenerated(
+		flow.Findings, gen,
+		func(f flowEntity.Finding) string { return f.Ref.File },
+	)
+	flow.GeneratedFiles = len(gen)
 
 	for _, e := range hardErrs {
 		flow.Findings = append(flow.Findings, flowEntity.Finding{

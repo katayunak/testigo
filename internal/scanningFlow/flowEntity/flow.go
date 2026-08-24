@@ -20,6 +20,25 @@ type Flow struct {
 	IdempotencyKeys Candidates `json:"idempotency_keys,omitempty"`
 	MoneyTypes      Candidates `json:"money_types,omitempty"`
 
+	// Entities maps a struct name to the lifecycle state it carries.
+	//
+	// This is testigo's answer to "what is the main entity", derived rather than
+	// asked: a struct holding a field whose type is one of the flow's state
+	// machines is an object the flow moves through states. In a payment system
+	// that is the business object, and its identity fields are the ones a retry
+	// has to match.
+	Entities map[string]string `json:"entities,omitempty"`
+
+	// GeneratedFiles counts the files carrying the "Code generated ... DO NOT
+	// EDIT." marker. GeneratedFindings counts the findings dropped because they
+	// pointed into one.
+	//
+	// Both are recorded rather than kept quiet. A filter that hides its own work
+	// reads as "there was nothing there", and on a gRPC service the number is
+	// large enough that a reader deserves to know it was applied.
+	GeneratedFiles    int `json:"generated_files,omitempty"`
+	GeneratedFindings int `json:"generated_findings,omitempty"`
+
 	// Docs are the repository's own markdown, ranked by how much it talks about
 	// money. The team already wrote down some of its business rules; reading
 	// them is cheaper and more accurate than asking a model to infer them.

@@ -23,22 +23,7 @@ func Notes(f *flowEntity.Flow, node *flowEntity.Node, step Step, path Path) stri
 Describe one function in business terms, for a reader who knows payments but has
 not read this repository.
 
-## Rules
-
-1. Business terms, not mechanics. "Reserves the funds and records the hold" is
-   useful. "Calls ExecContext with an INSERT statement" is not — the analyser
-   already knows that and it is printed below.
-2. Two sentences at most for ` + "`purpose`" + `. If it needs more, the function is doing
-   more than one thing, and saying THAT is the useful note.
-3. ` + "`effects`" + ` lists only what survives the function returning: rows written,
-   messages published, money moved, provider state changed. Not local variables,
-   not logging.
-4. ` + "`assumptions`" + ` lists what this function needs its CALLER to have already
-   guaranteed — validated input, an open transaction, an acquired lock, a
-   checked balance. This is the field that finds bugs, because an assumption
-   nobody enforces is a bug waiting for an unusual call order.
-5. Describe what the code DOES, not what it should do. Bugs are reported
-   elsewhere. A note that quietly describes intended behaviour hides the defect.
+Rules and the JSON shape are in PREAMBLE.md, under "notes".
 
 ## What the analyser proved about this function
 
@@ -74,27 +59,36 @@ not read this repository.
 		}
 	}
 
-	b.WriteString("\n## The flow it belongs to\n\n")
-	b.WriteString(indent(path.Render(), "  "))
+	// The flow map lives in PREAMBLE.md, printed once for the whole pack.
+	//
+	// It used to be pasted into every notes prompt. On a 73-function service
+	// that map is 34 KB and it was 94% of every prompt — two prompts compared
+	// byte for byte were 99% identical, and the pack came to a million tokens
+	// to describe 73 functions. The map is the same map every time; only the
+	// step number changes.
+	//
+	// Worse than the size, the shape: the map grows with the function count AND
+	// there is one prompt per function, so pasting it made the pack quadratic.
+	// Eight times the functions cost seventy-three times the tokens.
+	fmt.Fprintf(&b, "\n## Where this sits in the flow\n\nYou are describing **step %d** of %q.\n"+
+		"The full step list is in PREAMBLE.md — read it once, then come back here.\n"+
+		"Steps %s are the ones immediately around it.\n",
+		step.Order, path.Label, neighbours(step, path))
 
-	b.WriteString(`## Output
-
-Reply with one JSON object and nothing else.
-
-` + "```" + `
-{
-  "step": "reserve funds",
-  "purpose": "One or two sentences.",
-  "effects": ["writes a pending payment row", "debits the payer ledger account"],
-  "assumptions": ["caller has validated the amount is positive",
-                  "caller holds an open transaction"],
-  "confidence": "high" | "medium" | "low"
-}
-` + "```" + `
-
-Use ` + "`confidence: low`" + ` freely. A low-confidence note is still useful — it tells a
-person which parts of the map to check first — whereas a confident wrong note is
-worse than none at all.
-`)
+	
 	return b.String()
+}
+
+// neighbours names the steps either side of this one, so the prompt can point
+// into the shared map instead of carrying a copy of it.
+func neighbours(step Step, path Path) string {
+	lo, hi := step.Order-1, step.Order+1
+	if lo < 1 {
+		lo = 1
+	}
+	last := len(path.Steps)
+	if hi > last {
+		hi = last
+	}
+	return fmt.Sprintf("%d-%d", lo, hi)
 }

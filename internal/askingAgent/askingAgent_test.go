@@ -411,13 +411,25 @@ func TestPromptsCarryTheirLoadBearingRules(t *testing.T) {
 			"Can the outcome be checked afterwards",
 		}},
 	}
+	// A rule has to REACH the agent. It does not have to be in every prompt.
+	//
+	// Round one now hoists the fixed blocks into PREAMBLE.md, which the agent
+	// reads once, because repeating them made a 73-function service cost a
+	// million tokens. So the assertion is "the agent is told this", not "this
+	// prompt repeats it" — and the preamble counts.
+	pre := UnderstandPreambleFor(f)
 	for _, c := range cases {
 		for _, must := range c.must {
-			if !strings.Contains(c.prompt, must) {
-				t.Errorf("%s prompt lost its rule about %q", c.name, must)
+			if !strings.Contains(c.prompt, must) && !strings.Contains(pre, must) {
+				t.Errorf("%s: the rule about %q reaches the agent from neither the prompt nor PREAMBLE.md", c.name, must)
 			}
 		}
 	}
+}
+
+// UnderstandPreambleFor is a test shorthand for the round-one shared block.
+func UnderstandPreambleFor(f *flowEntity.Flow) string {
+	return Preamble(f, askEntity.RoundUnderstand)
 }
 
 // The shared preamble must keep the rules that were hoisted out of the per-case
@@ -481,7 +493,7 @@ func TestSharedPreambleIsCheaperThanRepeatingIt(t *testing.T) {
 	if len(asks) < 2 {
 		t.Skip("need at least two cases to compare")
 	}
-	cost := Estimate(askEntity.RoundGenerate, asks)
+	cost := Estimate(askEntity.RoundGenerate, asks, Preamble(f, askEntity.RoundGenerate))
 	if cost.SavedByShared <= 0 {
 		t.Fatal("no saving reported from the shared preamble")
 	}
@@ -509,16 +521,16 @@ func fullKnowledge(f *flowEntity.Flow) *askEntity.Knowledge {
 // costs money or costs accuracy.
 func TestEvidenceDecidesInsteadOfAsking(t *testing.T) {
 	clear := flowEntity.Candidates{
-		{Name: "IdempotencyKey", Owner: "Payment", Score: 7},
-		{Name: "OrderID", Owner: "Payment", Score: 4},
+		{Name: "IdempotencyKey", Owner: "Payment", Score: 7, Declarative: true},
+		{Name: "OrderID", Owner: "Payment", Score: 4, Declarative: true},
 	}
 	if _, ok := clear.Decided(); !ok {
 		t.Error("a 7 against a 4 should be decided without asking")
 	}
 
 	close := flowEntity.Candidates{
-		{Name: "ReferenceID", Owner: "Order", Score: 5},
-		{Name: "IdempotencyKey", Owner: "Order", Score: 4},
+		{Name: "ReferenceID", Owner: "Order", Score: 5, Declarative: true},
+		{Name: "IdempotencyKey", Owner: "Order", Score: 4, Declarative: true},
 	}
 	if _, ok := close.Decided(); ok {
 		t.Error("a one-point gap is a real question, not a decision")
@@ -527,12 +539,67 @@ func TestEvidenceDecidesInsteadOfAsking(t *testing.T) {
 	// A field that matched only on its name must never win alone. That was the
 	// original bug: an Order carrying ID, ReferenceID and TraceID had three
 	// name matches and no way to choose.
-	nameOnly := flowEntity.Candidates{{Name: "ReferenceID", Owner: "Order", Score: 1}}
+	nameOnly := flowEntity.Candidates{{Name: "ReferenceID", Owner: "Order", Score: 1, Declarative: true}}
 	if _, ok := nameOnly.Decided(); ok {
 		t.Error("a name match with no behavioural evidence decided the question")
 	}
 
+	// The mirror image, and the one that actually shipped wrong. On a real
+	// recharge service Order.Phone scored 6 on behaviour alone — it arrives in
+	// the request and it is passed to a database call, both true, both true of
+	// every other query parameter in the repo. Nothing named it a key, and a
+	// phone number is the TARGET of a topup, not a deduplication key.
+	//
+	// Behaviour says a value COULD be a key. Only a name or a unique constraint
+	// says anyone meant it to be one.
+	behaviourOnly := flowEntity.Candidates{{Name: "Phone", Owner: "Order", Score: 6}}
+	if _, ok := behaviourOnly.Decided(); ok {
+		t.Error("behavioural evidence with nothing declaring the field a key decided the question")
+	}
+	if behaviourOnly[0].Credible() {
+		t.Error("Phone is not credible enough to raise a finding on its own")
+	}
+
 	if _, ok := (flowEntity.Candidates{}).Decided(); ok {
 		t.Error("an empty list cannot decide anything")
+	}
+}
+
+// TestRoundOneDoesNotRepeatTheFlowMap is the regression for the bug that made a
+// 73-function service cost a million tokens to ask about.
+//
+// Every round-one prompt used to paste the whole step list. Measured on a real
+// service that was 34 KB per prompt and 94% of each one; two prompts compared
+// byte for byte came out 99% identical. Worse than the size was the shape — the
+// map grows with the function count and there is roughly one prompt per
+// function, so the pack was QUADRATIC.
+func TestRoundOneDoesNotRepeatTheFlowMap(t *testing.T) {
+	f := fixtureFlow()
+	asks := Plan(f, askEntity.NewKnowledge(), askEntity.RoundUnderstand)
+	if len(asks) < 2 {
+		t.Skip("need at least two prompts to compare")
+	}
+
+	// The map is in the preamble, so the preamble is allowed to be large.
+	pre := Preamble(f, askEntity.RoundUnderstand)
+	if !strings.Contains(pre, "ENTRY POINT") {
+		t.Fatal("round one's preamble does not carry the flow map")
+	}
+
+	// No individual prompt may. "step N" pointing into the shared map is fine;
+	// a second copy of the steps is not.
+	for _, a := range asks {
+		if strings.Count(a.Prompt, "ENTRY POINT") > 1 {
+			t.Errorf("%s: prompt contains the flow map more than once", a.Kind)
+		}
+		if strings.Contains(a.Prompt, "leaves process:") && strings.Contains(a.Prompt, "step 2") {
+			t.Errorf("%s: prompt is reprinting the step list instead of citing PREAMBLE.md", a.Kind)
+		}
+	}
+
+	// And the whole point: hoisting has to be cheaper than repeating.
+	cost := Estimate(askEntity.RoundUnderstand, asks, pre)
+	if cost.SavedByShared <= 0 {
+		t.Error("round one reports no saving from hoisting the shared block")
 	}
 }

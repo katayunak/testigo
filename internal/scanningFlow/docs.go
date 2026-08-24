@@ -30,7 +30,7 @@ func FindDocs(root string) []flowEntity.Doc {
 		}
 		if d.IsDir() {
 			switch d.Name() {
-			case ".git", "vendor", "node_modules", ".testigo", "_to_delete", "testdata":
+			case ".git", "vendor", "node_modules", ".testigo", "testigo", "_to_delete", "testdata":
 				return filepath.SkipDir
 			}
 			return nil

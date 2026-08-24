@@ -41,6 +41,19 @@ type Candidate struct {
 	// Evidence is why, in words a person can check. Every entry names a fact.
 	Evidence []string `json:"evidence"`
 
+	// Declarative is true when something DECLARES this field to be a key: its
+	// name is in the vocabulary, or a migration puts a unique constraint on its
+	// column.
+	//
+	// It exists because behavioural evidence alone describes far too much. "The
+	// value arrives from outside" and "the value is passed to a database call"
+	// are both true of a phone number, a product code and every other query
+	// parameter in a request — on a real recharge service that pair scored
+	// Order.Phone a 6 and would have named it the idempotency key. Behaviour
+	// says the value COULD be a key. Only a declaration says anyone INTENDED it
+	// to be one.
+	Declarative bool `json:"declarative,omitempty"`
+
 	// Against is the evidence pointing the other way. Kept rather than dropped:
 	// a candidate that scored well DESPITE something suspicious is worth a
 	// second look, and hiding the doubt would make the score look more certain
@@ -55,8 +68,19 @@ func (c Candidate) String() string {
 // Candidates is a ranked list.
 type Candidates []Candidate
 
+// Sort ranks declared candidates above behaviour-only ones, then by score.
+//
+// The order is what a person and an agent both read first, so it has to lead
+// with the kind of evidence that can actually settle the question. A phone
+// number scoring 10 on flow alone above an OrderID scoring 8 with its name
+// behind it is a true ranking of the wrong quantity.
 func (cs Candidates) Sort() {
-	sort.SliceStable(cs, func(i, j int) bool { return cs[i].Score > cs[j].Score })
+	sort.SliceStable(cs, func(i, j int) bool {
+		if cs[i].Declarative != cs[j].Declarative {
+			return cs[i].Declarative
+		}
+		return cs[i].Score > cs[j].Score
+	})
 }
 
 // Decided reports whether one candidate wins clearly enough to skip the question.
@@ -70,10 +94,10 @@ func (cs Candidates) Decided() (Candidate, bool) {
 		return Candidate{}, false
 	}
 	if len(cs) == 1 {
-		return cs[0], cs[0].Score >= minDecisiveScore
+		return cs[0], cs[0].Credible()
 	}
 	top, next := cs[0], cs[1]
-	return top, top.Score >= minDecisiveScore && top.Score-next.Score >= minDecisiveGap
+	return top, top.Credible() && top.Score-next.Score >= minDecisiveGap
 }
 
 const (
@@ -92,7 +116,7 @@ const (
 // field that only matched the vocabulary never clears it. A finding is an
 // accusation, and an accusation built on a name match is the coin flip this
 // whole type exists to avoid.
-func (c Candidate) Credible() bool { return c.Score >= minDecisiveScore }
+func (c Candidate) Credible() bool { return c.Score >= minDecisiveScore && c.Declarative }
 
 // Find returns the candidate for one owner and field, if it was scored at all.
 func (cs Candidates) Find(owner, name string) (Candidate, bool) {
@@ -105,9 +129,19 @@ func (cs Candidates) Find(owner, name string) (Candidate, bool) {
 }
 
 // Render writes the ranked list for a prompt.
+//
+// Capped, because the ranking is the message and the tail is not. On a real
+// payment service the uncapped list was 28 KB inside a single prompt — eighty
+// candidates whose evidence lines were near-identical copies of each other, and
+// nobody, human or model, reads to number eighty. What matters is the top few
+// and how far ahead the leader is.
 func (cs Candidates) Render() string {
+	shown := cs
+	if len(shown) > maxRendered {
+		shown = shown[:maxRendered]
+	}
 	var b strings.Builder
-	for i, c := range cs {
+	for i, c := range shown {
 		fmt.Fprintf(&b, "  %d. %s.%s  %s\n", i+1, c.Owner, c.Name, c.Type)
 		fmt.Fprintf(&b, "     %s:%d   score %d\n", c.File, c.Line, c.Score)
 		for _, e := range c.Evidence {
@@ -118,8 +152,18 @@ func (cs Candidates) Render() string {
 		}
 		b.WriteString("\n")
 	}
+	if len(cs) > len(shown) {
+		fmt.Fprintf(&b, "  ...and %d lower-scoring candidate(s), in testigo/flow.json.\n"+
+			"  They are not printed here: none of them beats the ones above, and\n"+
+			"  printing them would cost more than reading them is worth.\n\n",
+			len(cs)-len(shown))
+	}
 	return b.String()
 }
+
+// maxRendered is how many candidates a prompt is allowed to print. Past this
+// the list stops informing a decision and starts being a data dump.
+const maxRendered = 6
 
 // Doc is one of the repository's own markdown files, ranked by how much it talks
 // about money movement.

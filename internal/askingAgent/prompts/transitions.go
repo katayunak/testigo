@@ -89,76 +89,9 @@ currently tests that.
 
 	b.WriteString("\n## The flow these states belong to\n\n")
 	for _, p := range paths {
-		b.WriteString(indent(p.Render(), "  "))
+		b.WriteString(indent(p.RenderHeader(), "  "))
 	}
 
-	b.WriteString(`Note on ordering: the step numbers above are a breadth-first walk of the call
-graph, not execution order. A compiler cannot know which branch runs. Use them
-to see WHAT is reachable, not in what sequence.
-
-## Output
-
-Reply with one JSON object and nothing else.
-
-` + "```" + `
-{
-  "initial_state": "StatusPending",
-  "may_move_to": {
-    "StatusPending":    ["StatusAuthorized", "StatusFailed"],
-    "StatusAuthorized": ["StatusCaptured", "StatusFailed"],
-    "StatusCaptured":   ["StatusRefunded"],
-    "StatusFailed":     [],
-    "StatusRefunded":   [],
-    "StatusAbandoned":  []
-  },
-  "unsure": [
-    { "from": "StatusFailed", "to": "StatusPending",
-      "why": "retry may be intended to reuse the row rather than create a new payment" }
-  ],
-  "never_assigned_verdict": {
-    "StatusRefunded":  "reachable_from_outside",
-    "StatusAbandoned": "dead"
-  },
-  "final_states": ["StatusRefunded", "StatusFailed"],
-  "final_state_exceptions": [
-    { "from": "StatusCaptured", "to": "StatusRefunded",
-      "why": "a chargeback can arrive up to 40 days after capture" }
-  ],
-  "notes": "anything a test author needs that the shape above cannot carry"
-}
-` + "```" + `
-
-### On final states
-
-A state is final when a payment in it will never legitimately change again. This
-matters more than it sounds, because it produces one of the strongest tests
-available: drive a payment into a final state, attempt every other transition,
-and assert every one is refused.
-
-That test is only correct if the final list is correct, which is why the
-exceptions are asked for in the same breath. Real payment systems are full of
-states that look final and are not:
-
-- **captured** is finished, until a chargeback arrives weeks later
-- **settled** is finished, until the transfer is recalled
-- **refunded** is finished, until the refund itself is reversed
-- **failed** is often NOT final at all — see below
-
-A state you list as final with no exception becomes a hard assertion. If reality
-can leave it, that test will fail the first time reality happens, and someone
-will delete it instead of fixing the code. So put the exception in the list, with
-the reason, and the generated test will allow that one path and forbid the rest.
-
-Two transitions are worth extra thought before you answer, because published
-payment state machines get both wrong more often than any others:
-
-- **Is failure terminal?** Stripe's PaymentIntent returns to
-  ` + "`requires_payment_method`" + ` after a failed payment so it can be retried.
-  Implementations that treat failure as terminal look correct until a customer
-  retries a declined card.
-- **Is the terminal state really terminal?** A captured payment is done, but
-  money can still leave through a refund, a chargeback, or a reversal. If this
-  repository models any of those, the "terminal" state has outgoing edges.
-`)
-	return b.String()
+	b.WriteString("The JSON shape and the note on final states are in\nPREAMBLE.md, under \"transitions\".\n")
+		return b.String()
 }
