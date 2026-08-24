@@ -190,8 +190,39 @@ func (g *graph) moneyTypesIn(fn *ssa.Function) []string {
 			}
 			break
 		}
-		if n, ok := t.(*types.Named); ok && patterns.MoneyType.MatchString(n.Obj().Name()) {
+		n, ok := t.(*types.Named)
+		if !ok {
+			return
+		}
+		if patterns.MoneyType.MatchString(n.Obj().Name()) {
 			seen[types.TypeString(t, relativeTo)] = true
+			return
+		}
+		// A struct that CARRIES money is money for this purpose.
+		//
+		// Only the signature used to be read, and only for type names in the
+		// money vocabulary. On a real recharge service that found nothing at
+		// all: money there never travels as a bare Price argument, it travels
+		// inside entity.Order, whose name says nothing about money. The scanner
+		// then reported "no money-shaped type flows through the reachable
+		// functions" and dropped SEVEN scenarios — every conservation, split,
+		// currency and round-trip test — on a repository whose main entity has
+		// four money fields.
+		//
+		// The evidence was already in the same program. moneyCandidates had
+		// scored Order.Price, Order.Fee, Order.BasePrice and Order.Discount.
+		// This function simply never asked it.
+		if fields, isStruct := n.Underlying().(*types.Struct); isStruct {
+			for i := 0; i < fields.NumFields(); i++ {
+				fld := fields.Field(i)
+				if !fld.Exported() && fld.Pkg() != nil {
+					continue
+				}
+				if patterns.MoneyField.MatchString(fld.Name()) || moneyShapedType(fld.Type()) {
+					seen[types.TypeString(t, relativeTo)+" (carries "+fld.Name()+")"] = true
+					return
+				}
+			}
 		}
 	}
 	for i := 0; i < sig.Params().Len(); i++ {
@@ -209,4 +240,22 @@ func (g *graph) moneyTypesIn(fn *ssa.Function) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// moneyShapedType reports whether a type NAME is in the money vocabulary,
+// following pointers and slices to the thing itself.
+func moneyShapedType(t types.Type) bool {
+	for {
+		switch x := t.(type) {
+		case *types.Pointer:
+			t = x.Elem()
+			continue
+		case *types.Slice:
+			t = x.Elem()
+			continue
+		}
+		break
+	}
+	n, ok := t.(*types.Named)
+	return ok && patterns.MoneyType.MatchString(n.Obj().Name())
 }
