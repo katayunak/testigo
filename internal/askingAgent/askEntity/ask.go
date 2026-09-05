@@ -54,10 +54,10 @@ func (r Round) String() string {
 type Kind string
 
 const (
-	// KindBinding names the money model: which type is money, which function
+	// KindMoneyModel names the money model: which type is money, which function
 	// moves it, which field carries the idempotency key. Everything else in
 	// both rounds depends on this, so it is asked first and asked alone.
-	KindBinding Kind = "binding"
+	KindMoneyModel Kind = "moneyModel"
 
 	// KindMainEntity asks which struct the flow actually moves, and which of its
 	// several identifiers a client repeats on a retry.
@@ -66,6 +66,21 @@ const (
 	// it. Which value two systems agreed to repeat is a contract, not a
 	// property of the syntax.
 	KindMainEntity Kind = "mainEntity"
+
+	// KindStateRoles asks what part each state plays. testigo derives the
+	// transition matrix from the answer instead of paying for N x N cells.
+	KindStateRoles Kind = "stateRoles"
+
+	// KindPaymentKind asks the questions that only matter for THIS kind of
+	// payment system.
+	//
+	// Which kind it is was decided in Go, from the migrations and the struct
+	// names, so nobody pays to be told "this is a top-up service". What is left
+	// is the part no static analysis reaches: whether delivered airtime can be
+	// clawed back, whether the provider's requery endpoint re-submits the order,
+	// which of its status values mean money was actually taken. Seventy-nine
+	// questions exist; a repository sees the fifteen that can apply to it.
+	KindPaymentKind Kind = "paymentKind"
 
 	// KindNotes asks what one function does in business terms.
 	KindNotes Kind = "notes"

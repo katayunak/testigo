@@ -106,10 +106,10 @@ type Requires struct {
 	IdempotencyKey bool
 }
 
-// Bindings is the slice of round-one knowledge the catalog filters on. Passed in
+// Facts is the slice of round-one answers the catalog filters on. Passed in
 // rather than imported so testPlan does not depend on askingAgent, which depends
 // on testPlan.
-type Bindings struct {
+type Facts struct {
 	MoneyType      string
 	BalanceFunc    string
 	TransferFunc   string
@@ -132,7 +132,7 @@ type Bindings struct {
 // Called before anything is rendered, which is where the token saving lives: a
 // scenario that cannot apply is never written to a file, never read by an agent,
 // and never paid for.
-func (s Scenario) Applies(f *flowEntity.Flow, b Bindings) (bool, string) {
+func (s Scenario) Applies(f *flowEntity.Flow, b Facts) (bool, string) {
 	r := s.Requires
 
 	if why, off := b.Skipped[s.ID]; off {
@@ -154,7 +154,7 @@ func (s Scenario) Applies(f *flowEntity.Flow, b Bindings) (bool, string) {
 		}
 	}
 
-	if r.StateMachine && len(f.Machines) == 0 {
+	if r.StateMachine && len(f.States) == 0 {
 		return false, "no status type with declared constants was found"
 	}
 	if r.MultipleEntries && len(f.Entries) < 2 {

@@ -11,11 +11,11 @@ type Flow struct {
 	Entries       []EntryPoint     `json:"entries"`
 	Nodes         map[string]*Node `json:"nodes"`
 	Seams         []Seam           `json:"seams"`
-	Machines      []StateMachine   `json:"machines"`
+	States        []StateMachine   `json:"states"`
 	Findings      []Finding        `json:"findings"`
 	Infra         Infra            `json:"infra,omitempty"`
 
-	// IdempotencyKeys and MoneyTypes are ranked guesses with their evidence
+	// IdempotencyKeys and MoneyTypes are ranked guesses with their proof
 	// attached, computed here so round one does not have to pay to ask.
 	IdempotencyKeys Candidates `json:"idempotency_keys,omitempty"`
 	MoneyTypes      Candidates `json:"money_types,omitempty"`

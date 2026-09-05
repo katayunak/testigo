@@ -6,23 +6,6 @@ import (
 	"strings"
 )
 
-// Candidate is a guess with its reasons attached.
-//
-// This type exists because of a mistake worth naming. An earlier version matched
-// field names against a vocabulary — anything called `idem_key`, `request_id`,
-// `reference_id`, `order_id` was "the idempotency key". On an Order struct that
-// carries three of those at once, that is not a heuristic, it is a coin flip.
-//
-// Handing the coin flip to an agent does not fix it either. The agent sees the
-// same three names and has the same information. A confident answer from a model
-// is still a guess; it is just harder to audit.
-//
-// So testigo does not guess. It collects EVIDENCE — where the value comes from,
-// what the code does with it, what the database enforces about it — scores each
-// candidate, and shows its work. Most of the time one candidate wins clearly and
-// no question is asked at all. When two tie, the agent gets a narrow
-// multiple-choice question with the evidence attached, which is a far better
-// question than "find the idempotency key".
 type Candidate struct {
 	// Name is the field or type being proposed.
 	Name string `json:"name"`
@@ -34,18 +17,18 @@ type Candidate struct {
 	File string `json:"file"`
 	Line int    `json:"line"`
 
-	// Score is the sum of the evidence below. Comparable only against other
+	// Score is the sum of the proof below. Comparable only against other
 	// candidates for the same question.
 	Score int `json:"score"`
 
-	// Evidence is why, in words a person can check. Every entry names a fact.
-	Evidence []string `json:"evidence"`
+	// Proof is why, in words a person can check. Every entry names a fact.
+	Proof []string `json:"proof"`
 
 	// Declarative is true when something DECLARES this field to be a key: its
 	// name is in the vocabulary, or a migration puts a unique constraint on its
 	// column.
 	//
-	// It exists because behavioural evidence alone describes far too much. "The
+	// It exists because behavioural proof alone describes far too much. "The
 	// value arrives from outside" and "the value is passed to a database call"
 	// are both true of a phone number, a product code and every other query
 	// parameter in a request — on a real recharge service that pair scored
@@ -54,7 +37,7 @@ type Candidate struct {
 	// to be one.
 	Declarative bool `json:"declarative,omitempty"`
 
-	// Against is the evidence pointing the other way. Kept rather than dropped:
+	// Against is the proof pointing the other way. Kept rather than dropped:
 	// a candidate that scored well DESPITE something suspicious is worth a
 	// second look, and hiding the doubt would make the score look more certain
 	// than it is.
@@ -65,15 +48,8 @@ func (c Candidate) String() string {
 	return fmt.Sprintf("%s.%s (%s:%d) score=%d", c.Owner, c.Name, c.File, c.Line, c.Score)
 }
 
-// Candidates is a ranked list.
 type Candidates []Candidate
 
-// Sort ranks declared candidates above behaviour-only ones, then by score.
-//
-// The order is what a person and an agent both read first, so it has to lead
-// with the kind of evidence that can actually settle the question. A phone
-// number scoring 10 on flow alone above an OrderID scoring 8 with its name
-// behind it is a true ranking of the wrong quantity.
 func (cs Candidates) Sort() {
 	sort.SliceStable(cs, func(i, j int) bool {
 		if cs[i].Declarative != cs[j].Declarative {
@@ -86,22 +62,24 @@ func (cs Candidates) Sort() {
 // Decided reports whether one candidate wins clearly enough to skip the question.
 //
 // The margin is the whole design. A clear winner is used as a fact and costs
-// nothing. A close call becomes a narrow question with the evidence attached.
+// nothing. A close call becomes a narrow question with the proof attached.
 // Requiring both a minimum score and a gap over the runner-up means a field that
 // only matched on its name never wins by itself.
 func (cs Candidates) Decided() (Candidate, bool) {
 	if len(cs) == 0 {
 		return Candidate{}, false
 	}
+
 	if len(cs) == 1 {
 		return cs[0], cs[0].Credible()
 	}
+
 	top, next := cs[0], cs[1]
 	return top, top.Credible() && top.Score-next.Score >= minDecisiveGap
 }
 
 const (
-	// minDecisiveScore keeps a name-only match from winning. Name evidence is
+	// minDecisiveScore keeps a name-only match from winning. Name proof is
 	// worth 1; anything decisive needs at least one behavioural fact behind it.
 	minDecisiveScore = 4
 	// minDecisiveGap is how far ahead the winner must be. Two candidates within
@@ -109,10 +87,10 @@ const (
 	minDecisiveGap = 3
 )
 
-// Credible reports whether the evidence behind this candidate is strong enough
+// Credible reports whether the proof behind this candidate is strong enough
 // to raise a finding about it without asking anyone first.
 //
-// Same bar as Decided, for the same reason. Name evidence is worth 1, so a
+// Same bar as Decided, for the same reason. Name proof is worth 1, so a
 // field that only matched the vocabulary never clears it. A finding is an
 // accusation, and an accusation built on a name match is the coin flip this
 // whole type exists to avoid.
@@ -132,7 +110,7 @@ func (cs Candidates) Find(owner, name string) (Candidate, bool) {
 //
 // Capped, because the ranking is the message and the tail is not. On a real
 // payment service the uncapped list was 28 KB inside a single prompt — eighty
-// candidates whose evidence lines were near-identical copies of each other, and
+// candidates whose proof lines were near-identical copies of each other, and
 // nobody, human or model, reads to number eighty. What matters is the top few
 // and how far ahead the leader is.
 func (cs Candidates) Render() string {
@@ -144,7 +122,7 @@ func (cs Candidates) Render() string {
 	for i, c := range shown {
 		fmt.Fprintf(&b, "  %d. %s.%s  %s\n", i+1, c.Owner, c.Name, c.Type)
 		fmt.Fprintf(&b, "     %s:%d   score %d\n", c.File, c.Line, c.Score)
-		for _, e := range c.Evidence {
+		for _, e := range c.Proof {
 			fmt.Fprintf(&b, "     + %s\n", e)
 		}
 		for _, a := range c.Against {

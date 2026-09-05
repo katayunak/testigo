@@ -1,6 +1,10 @@
 package prompts
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+)
 
 // UnderstandPreamble is everything round one repeats, written once.
 //
@@ -16,7 +20,7 @@ import "strings"
 //
 // Hoisting it makes the pack linear again. The agent reads the map once and
 // every prompt refers to it by step number.
-func UnderstandPreamble(paths []Path) string {
+func UnderstandPreamble(f *flowEntity.Flow, paths []Path) string {
 	var b strings.Builder
 
 	b.WriteString(`# testigo — the flow, once
@@ -31,7 +35,17 @@ reading, and you must not contradict it. If your reading of the source disagrees
 with a line here, you have misread the source.
 
 What is NOT here is why any of it exists. That is what the questions ask for.
+`)
 
+	// The schema, before the flow.
+	//
+	// It goes here because it is the cheapest information testigo owns and the
+	// most expensive for an agent to go and get: reading every migration file is
+	// the single largest avoidable cost in a round. Stating it once, up front,
+	// means no question has to carry it and no answer has to guess at it.
+	b.WriteString(Migrations(f))
+
+	b.WriteString(`
 ## The flow
 
 `)
@@ -60,6 +74,9 @@ make it fail on demand — which usually matters more than it sounds, because mo
 serious payment bugs only appear when something downstream fails.
 
 ## notes — describing one step
+
+Describe one function in business terms, for a reader who knows payments but has
+not read this repository.
 
 ## Rules
 
@@ -98,6 +115,26 @@ worse than none at all.
 
 ## externalEffect — one call that leaves the process
 
+A static analyser found a call that leaves this process. It can prove where the
+call is made and whether a test could substitute it. It cannot see what happens
+on the other side, and that is the only thing that decides whether doing it twice
+is harmless or moves money twice.
+
+You are NOT being asked whether this should be retried. That is a decision for
+the team who owns this code, and some of them have deliberately decided not to
+retry anything. You are being asked what is TRUE about the call.
+
+### Rules for every externalEffect answer
+
+1. Answer about THIS call only. Other calls get their own task.
+2. Read the implementation if it is in this repository. If it is a third-party
+   client, reason from its documented behaviour and say which you did in ` + "`basis`" + `.
+3. Answer "unknown" when you are not sure. Every default leans the same way:
+   unknown is treated as irreversible and unobservable. Assuming an effect can
+   be taken back when it cannot means a missing test and money moved twice; the
+   reverse costs one unnecessary test.
+4. Do not guess from the name. ` + "`Notify`" + ` sounds harmless and may settle a payment.
+
 ## The four questions that matter
 
 **1. Does it change state outside this process?**
@@ -130,7 +167,7 @@ Reply with one JSON object and nothing else.
   "accepts_dedup_key":      true | false | "unknown",
   "dedup_key_argument": "the parameter carrying the key, or null",
   "moves_money": true | false | "unknown",
-  "undo": { "exists": false, "symbol": null, "evidence": "" },
+  "undo": { "exists": false, "symbol": null, "proof": "" },
   "failure_modes": ["timeout", "5xx", "connection_reset", "duplicate_response"],
   "basis": "read_implementation" | "vendor_documentation" | "inference",
   "notes": ""
@@ -220,6 +257,9 @@ payment state machines get both wrong more often than any others:
   repository models any of those, the "terminal" state has outgoing edges.
 
 `)
+	b.WriteString(SharedRules())
+	b.WriteString(StateRolesPreamble)
+	b.WriteString(PaymentKindPreamble)
 
 	return b.String()
 }

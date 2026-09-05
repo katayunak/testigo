@@ -80,9 +80,13 @@ func Write(sidecarDir string, round askEntity.Round, asks []askEntity.Ask, pream
 		}
 	}
 
-	for _, a := range asks {
-		path := filepath.Join(adir, a.ID()+".md")
-		if err := os.WriteFile(path, []byte(a.Prompt), 0o644); err != nil {
+	// One file per KIND, not one per question.
+	//
+	// Sixty-six files is sixty-six turns, and a turn is the unit the bill is
+	// actually denominated in. See batch.go.
+	for _, b := range Batches(asks) {
+		path := filepath.Join(adir, b.ID()+".md")
+		if err := os.WriteFile(path, []byte(b.Prompt()), 0o644); err != nil {
 			return nil, err
 		}
 	}
@@ -112,20 +116,27 @@ func instructions(round askEntity.Round, asks []askEntity.Ask) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `# testigo — round %d (%s)
 
-You are being asked %d question(s) about this repository. Everything a Go
-compiler could already prove has been proved and is pasted into each prompt as
+You are being asked %d question(s) about this repository, grouped into %d files.
+Everything a Go compiler could already prove has been proved and is stated as
 fact. You are only being asked for the context a compiler cannot read.
 
 ## How to do this
 
-Work through the files below in the order listed. For each one:
+Read PREAMBLE.md once. Then, for each file below:
 
-1. Read `+"`asks/<id>.md`"+`.
-2. Read the actual source it points at. Every prompt names files and lines.
-3. Write your answer to `+"`answers/<id>.json`"+`.
+1. Read `+"`asks/<name>.md`"+`. It holds every question of that kind.
+2. Read the source it points at. Every question names files and lines, and
+   those are sufficient — you should not need to search the repository.
+3. Write ONE answer file, `+"`answers/<name>.json`"+`, covering all of them.
+
+**Answer each file in a single pass.** One file at a time is fine; one QUESTION
+at a time is not. Every turn re-reads everything said so far, so answering
+sixty questions in sixty turns costs far more than the questions do — that is
+where the money goes, not in the prompts.
 
 The answer must be **one JSON object and nothing else** — no prose around it, no
-markdown fence, no explanation. Each prompt ends with the exact shape expected.
+markdown fence. A file with several questions is answered by one object whose
+keys are the answer keys printed above each question.
 
 ## Rules that apply to every answer
 
@@ -135,7 +146,7 @@ markdown fence, no explanation. Each prompt ends with the exact shape expected.
   null.
 - **"unknown" is a real answer.** Prefer it to a guess. Downstream treats unknown
   as the unsafe case, which is the correct default when money is involved.
-- **Do not fix anything.** askEntity.Round %d is read-only. Do not edit source, do not
+- **Do not fix anything.** This round is read-only. Do not edit source, do not
   suggest patches.
 - **Do not answer the example.** Every prompt shows a filled-in example of the
   JSON shape. It uses placeholder names like `+"`example.com/pay`"+`. If those appear
@@ -143,7 +154,7 @@ markdown fence, no explanation. Each prompt ends with the exact shape expected.
 
 ## The questions
 
-`, int(round), round, len(asks), int(round))
+`, int(round), round, len(asks), len(Batches(asks)))
 
 	// Grouped by kind, not listed one by one.
 	//
@@ -152,24 +163,11 @@ markdown fence, no explanation. Each prompt ends with the exact shape expected.
 	// already holds the list in a form a program can read, and `ls asks/` holds
 	// it in a form a person can read. A prose index of a directory is the
 	// directory, retyped and paid for.
-	byKind := map[askEntity.Kind][]askEntity.Ask{}
-	var order []askEntity.Kind
-	for _, a := range asks {
-		if _, seen := byKind[a.Kind]; !seen {
-			order = append(order, a.Kind)
-		}
-		byKind[a.Kind] = append(byKind[a.Kind], a)
+	for _, batch := range Batches(asks) {
+		fmt.Fprintf(&b, "`asks/%s.md`  ->  `answers/%s`   (%d question(s))\n",
+			batch.ID(), batch.AnswerFile(), len(batch.Asks))
 	}
-	for _, k := range order {
-		group := byKind[k]
-		fmt.Fprintf(&b, "**%s** — %d question(s)\n", k, len(group))
-		// Name one so the shape of the filename is obvious, then stop.
-		fmt.Fprintf(&b, "  `asks/%s.md`  →  `answers/%s`\n", group[0].ID(), group[0].AnswerFile())
-		if len(group) > 1 {
-			fmt.Fprintf(&b, "  ...and %d more of the same shape. `manifest.json` lists them all.\n", len(group)-1)
-		}
-		b.WriteString("\n")
-	}
+	b.WriteString("\n")
 
 	b.WriteString(`## Read PREAMBLE.md once, then keep it in front of you
 
@@ -184,7 +182,7 @@ than once per question, and on a pack this size that is most of the bill.
 `)
 	b.WriteString("## When you are done\n\nRun:\n\n```sh\ntestigo collect\n```\n\n")
 	b.WriteString(`It validates every answer against the facts — that the states you listed are
-the states the compiler found, that named symbols carry evidence, that nothing
+the states the compiler found, that named symbols carry proof, that nothing
 came back as the placeholder example. Anything malformed is reported with the
 exact problem so you can fix that one file rather than redo the round.
 `)

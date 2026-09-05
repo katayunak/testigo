@@ -25,7 +25,7 @@ import (
 // depends on knowing which type is money and which call commits the money. If that
 // answer is wrong, everything built on it is wrong, and it is far cheaper to
 // catch at one prompt than at twenty.
-func Plan(f *flowEntity.Flow, k *askEntity.Knowledge, round askEntity.Round) []askEntity.Ask {
+func Plan(f *flowEntity.Flow, k *askEntity.AgentResponse, round askEntity.Round) []askEntity.Ask {
 	paths := prompts.Paths(f)
 
 	switch round {
@@ -37,18 +37,47 @@ func Plan(f *flowEntity.Flow, k *askEntity.Knowledge, round askEntity.Round) []a
 	return nil
 }
 
+// MaxPromptChars caps one question file.
+//
+// This is the third lever on the bill, and the smallest of the three. Hoisting
+// the shared half into PREAMBLE.md removed what was repeated; batching by kind
+// removed turns, which is the term that actually dominates. This one only stops
+// a single pathological prompt from swallowing a round — the case that produced
+// it was one state machine with 122 write sites, where the question is what ROLE
+// a state plays and the 123rd example answers nothing the first three did not.
+//
+// 24000 characters is roughly 6k tokens. It is set where it does not fire on a
+// normal prompt, because a budget that trims every prompt is a budget that is
+// silently deciding what the agent may know. Proof-priority context is never
+// cut, and anything that is cut is named in the prompt with the file that holds
+// it — an agent told what is missing does one lookup, an agent left to notice
+// reads the repository.
+//
+// Zero turns it off.
+var MaxPromptChars = 24000
+
+// render applies the budget and writes the prompt out. Every ask goes through
+// here, so there is exactly one place where a prompt's size is decided.
+func render(p *prompts.Prompt) string {
+	if p == nil {
+		return ""
+	}
+	p.Trim(MaxPromptChars)
+	return p.Render()
+}
+
 func planUnderstand(f *flowEntity.Flow, paths []prompts.Path) []askEntity.Ask {
 	var asks []askEntity.Ask
 
-	// Ask about the money model only where the evidence did not settle it. On a
+	// Ask about the money model only where the proof did not settle it. On a
 	// repository with one obvious money type and a client-supplied key, most of
 	// this question disappears.
-	_, unresolved := askEntity.FromEvidence(f)
+	_, unresolved := askEntity.FromScan(f)
 	asks = append(asks, askEntity.Ask{
-		Kind:   askEntity.KindBinding,
+		Kind:   askEntity.KindMoneyModel,
 		Round:  askEntity.RoundUnderstand,
-		Title:  bindingTitle(unresolved),
-		Prompt: prompts.Binding(f, paths, unresolved),
+		Title:  moneyModelTitle(unresolved),
+		Prompt: render(prompts.MoneyModel(f, paths, unresolved)),
 	})
 
 	// Which entity the flow moves, and which of its several IDs a retry
@@ -60,17 +89,31 @@ func planUnderstand(f *flowEntity.Flow, paths []prompts.Path) []askEntity.Ask {
 			Kind:   askEntity.KindMainEntity,
 			Round:  askEntity.RoundUnderstand,
 			Title:  entityTitle(entities),
-			Prompt: prompts.MainEntity(f, entities),
+			Prompt: render(prompts.MainEntity(f, entities)),
 		})
 	}
 
-	for _, m := range f.Machines {
+	// The questions this KIND of payment system raises. Which kind it is was
+	// decided in Go from the schema and the type names, so only the questions
+	// that can apply to it are ever written to a file.
+	if class := askEntity.Classify(f); len(class.Questions()) > 0 {
 		asks = append(asks, askEntity.Ask{
-			Kind:    askEntity.KindTransitions,
+			Kind:    askEntity.KindPaymentKind,
 			Round:   askEntity.RoundUnderstand,
-			Title:   fmt.Sprintf("Which transitions of %s must be impossible? (%d states)", shortType(m.Type), len(m.States)),
+			Title:   paymentKindTitle(class),
+			Subject: string(class.Spine),
+			Prompt:  render(prompts.PaymentKind(f, class)),
+		})
+	}
+
+	for _, m := range f.States {
+		asks = append(asks, askEntity.Ask{
+			Kind:  askEntity.KindStateRoles,
+			Round: askEntity.RoundUnderstand,
+			// N answers, not N x N cells. testigo derives the matrix.
+			Title:   fmt.Sprintf("What part does each of %s's %d states play?", shortType(m.Type), len(m.States)),
 			Subject: m.Type,
-			Prompt:  prompts.Transitions(f, m, paths),
+			Prompt:  render(prompts.StateRoles(f, m)),
 		})
 	}
 
@@ -84,7 +127,7 @@ func planUnderstand(f *flowEntity.Flow, paths []prompts.Path) []askEntity.Ask {
 			Round:   askEntity.RoundUnderstand,
 			Title:   "Is a retry of " + target + " free, or does it move money twice?",
 			Subject: target,
-			Prompt:  prompts.ExternalEffect(f, target, seamsByTarget[target], paths),
+			Prompt:  render(prompts.ExternalEffect(f, target, seamsByTarget[target], paths)),
 		})
 	}
 
@@ -141,24 +184,37 @@ func planUnderstand(f *flowEntity.Flow, paths []prompts.Path) []askEntity.Ask {
 			Title:   "What does " + node.Ref.Symbol + " do, in business terms?",
 			Subject: id,
 			ForHash: node.Ref.BodyHash,
-			Prompt:  prompts.Notes(f, node, ctx.step, ctx.path),
+			Prompt:  render(prompts.Notes(f, node, ctx.step, ctx.path)),
 		})
 	}
 	return asks
 }
 
-// bindingTitle says what is actually left to decide, so a person scanning the
+// paymentKindTitle names the kinds, so a person reading `testigo ask` output can
+// see whether the classification is wrong BEFORE paying for the answers.
+func paymentKindTitle(c askEntity.Classification) string {
+	names := []string{c.Spine.Human()}
+	for _, m := range c.Motions {
+		names = append(names, m.Human())
+	}
+	for _, o := range c.Overlays {
+		names = append(names, o.Human())
+	}
+	return fmt.Sprintf("%d questions for a %s", len(c.Questions()), strings.Join(names, " + "))
+}
+
+// moneyModelTitle says what is actually left to decide, so a person scanning the
 // manifest can see at a glance whether phase 1 did its job.
-func bindingTitle(unresolved []string) string {
+func moneyModelTitle(unresolved []string) string {
 	if len(unresolved) == 0 {
-		return "Confirm the money model (both candidates decided by evidence) and name the transfer"
+		return "Confirm the money model (both candidates decided by proof) and name the transfer"
 	}
 	return "Decide " + strings.Join(unresolved, " and ") + ", then name the transfer"
 }
 
-func planGenerate(f *flowEntity.Flow, k *askEntity.Knowledge, paths []prompts.Path) []askEntity.Ask {
+func planGenerate(f *flowEntity.Flow, k *askEntity.AgentResponse, paths []prompts.Path) []askEntity.Ask {
 	var asks []askEntity.Ask
-	for _, c := range testPlan.Select(f, bindingsOf(k)) {
+	for _, c := range testPlan.Select(f, factsOf(k)) {
 		if !c.Runnable() {
 			continue // reported in the summary, not paid for as a prompt
 		}
@@ -167,7 +223,7 @@ func planGenerate(f *flowEntity.Flow, k *askEntity.Knowledge, paths []prompts.Pa
 			Round:   askEntity.RoundGenerate,
 			Title:   c.Scenario.Name,
 			Subject: c.Scenario.ID,
-			Prompt:  prompts.TestCase(c, f),
+			Prompt:  render(prompts.TestCase(c, f)),
 		})
 	}
 	return asks
@@ -177,21 +233,21 @@ func planGenerate(f *flowEntity.Flow, k *askEntity.Knowledge, paths []prompts.Pa
 // report what could not be tested and why. A short list with no explanation
 // reads as "there was not much to test"; the same list with eleven blocked
 // entries reads as "your seams are concrete", which is the actionable version.
-func Cases(f *flowEntity.Flow, k *askEntity.Knowledge, rules *config.Rules) []planEntity.TestCase {
-	return testPlan.Select(f, BindingsFrom(k, rules))
+func Cases(f *flowEntity.Flow, k *askEntity.AgentResponse, rules *config.Rules) []planEntity.TestCase {
+	return testPlan.Select(f, FactsFrom(k, rules))
 }
 
-// bindingsOf narrows round one's answers to the fields the catalog filters on.
-func bindingsOf(k *askEntity.Knowledge) planEntity.Bindings {
-	return BindingsFrom(k, nil)
+// factsOf narrows round one's answers to the fields the catalog filters on.
+func factsOf(k *askEntity.AgentResponse) planEntity.Facts {
+	return FactsFrom(k, nil)
 }
 
-// BindingsFrom merges what round one answered with what the team wrote down.
+// FactsFrom merges what round one answered with what the team wrote down.
 //
 // The rules file wins where the two disagree, because a person wrote it on
 // purpose and an agent inferred the other one.
-func BindingsFrom(k *askEntity.Knowledge, rules *config.Rules) planEntity.Bindings {
-	b := planEntity.Bindings{Skipped: map[string]string{}}
+func FactsFrom(k *askEntity.AgentResponse, rules *config.Rules) planEntity.Facts {
+	b := planEntity.Facts{Skipped: map[string]string{}}
 	if rules != nil {
 		b.Domain = rules.Domain
 		b.MoneyMovement = rules.MoneyMovement.Description
@@ -210,16 +266,16 @@ func BindingsFrom(k *askEntity.Knowledge, rules *config.Rules) planEntity.Bindin
 			b.Skipped[sk.Scenario] = why
 		}
 	}
-	if k == nil || k.Binding == nil {
+	if k == nil || k.MoneyModel == nil {
 		return b
 	}
-	fromAgent := planEntity.Bindings{
+	fromAgent := planEntity.Facts{
 		Known:          true,
-		MoneyType:      k.Binding.Money.Type,
-		BalanceFunc:    k.Binding.BalanceFunc.Symbol,
-		TransferFunc:   k.Binding.TransferFunc.Symbol,
-		IdempotencyKey: k.Binding.Idempotency.KeyField,
-		Uniqueness:     k.Binding.Idempotency.Uniqueness,
+		MoneyType:      k.MoneyModel.Money.Type,
+		BalanceFunc:    k.MoneyModel.BalanceFunc.Symbol,
+		TransferFunc:   k.MoneyModel.TransferFunc.Symbol,
+		IdempotencyKey: k.MoneyModel.Idempotency.KeyField,
+		Uniqueness:     k.MoneyModel.Idempotency.Uniqueness,
 	}
 	b.Known = true
 	b.MoneyType = fromAgent.MoneyType
@@ -237,12 +293,12 @@ func BindingsFrom(k *askEntity.Knowledge, rules *config.Rules) planEntity.Bindin
 // askEntity.Round two is gated rather than best-effort on purpose. Generating tests from
 // half-collected context produces tests that look complete and check the wrong
 // thing, which is the failure this whole two-round split exists to prevent.
-func BlockedReason(f *flowEntity.Flow, k *askEntity.Knowledge) string {
-	if k == nil || k.Binding == nil {
-		return "the money model has not been named yet — answer binding.json first"
+func BlockedReason(f *flowEntity.Flow, k *askEntity.AgentResponse) string {
+	if k == nil || k.MoneyModel == nil {
+		return "the money model has not been named yet — answer moneyModel.json first"
 	}
 	var missing []string
-	for _, m := range f.Machines {
+	for _, m := range f.States {
 		if k.Transitions[m.Type] == nil {
 			missing = append(missing, "transitions for "+shortType(m.Type))
 		}
@@ -261,25 +317,25 @@ func BlockedReason(f *flowEntity.Flow, k *askEntity.Knowledge) string {
 	return "still unanswered: " + strings.Join(missing, "; ")
 }
 
-func renderKnowledge(k *askEntity.Knowledge) string {
+func renderAgentResponse(k *askEntity.AgentResponse) string {
 	if k == nil {
 		return "(none)\n"
 	}
 	var b strings.Builder
-	if k.Binding != nil {
-		bd := k.Binding
+	if k.MoneyModel != nil {
+		bd := k.MoneyModel
 		b.WriteString("MONEY MODEL\n")
 		fmt.Fprintf(&b, "  money type:      %s (%s)\n", orNone(bd.Money.Type), orNone(bd.Money.Representation))
 		fmt.Fprintf(&b, "  amount field:    %s\n", orNone(bd.Money.AmountField))
 		fmt.Fprintf(&b, "  currency:        %s\n", orNone(bd.Money.Currency))
-		fmt.Fprintf(&b, "  transfer:        %s   %s\n", orNone(bd.TransferFunc.Symbol), bd.TransferFunc.Evidence)
-		fmt.Fprintf(&b, "  balance read:    %s   %s\n", orNone(bd.BalanceFunc.Symbol), bd.BalanceFunc.Evidence)
+		fmt.Fprintf(&b, "  transfer:        %s   %s\n", orNone(bd.TransferFunc.Symbol), bd.TransferFunc.At)
+		fmt.Fprintf(&b, "  balance read:    %s   %s\n", orNone(bd.BalanceFunc.Symbol), bd.BalanceFunc.At)
 		fmt.Fprintf(&b, "  entity id field: %s\n", orNone(bd.EntityIDField))
 		b.WriteString("\nIDEMPOTENCY\n")
 		fmt.Fprintf(&b, "  key source:      %s\n", orNone(bd.Idempotency.KeySource))
 		fmt.Fprintf(&b, "  key field:       %s\n", orNone(bd.Idempotency.KeyField))
 		fmt.Fprintf(&b, "  stored in:       %s\n", orNone(bd.Idempotency.StoredIn))
-		fmt.Fprintf(&b, "  uniqueness:      %s   %s\n", orNone(bd.Idempotency.Uniqueness), bd.Idempotency.Evidence)
+		fmt.Fprintf(&b, "  uniqueness:      %s   %s\n", orNone(bd.Idempotency.Uniqueness), bd.Idempotency.Proof)
 		if bd.Idempotency.Uniqueness == "app_check_then_write" {
 			b.WriteString("\n  NOTE: uniqueness is enforced by reading and then writing in application\n")
 			b.WriteString("  code, not by a database constraint. Two concurrent requests can both pass\n")
@@ -343,7 +399,7 @@ func renderKnowledge(k *askEntity.Knowledge) string {
 				fmt.Fprintf(&b, "    the far side deduplicates on %s\n", orNone(fe.DedupKeyArgument))
 			}
 			if fe.Undo.Exists {
-				fmt.Fprintf(&b, "    undone by %s (%s)\n", fe.Undo.Symbol, fe.Undo.Evidence)
+				fmt.Fprintf(&b, "    undone by %s (%s)\n", fe.Undo.Symbol, fe.Undo.Proof)
 			}
 			if len(fe.FailureModes) > 0 {
 				fmt.Fprintf(&b, "    fails as: %s\n", strings.Join(fe.FailureModes, ", "))
@@ -395,7 +451,7 @@ func slug(s string) string {
 	return out
 }
 
-// needsEntityQuestion is false when the evidence already settled it: no
+// needsEntityQuestion is false when the proof already settled it: no
 // lifecycle entity at all, or a single identifier on a single entity, which is
 // not a choice.
 func needsEntityQuestion(entities []prompts.Entity) bool {
@@ -424,7 +480,7 @@ func entityTitle(entities []prompts.Entity) string {
 func Preamble(f *flowEntity.Flow, round askEntity.Round) string {
 	switch round {
 	case askEntity.RoundUnderstand:
-		return prompts.UnderstandPreamble(prompts.Paths(f))
+		return prompts.UnderstandPreamble(f, prompts.Paths(f))
 	case askEntity.RoundGenerate:
 		return prompts.Preamble
 	}

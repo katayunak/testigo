@@ -19,7 +19,7 @@ import (
 // fault-injected should be told that in the same list as the tests it did get,
 // because "your seams are concrete so eleven of these are impossible" is more
 // useful than a short list with no explanation.
-func Select(f *flowEntity.Flow, b planEntity.Bindings) []planEntity.TestCase {
+func Select(f *flowEntity.Flow, b planEntity.Facts) []planEntity.TestCase {
 	seamsByKind := map[flowEntity.SeamKind][]flowEntity.Seam{}
 	var injectable []flowEntity.Seam
 	for _, s := range f.Seams {
@@ -79,8 +79,8 @@ func Select(f *flowEntity.Flow, b planEntity.Bindings) []planEntity.TestCase {
 			c.Entry = &e
 		}
 		c.Seams = scopeSeams(candidates, reachable)
-		if sc.Requires.StateMachine && len(f.Machines) > 0 {
-			m := f.Machines[0]
+		if sc.Requires.StateMachine && len(f.States) > 0 {
+			m := f.States[0]
 			c.States = &m
 		}
 

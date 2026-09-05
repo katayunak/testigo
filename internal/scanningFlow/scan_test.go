@@ -159,7 +159,7 @@ func TestStateMachineExtraction(t *testing.T) {
 	// lifecycle. Asking an agent which of its transitions are illegal would be
 	// nonsense that costs money.
 	byType := map[string]flowEntity.StateMachine{}
-	for _, m := range res.Flow.Machines {
+	for _, m := range res.Flow.States {
 		byType[shortName(m.Type)] = m
 	}
 	for _, want := range []string{"PaymentStatus", "SettlementMode"} {
@@ -529,7 +529,7 @@ func scanRepo(t *testing.T, root string, entries ...flowEntity.EntryPoint) *flow
 //
 // The finding used to run a name regex over every struct field, so a `bool`
 // called AcceptsDedupKey was reported as a critical missing unique index while
-// the actual key went unmentioned. A finding now needs the same evidence a
+// the actual key went unmentioned. A finding now needs the same proof a
 // decision needs.
 func TestFindingsAgreeWithTheScorer(t *testing.T) {
 	root := writeRepo(t, map[string]string{
@@ -648,9 +648,9 @@ func (s *Server) Handle() error {
 	flow := scanRepo(t, root, entry("example.com/st/api", "(*Server).Handle"))
 
 	var machine *flowEntity.StateMachine
-	for i := range flow.Machines {
-		if strings.HasSuffix(flow.Machines[i].Type, "domain.Status") {
-			machine = &flow.Machines[i]
+	for i := range flow.States {
+		if strings.HasSuffix(flow.States[i].Type, "domain.Status") {
+			machine = &flow.States[i]
 		}
 	}
 	if machine == nil {
@@ -725,7 +725,7 @@ func Handle(p *domain.Payment) error {
 
 	flow := scanRepo(t, root, entry("example.com/lc/api", "Handle"))
 
-	for _, m := range flow.Machines {
+	for _, m := range flow.States {
 		if strings.HasSuffix(m.Type, "domain.Phase") {
 			t.Errorf("Phase became a state machine with %d write sites; "+
 				"nothing assigns it, so there is no lifecycle to ask about", len(m.Writes))
@@ -733,7 +733,7 @@ func Handle(p *domain.Payment) error {
 	}
 
 	var found bool
-	for _, m := range flow.Machines {
+	for _, m := range flow.States {
 		if strings.HasSuffix(m.Type, "domain.PaymentStatus") {
 			found = true
 		}

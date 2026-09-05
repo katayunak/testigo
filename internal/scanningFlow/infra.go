@@ -46,10 +46,14 @@ func Infra(root string) flowEntity.Infra {
 				return nil
 			}
 
-			cs := parseConstraints(string(body), rel)
-			if len(cs) > 0 {
-				out.Constraints = append(out.Constraints, cs...)
-			}
+			out.Constraints = append(out.Constraints, parseConstraints(string(body), rel)...)
+
+			tables, fks, checks := parseSchema(string(body), rel)
+			out.Tables = append(out.Tables, tables...)
+			out.ForeignKeys = append(out.ForeignKeys, fks...)
+			out.Checks = append(out.Checks, checks...)
+			out.MigrationFiles++
+
 			if dir := filepath.Dir(rel); !seenDir[dir] {
 				seenDir[dir] = true
 				out.MigrationDirs = append(out.MigrationDirs, dir)

@@ -51,7 +51,7 @@ func Paths(f *flowEntity.Flow) []Path {
 		seamsBy[s.In.ID()] = append(seamsBy[s.In.ID()], s)
 	}
 	statesBy := map[string][]flowEntity.StateWrite{}
-	for _, m := range f.Machines {
+	for _, m := range f.States {
 		for _, w := range m.Writes {
 			statesBy[w.In.ID()] = append(statesBy[w.In.ID()], w)
 		}

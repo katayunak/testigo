@@ -54,7 +54,7 @@ func TestUnchangedRepoNeedsNoAgent(t *testing.T) {
 }
 
 // A changed function must NOT keep its old notes. This is the safety half of
-// the trade: a note that describes the previous body is not evidence about the
+// the trade: a note that describes the previous body is not proof about the
 // new one, and a plausible-but-wrong description is more dangerous in a report
 // than an admitted gap.
 func TestChangedFunctionDropsItsNotes(t *testing.T) {

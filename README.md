@@ -1,5 +1,6 @@
 # TESTIGO
 Test your *GO Fintech* code with some help from your *AGENT!!*
+So Testigo becomes the backend behind the tools
 
 ## Install and run
 

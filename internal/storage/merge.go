@@ -35,7 +35,7 @@ func Merge(prev, fresh *flowEntity.Flow, ix *codeRef.Index) MergeStats {
 
 		case codeRef.Stale:
 			// Deliberately do NOT carry the notes over. A note that describes
-			// the old body is not evidence about the new one, and a plausible
+			// the old body is not proof about the new one, and a plausible
 			// but wrong note is more dangerous than a missing one.
 			mergeStats.Stale++
 

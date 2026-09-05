@@ -4,37 +4,79 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/katayunak/testigo/internal/testPlan/planEntity"
+	"regexp"
 	"strings"
 
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
-
 	"github.com/katayunak/testigo/internal/testPlan"
+	"github.com/katayunak/testigo/internal/testPlan/planEntity"
 )
 
-// KnowledgeSchema is the on-disk version of .testigo/knowledge.json.
-const KnowledgeSchema = 1
+// AgentResponseSchema is the on-disk version of .testigo/agentResponse.json.
+const AgentResponseSchema = 1
 
-// Knowledge is everything an agent told us, kept separate from everything the
-// compiler proved.
-//
-// The separation is deliberate and is the most important structural decision in
-// this package. flowEntity.Flow holds facts: reproducible, checkable, free to
-// recompute. Knowledge holds context: expensive, fallible, and worth exactly as
-// much as the reasoning behind it. Merging them into one file would make the
-// report unable to tell a reader which of its claims are evidence and which are
-// opinion — and for a tool whose only product is trust, that distinction is the
-// product.
-type Knowledge struct {
-	SchemaVersion   int                              `json:"schema_version"`
-	GeneratedAt     string                           `json:"generated_at,omitempty"`
-	Binding         *BindingAnswer                   `json:"binding,omitempty"`
-	MainEntity      *MainEntityAnswer                `json:"main_entity,omitempty"`
-	Transitions     map[string]*TransitionsAnswer    `json:"transitions,omitempty"`
+// AgentResponse is everything an agent told us
+type AgentResponse struct {
+	SchemaVersion int    `json:"schema_version"`
+	GeneratedAt   string `json:"generated_at,omitempty"`
+
+	MoneyModel  *MoneyModelAnswer             `json:"money_model,omitempty"`
+	MainEntity  *MainEntityAnswer             `json:"main_entity,omitempty"`
+	Transitions map[string]*TransitionsAnswer `json:"transitions,omitempty"`
+	// StateRoles is what was actually asked for. Transitions above is derived
+	// from it, and kept because round two and the report already read that.
+	StateRoles      map[string]*StateRolesAnswer     `json:"state_roles,omitempty"`
 	ExternalEffects map[string]*ExternalEffectAnswer `json:"external_effects,omitempty"`
+
+	// PaymentKind is what kind of payment system this is, and the answers to
+	// the questions that only that kind raises. Keyed by question ID.
+	Classification *Classification            `json:"classification,omitempty"`
+	PaymentKind    map[string]*QuestionAnswer `json:"payment_kind,omitempty"`
 }
 
-// FromEvidence fills in whatever phase 1 already proved, and reports what is
+// PaymentKindAnswer is one file of answers to the per-kind questions.
+type PaymentKindAnswer struct {
+	Answers map[string]*QuestionAnswer `json:"answers"`
+	Notes   string                     `json:"notes,omitempty"`
+}
+
+// ValidateAgainst checks every question was answered in the right shape.
+//
+// Coherence only. Nothing here can tell whether an airtime top-up really is
+// irreversible — that is the whole reason the question is being asked — but it
+// can tell that a true/false question came back without a verdict, which would
+// otherwise become a silent "false" downstream.
+func (a *PaymentKindAnswer) ValidateAgainst(qs []Question) error {
+	var bad []string
+	byID := map[string]Question{}
+	for _, q := range qs {
+		byID[q.ID] = q
+	}
+	for id, ans := range a.Answers {
+		q, ok := byID[id]
+		if !ok {
+			bad = append(bad, fmt.Sprintf("%q is not one of the questions asked", id))
+			continue
+		}
+		if ans == nil {
+			bad = append(bad, fmt.Sprintf("%s has a null answer", id))
+			continue
+		}
+		if err := ans.Validate(q); err != nil {
+			bad = append(bad, err.Error())
+		}
+	}
+	for _, q := range qs {
+		if _, ok := a.Answers[q.ID]; !ok {
+			// Named rather than counted. "3 missing" sends a person hunting;
+			// naming them says which file to open.
+			bad = append(bad, fmt.Sprintf("%s was not answered: say `unknown` rather than leaving it out, because a missing key and a question you never reached look identical", q.ID))
+		}
+	}
+	return join(bad)
+}
+
+// FromScan fills in whatever phase 1 already proved, and reports what is
 // left over.
 //
 // This is the answer to a fair criticism: round one was asking an agent which
@@ -43,12 +85,12 @@ type Knowledge struct {
 // because it also introduces a chance of getting a WORSE answer than the one
 // you threw away.
 //
-// The rule now: if the evidence decides it, it is a fact and no question is
-// asked. If the evidence is close, the agent gets a narrow multiple-choice
-// question with the evidence attached. Only a genuinely empty result produces an
+// The rule now: if the proof decides it, it is a fact and no question is
+// asked. If the proof is close, the agent gets a narrow multiple-choice
+// question with the proof attached. Only a genuinely empty result produces an
 // open question.
-func FromEvidence(f *flowEntity.Flow) (*Knowledge, []string) {
-	k := NewKnowledge()
+func FromScan(f *flowEntity.Flow) (*AgentResponse, []string) {
+	k := NewAgentResponse()
 	var unresolved []string
 
 	money, moneyDecided := f.MoneyTypes.Decided()
@@ -58,19 +100,19 @@ func FromEvidence(f *flowEntity.Flow) (*Knowledge, []string) {
 		return k, []string{"money type", "idempotency key"}
 	}
 
-	b := &BindingAnswer{}
+	b := &MoneyModelAnswer{}
 	if moneyDecided {
 		b.Money.Type = money.Owner + "." + money.Name
 		b.Money.AmountField = money.Name
 		b.Money.Representation = representationOf(money.Type)
-		b.Money.Evidence = fmt.Sprintf("%s:%d", money.File, money.Line)
+		b.Money.Proof = fmt.Sprintf("%s:%d", money.File, money.Line)
 	} else {
 		unresolved = append(unresolved, "money type")
 	}
 
 	if idemDecided {
 		b.Idempotency.KeyField = idem.Name
-		b.Idempotency.Evidence = fmt.Sprintf("%s:%d", idem.File, idem.Line)
+		b.Idempotency.Proof = fmt.Sprintf("%s:%d", idem.File, idem.Line)
 		b.Idempotency.KeySource = "request"
 		// Uniqueness is not a call the compiler cannot make. Either a migration constrains the
 		// column or it does not, and infra.go already read the migrations.
@@ -86,7 +128,7 @@ func FromEvidence(f *flowEntity.Flow) (*Knowledge, []string) {
 	}
 
 	if b.Money.Type != "" || b.Idempotency.KeyField != "" {
-		k.Binding = b
+		k.MoneyModel = b
 	}
 	return k, unresolved
 }
@@ -106,45 +148,49 @@ func representationOf(goType string) string {
 	return "unknown"
 }
 
-func NewKnowledge() *Knowledge {
-	return &Knowledge{
-		SchemaVersion:   KnowledgeSchema,
+func NewAgentResponse() *AgentResponse {
+	return &AgentResponse{
+		SchemaVersion:   AgentResponseSchema,
 		Transitions:     map[string]*TransitionsAnswer{},
+		StateRoles:      map[string]*StateRolesAnswer{},
 		ExternalEffects: map[string]*ExternalEffectAnswer{},
+		PaymentKind:     map[string]*QuestionAnswer{},
 	}
 }
 
-// Evidence is a symbol plus the file:line that proves it exists. Every claim an
+// Proof is a symbol plus the file:line that proves it exists. Every claim an
 // agent makes about this repository carries one, so a reviewer can check it in
 // seconds instead of taking it on faith.
-type Evidence struct {
-	Symbol   string `json:"symbol"`
-	Evidence string `json:"evidence"`
+type Proof struct {
+	Symbol string `json:"symbol"`
+	// At is the file:line where the symbol is declared, so a reviewer can
+	// check the claim in seconds instead of taking it on faith.
+	At string `json:"at"`
 }
 
-type MoneyBinding struct {
+type Money struct {
 	Type           string `json:"type"`
 	AmountField    string `json:"amount_field"`
 	Representation string `json:"representation"` // minor_units_int | decimal | float | unknown
 	Currency       string `json:"currency"`
-	Evidence       string `json:"evidence"`
+	Proof          string `json:"proof"`
 }
 
-type IdempotencyBinding struct {
+type Idempotency struct {
 	KeySource  string `json:"key_source"`
 	KeyField   string `json:"key_field"`
 	StoredIn   string `json:"stored_in"`
 	Uniqueness string `json:"uniqueness"` // db_constraint | app_check_then_write | none | unknown
-	Evidence   string `json:"evidence"`
+	Proof      string `json:"proof"`
 }
 
-type BindingAnswer struct {
-	Money         MoneyBinding       `json:"money"`
-	TransferFunc  Evidence           `json:"transfer_func"`
-	BalanceFunc   Evidence           `json:"balance_func"`
-	Idempotency   IdempotencyBinding `json:"idempotency"`
-	EntityIDField string             `json:"entity_id_field"`
-	Notes         string             `json:"notes"`
+type MoneyModelAnswer struct {
+	Money         Money       `json:"money"`
+	TransferFunc  Proof       `json:"transfer_func"`
+	BalanceFunc   Proof       `json:"balance_func"`
+	Idempotency   Idempotency `json:"idempotency"`
+	EntityIDField string      `json:"entity_id_field"`
+	Notes         string      `json:"notes"`
 }
 
 // Validate rejects answers that would silently produce a useless next round.
@@ -153,7 +199,7 @@ type BindingAnswer struct {
 // the agent named the right function. What it can do is refuse an answer that
 // is not even internally consistent, which catches the common failure of a
 // model returning the example from the prompt.
-func (a *BindingAnswer) Validate() error {
+func (a *MoneyModelAnswer) Validate() error {
 	var bad []string
 	switch a.Money.Representation {
 	case "minor_units_int", "decimal", "float", "unknown", "":
@@ -165,11 +211,11 @@ func (a *BindingAnswer) Validate() error {
 	default:
 		bad = append(bad, fmt.Sprintf("idempotency.uniqueness %q is not one of db_constraint, app_check_then_write, none, unknown", a.Idempotency.Uniqueness))
 	}
-	if a.Money.Type != "" && a.Money.Evidence == "" {
-		bad = append(bad, "money.type was named but money.evidence is empty: every claim needs a file:line")
+	if a.Money.Type != "" && a.Money.Proof == "" {
+		bad = append(bad, "money.type was named but money.proof is empty: every claim needs a file:line")
 	}
-	if a.TransferFunc.Symbol != "" && a.TransferFunc.Evidence == "" {
-		bad = append(bad, "transfer_func was named but has no evidence")
+	if a.TransferFunc.Symbol != "" && a.TransferFunc.At == "" {
+		bad = append(bad, "transfer_func was named but has no proof")
 	}
 	// The example values from the prompt coming back verbatim means the model
 	// answered the illustration instead of the repository.
@@ -344,9 +390,9 @@ type ExternalEffectAnswer struct {
 
 	// Undo is the compensating action, if one exists.
 	Undo struct {
-		Exists   bool   `json:"exists"`
-		Symbol   string `json:"symbol"`
-		Evidence string `json:"evidence"`
+		Exists bool   `json:"exists"`
+		Symbol string `json:"symbol"`
+		Proof  string `json:"proof"`
 	} `json:"undo"`
 
 	// MovesMoney is about THIS repository's meaning of money movement, which is
@@ -491,23 +537,31 @@ func join(bad []string) error {
 // identifies a repeat of the same request.
 type MainEntityAnswer struct {
 	MainEntity struct {
-		Struct   string `json:"struct"`
-		Package  string `json:"package"`
-		Evidence string `json:"evidence"`
-		Why      string `json:"why"`
+		Struct  string `json:"struct"`
+		Package string `json:"package"`
+		Proof   string `json:"proof"`
+		Why     string `json:"why"`
 	} `json:"main_entity"`
 
 	IdempotencyKey struct {
 		Field            string          `json:"field"`
-		Evidence         string          `json:"evidence"`
+		Proof            string          `json:"proof"`
 		SuppliedBy       string          `json:"supplied_by"`
 		ReadBeforeActing json.RawMessage `json:"read_before_acting"`
 		Confidence       string          `json:"confidence"`
 	} `json:"idempotency_key"`
 
 	OtherIdentifiers []struct {
-		Field      string `json:"field"`
-		Purpose    string `json:"purpose"`
+		Field   string `json:"field"`
+		Purpose string `json:"purpose"`
+		// Proof is required, like every other claim in this pack.
+		//
+		// It was not, and that is exactly where a wrong answer got through. On
+		// a real recharge service the agent rejected Order.OrderID because of a
+		// "uuid.NewString() fallback" — a real mechanism, in a function the
+		// order path never calls. Every field the validator policed came back
+		// clean; the false claim lived in the one field nothing checked.
+		Proof      string `json:"proof"`
 		CouldBeKey bool   `json:"could_be_key"`
 	} `json:"other_identifiers"`
 
@@ -523,8 +577,8 @@ func (a *MainEntityAnswer) Validate() error {
 
 	if a.MainEntity.Struct == "" {
 		bad = append(bad, "main_entity.struct is empty: the flow moves something, name it")
-	} else if a.MainEntity.Evidence == "" {
-		bad = append(bad, "main_entity was named but has no evidence: every claim needs a file:line")
+	} else if a.MainEntity.Proof == "" {
+		bad = append(bad, "main_entity was named but has no proof: every claim needs a file:line")
 	}
 
 	switch {
@@ -535,16 +589,162 @@ func (a *MainEntityAnswer) Validate() error {
 		// question — and the two lead to opposite tests.
 		bad = append(bad, "no idempotency key was named and no_key_reason is empty: "+
 			"if there is no deduplication key, say what stops duplicates instead, or say that nothing does")
-	case a.IdempotencyKey.Field != "" && a.IdempotencyKey.Evidence == "":
-		bad = append(bad, "idempotency_key.field was named but has no evidence: "+
+	case a.IdempotencyKey.Field != "" && a.IdempotencyKey.Proof == "":
+		bad = append(bad, "idempotency_key.field was named but has no proof: "+
 			"name the line it arrives on and the line it is read back on")
 	case a.IdempotencyKey.Field != "" && a.IdempotencyKey.SuppliedBy == "generated":
 		bad = append(bad, "a value this process generates cannot deduplicate anything, "+
 			"because a retry produces a different one")
 	}
 
+	// D — the same field cannot be the key and not the key.
+	//
+	// This is not a hypothetical. An agent named OrderCompleteRequest.OrderId
+	// as the idempotency key and, in the same answer, listed Order.OrderID
+	// under other_identifiers with could_be_key false. They are the same value:
+	// completeOrder.go assigns one directly from the other. Two verdicts on one
+	// field is a contradiction the reader has to catch, and a reader did.
+	if key := a.IdempotencyKey.Field; key != "" {
+		for _, o := range a.OtherIdentifiers {
+			if !sameField(o.Field, key) {
+				continue
+			}
+			if o.CouldBeKey {
+				continue // agreeing with itself is fine
+			}
+			bad = append(bad, fmt.Sprintf(
+				"%q is named as the idempotency key and also listed under other_identifiers "+
+					"with could_be_key false — decide which, or explain in `notes` why the two "+
+					"spellings are different values", o.Field))
+		}
+	}
+
+	for i, o := range a.OtherIdentifiers {
+		switch {
+		case o.Field == "":
+			bad = append(bad, fmt.Sprintf("other_identifiers[%d] has no field name", i))
+		case o.Purpose == "":
+			bad = append(bad, fmt.Sprintf("%s: no purpose given — saying what it is FOR is how a "+
+				"key gets chosen rather than picked", o.Field))
+		case !hasCitation(o.Proof):
+			bad = append(bad, fmt.Sprintf("%s: proof must name a file and line, got %q",
+				o.Field, o.Proof))
+		}
+	}
+
 	if len(bad) > 0 {
 		return fmt.Errorf("%d problem(s):\n  - %s", len(bad), strings.Join(bad, "\n  - "))
 	}
 	return nil
+}
+
+// citation matches the "file.go:123" that every claim in this pack must carry.
+var citation = regexp.MustCompile(`\.go:\d+`)
+
+func hasCitation(s string) bool { return citation.MatchString(s) }
+
+// sameField compares field names the way a reader does.
+//
+// OrderId and OrderID are the same field with two spellings, and Go code
+// contains both because protobuf generates one and hand-written structs use the
+// other. Comparing them literally is how the contradiction above stayed
+// invisible.
+func sameField(a, b string) bool { return strings.EqualFold(a, b) }
+
+// StateRolesAnswer classifies every state of one machine.
+//
+// It replaces TransitionsAnswer's N x N matrix: testigo derives that from the
+// roles, which is cheaper to ask for, cheaper to return, and checkable in ways
+// a hand-filled matrix is not.
+type StateRolesAnswer struct {
+	Roles      flowEntity.StateRoles `json:"roles"`
+	Exceptions []struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+		Why  string `json:"why"`
+	} `json:"exceptions"`
+	Notes string `json:"notes"`
+}
+
+// ValidateAgainst checks the roles describe the states the compiler found, and
+// that each one is coherent.
+//
+// Completeness is checkable and correctness is not, so completeness is checked
+// hard: a forgotten state is a validation error rather than a silent gap, which
+// is the same rule the old matrix question used.
+func (a *StateRolesAnswer) ValidateAgainst(states []string) error {
+	declared := map[string]bool{}
+	for _, s := range states {
+		declared[s] = true
+	}
+
+	var bad []string
+	seen := map[string]bool{}
+	for _, r := range a.Roles {
+		if !declared[r.State] {
+			bad = append(bad, fmt.Sprintf("roles contains %q, which is not a declared state", r.State))
+			continue
+		}
+		if seen[r.State] {
+			bad = append(bad, fmt.Sprintf("%s appears more than once", r.State))
+		}
+		seen[r.State] = true
+		if err := r.Validate(); err != nil {
+			bad = append(bad, err.Error())
+		}
+		if r.RetryEntersAt != "" && !declared[r.RetryEntersAt] {
+			bad = append(bad, fmt.Sprintf("%s: retry_enters_at names %q, which is not a declared state",
+				r.State, r.RetryEntersAt))
+		}
+	}
+	for _, s := range states {
+		if !seen[s] {
+			bad = append(bad, fmt.Sprintf("state %q is declared in the code but has no role", s))
+		}
+	}
+	for _, e := range a.Exceptions {
+		switch {
+		case !declared[e.From] || !declared[e.To]:
+			bad = append(bad, fmt.Sprintf("exception %s -> %s names a state that is not declared", e.From, e.To))
+		case e.Why == "":
+			bad = append(bad, fmt.Sprintf("exception %s -> %s has no reason; an exception without one "+
+				"is indistinguishable from a mistake", e.From, e.To))
+		}
+	}
+
+	if len(bad) > 0 {
+		return fmt.Errorf("%d problem(s):\n  - %s", len(bad), strings.Join(bad, "\n  - "))
+	}
+	return nil
+}
+
+// Transitions converts the roles into the matrix the rest of testigo already
+// speaks, so nothing downstream has to know the question changed shape.
+func (a *StateRolesAnswer) Transitions(neverAssigned []string) *TransitionsAnswer {
+	out := &TransitionsAnswer{
+		MayMoveTo: a.Roles.Derive(neverAssigned),
+		Notes:     a.Notes,
+	}
+	if init, ok := a.Roles.Initial(); ok {
+		out.InitialState = init
+	}
+	out.FinalStates = a.Roles.Finals()
+	for _, e := range a.Exceptions {
+		out.MayMoveTo[e.From] = appendOnce(out.MayMoveTo[e.From], e.To)
+		out.FinalStateExceptions = append(out.FinalStateExceptions, struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+			Why  string `json:"why"`
+		}{From: e.From, To: e.To, Why: e.Why})
+	}
+	return out
+}
+
+func appendOnce(list []string, s string) []string {
+	for _, x := range list {
+		if x == s {
+			return list
+		}
+	}
+	return append(list, s)
 }

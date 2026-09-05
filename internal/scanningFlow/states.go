@@ -48,7 +48,7 @@ func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[
 				continue
 			}
 			// Both lists are collected. The weak ones have to earn their place
-			// further down, on evidence rather than on their name.
+			// further down, on proof rather than on their name.
 			if !patterns.IsStateType(name) && !patterns.IsWeakStateType(name) {
 				continue
 			}
@@ -141,7 +141,7 @@ func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[
 						}
 						pos := p.Fset.Position(kv.Pos())
 						writes[key] = append(writes[key], flowEntity.StateWrite{
-							In: fns.at(kv.Pos()), To: to, Line: pos.Line,
+							In: siteOf(p, fns, root, kv.Pos()), To: to, Line: pos.Line,
 						})
 					}
 				case *ast.ReturnStmt:
@@ -165,7 +165,7 @@ func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[
 					// fact. A missed write costs one noisy finding. A false
 					// write teaches the agent something untrue.
 					for _, r := range t.Results {
-						addWrite(p, fns, isLifecycleType, writes, relativeTo, r)
+						addWrite(p, fns, isLifecycleType, writes, relativeTo, root, r)
 					}
 				case *ast.AssignStmt:
 					for i, lhs := range t.Lhs {
@@ -183,7 +183,7 @@ func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[
 						// covers assignment through an alias as a bonus.
 						tv, ok := p.TypesInfo.Types[lhs]
 						if !ok || !isLifecycleType(types.TypeString(tv.Type, relativeTo)) {
-							addWrite(p, fns, isLifecycleType, writes, relativeTo, t.Rhs[i])
+							addWrite(p, fns, isLifecycleType, writes, relativeTo, root, t.Rhs[i])
 							continue
 						}
 						key := types.TypeString(tv.Type, relativeTo)
@@ -193,7 +193,7 @@ func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[
 						}
 						pos := p.Fset.Position(t.Pos())
 						writes[key] = append(writes[key], flowEntity.StateWrite{
-							In: fns.at(t.Pos()), To: to, Line: pos.Line,
+							In: siteOf(p, fns, root, t.Pos()), To: to, Line: pos.Line,
 						})
 					}
 				}
@@ -258,7 +258,7 @@ func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[
 //     ErrorCode is returned and compared, rarely stored and updated.
 //
 // A strong name passes on its own, because "PaymentStatus" is not ambiguous and
-// demanding evidence would drop real machines in repositories that keep their
+// demanding proof would drop real machines in repositories that keep their
 // transitions in one place. A weak name has to show both behaviours.
 func isLifecycle(qualified, simple, field string, writes []flowEntity.StateWrite) (string, bool) {
 	distinct := map[string]bool{}
@@ -374,6 +374,7 @@ func addWrite(
 	isLifecycleType func(string) bool,
 	writes map[string][]flowEntity.StateWrite,
 	relativeTo types.Qualifier,
+	root string,
 	e ast.Expr,
 ) {
 	tv, ok := p.TypesInfo.Types[e]
@@ -389,8 +390,39 @@ func addWrite(
 	if tv.Value != nil {
 		to = constName(p, e, tv.Value.String())
 	}
+
+	// A write site with no location is worse than no write site.
+	//
+	// fns.at returns an empty reference for anything not inside a declared
+	// function — a package-level var, a composite literal in a global, a
+	// closure the index did not span. The write is real, so dropping it would
+	// under-report, but recording it blank printed "set in   (:32)" in the
+	// prompt, which asks a reader to go and look at nothing. Fill in the file
+	// and package from the position, which are always available.
 	pos := p.Fset.Position(e.Pos())
 	writes[key] = append(writes[key], flowEntity.StateWrite{
-		In: fns.at(e.Pos()), To: to, Line: pos.Line,
+		In: siteOf(p, fns, root, e.Pos()), To: to, Line: pos.Line,
 	})
+}
+
+// siteOf names where a state is written, and never returns a blank.
+//
+// funcTable.at returns an empty reference for anything not inside a declared
+// function — a package-level var, a composite literal in a global, a seed
+// script. The write is real, so dropping it would under-report; recording it
+// blank printed "set in   (:32)" into a prompt, which asks a reader to go and
+// look at nothing. The file and package are always available from the position,
+// so they are filled in and the symbol says plainly that there is no function.
+func siteOf(p *packages.Package, fns funcTable, root string, pos token.Pos) codeRef.CodeRef {
+	in := fns.at(pos)
+	if in.File == "" {
+		in.File = relPath(p.Fset, pos, root)
+	}
+	if in.Pkg == "" {
+		in.Pkg = p.PkgPath
+	}
+	if in.Symbol == "" {
+		in.Symbol = "(package level)"
+	}
+	return in
 }

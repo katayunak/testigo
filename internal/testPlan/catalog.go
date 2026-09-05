@@ -208,7 +208,7 @@ reconciler can find.`,
 		},
 		AntiGoals: []string{
 			"asserting the transaction rolled back and stopping there — the rollback is exactly the problem, since it erases the only trace of the provider call",
-			"treating this as the same test as IDEM-CRASH-AT-STEP; that one is about converging, this one is about not losing evidence",
+			"treating this as the same test as IDEM-CRASH-AT-STEP; that one is about converging, this one is about not losing proof",
 		},
 		Techniques: []planEntity.Technique{planEntity.TechniqueFaultInjection},
 		Oracle:     planEntity.OracleInvariant,

@@ -209,7 +209,7 @@ func (g *graph) moneyTypesIn(fn *ssa.Function) []string {
 		// currency and round-trip test — on a repository whose main entity has
 		// four money fields.
 		//
-		// The evidence was already in the same program. moneyCandidates had
+		// The proof was already in the same program. moneyCandidates had
 		// scored Order.Price, Order.Fee, Order.BasePrice and Order.Discount.
 		// This function simply never asked it.
 		if fields, isStruct := n.Underlying().(*types.Struct); isStruct {

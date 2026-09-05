@@ -24,34 +24,21 @@ import (
 //
 // The analyser can prove a call LEAVES THE PROCESS. It cannot see the other
 // side. So it lists the exits and asks about each one.
-func ExternalEffect(f *flowEntity.Flow, target string, seams []flowEntity.Seam, paths []Path) string {
+func ExternalEffect(f *flowEntity.Flow, target string, seams []flowEntity.Seam, paths []Path) *Prompt {
+	// No Goal and no Rule here on purpose.
+	//
+	// There are twenty-seven of these questions in one pack and the goal and the
+	// rules are identical in every one. Attaching them to the prompt copies
+	// thirteen hundred characters twenty-seven times — thirty-five kilobytes,
+	// most of one question file, to say the same four things over and over. They
+	// live in ExternalEffectPreamble instead, read once.
+	//
+	// This is the same mistake the flow map made, and the rule that comes out of
+	// it is worth stating plainly: anything constant across a KIND belongs in
+	// PREAMBLE.md, and only what varies per question belongs in the prompt.
+	p := New("testigo — what does this call do to the world?")
+
 	var b strings.Builder
-
-	b.WriteString(`# testigo — what does this call do to the world?
-
-A static analyser found a call that leaves this process. It can prove where the
-call is made and whether a test could substitute it. It cannot see what happens
-on the other side, and that is the only thing that decides whether doing it twice
-is harmless or moves money twice.
-
-You are NOT being asked whether this should be retried. That is a decision for
-the team who owns this code, and some of them have deliberately decided not to
-retry anything. You are being asked what is TRUE about the call.
-
-## Rules
-
-1. Answer about THIS call only. Other calls get their own task.
-2. Read the implementation if it is in this repository. If it is a third-party
-   client, reason from its documented behaviour and say which you did in ` + "`basis`" + `.
-3. Answer "unknown" when you are not sure. Every default leans the same way:
-   unknown is treated as irreversible and unobservable. Assuming an effect can
-   be taken back when it cannot means a missing test and money moved twice; the
-   reverse costs one unnecessary test.
-4. Do not guess from the name. ` + "`Notify`" + ` sounds harmless and may settle a payment.
-
-## The call
-
-`)
 	fmt.Fprintf(&b, "Target: %s\n\n", target)
 	b.WriteString("Called from:\n\n")
 	for _, s := range seams {
@@ -63,13 +50,15 @@ retry anything. You are being asked what is TRUE about the call.
 			s.In.Symbol, s.In.File, s.Line, s.Kind, injectable)
 	}
 
-	b.WriteString("## Where it sits in the flow\n\n")
-	for _, p := range paths {
-		b.WriteString(indent(p.RenderHeader(), "  "))
-	}
+	p.Fact(Proof, "The call", b.String())
 
-	b.WriteString("The four questions, the JSON shape and the timeout note are in\nPREAMBLE.md, under \"externalEffect\".\n")
-		return b.String()
+	var flow strings.Builder
+	for _, path := range paths {
+		flow.WriteString(indent(path.RenderHeader(), "  "))
+	}
+	p.Fact(Subject, "Where it sits in the flow", flow.String())
+
+	return p.Answers("The four questions, the JSON shape and the timeout note are in\nPREAMBLE.md, under \"externalEffect\".").Where("testigo/asks/PREAMBLE.md")
 }
 
 // SeamTargets picks the calls where "is a retry free?" is a real question.

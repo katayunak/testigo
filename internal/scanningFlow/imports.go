@@ -72,7 +72,7 @@ func importClosure(pkgs []*packages.Package) map[string]map[string]bool {
 // Same package is always allowed. An unknown caller is allowed too: if the
 // closure has no entry for it, the load did not give us the imports, and
 // guessing "impossible" from missing data would silently delete real edges.
-// Absent information is not evidence.
+// Absent information is not proof.
 func (g *graph) canCall(from, to string) bool {
 	if from == to {
 		return true

@@ -118,11 +118,11 @@ func Scan(opts Options) (*Result, error) {
 
 	flow.Infra = Infra(opts.Root)
 	flow.Docs = FindDocs(opts.Root)
-	// Machines FIRST. The candidate scorers ask which structs carry a lifecycle
+	// States FIRST. The candidate scorers ask which structs carry a lifecycle
 	// state, and a struct that carries one is the entity the flow moves — the
 	// single strongest signal either scorer has. Computing candidates first left
 	// that set empty and silently threw the signal away.
-	flow.Machines = extractStateMachines(pkgs, opts.Root, local, gen)
+	flow.States = extractStateMachines(pkgs, opts.Root, local, gen)
 	linkStateWritesToNodes(flow)
 
 	flow.IdempotencyKeys = idempotencyCandidates(pkgs, flow, opts.Root, local)
@@ -135,7 +135,7 @@ func Scan(opts Options) (*Result, error) {
 	flow.IdempotencyKeys, _ = withoutGenerated(flow.IdempotencyKeys, gen, fileOfCandidate)
 	flow.MoneyTypes, _ = withoutGenerated(flow.MoneyTypes, gen, fileOfCandidate)
 
-	flow.Findings = append(flow.Findings, stateFindings(flow.Machines)...)
+	flow.Findings = append(flow.Findings, stateFindings(flow.States)...)
 	flow.Findings = append(flow.Findings, moneyFindings(pkgs, opts.Root)...)
 	flow.Findings = append(flow.Findings, structuralFindings(flow)...)
 	flow.Findings = append(flow.Findings, infraFindings(pkgs, flow, opts.Root)...)
@@ -178,9 +178,9 @@ type declRef struct {
 // and the ledger can disagree if the process dies between them. That is the
 // shape of a real production incident, and it is visible here for free.
 func linkStateWritesToNodes(f *flowEntity.Flow) {
-	for mi := range f.Machines {
-		for wi := range f.Machines[mi].Writes {
-			write := &f.Machines[mi].Writes[wi]
+	for mi := range f.States {
+		for wi := range f.States[mi].Writes {
+			write := &f.States[mi].Writes[wi]
 			node, ok := f.Nodes[write.In.ID()]
 			if !ok {
 				continue // the status is written outside any reachable flow
@@ -326,7 +326,7 @@ func infraFindings(pkgs []*packages.Package, f *flowEntity.Flow, root string) []
 						// unique index. Two detectors, one opinion each, and
 						// the wrong one had the megaphone.
 						//
-						// Now a finding needs the same evidence a decision
+						// Now a finding needs the same proof a decision
 						// needs. A field that only matched the vocabulary
 						// scores 1 and says nothing.
 						cand, scored := f.IdempotencyKeys.Find(spec.Name.Name, nm.Name)
@@ -341,7 +341,7 @@ func infraFindings(pkgs []*packages.Package, f *flowEntity.Flow, root string) []
 						out = append(out, flowEntity.Finding{
 							ID: "IDEM-KEY-NOT-UNIQUE", Severity: flowEntity.SevCritical,
 							Title:  spec.Name.Name + "." + nm.Name + " is an idempotency key with no unique constraint behind it",
-							Detail: "The migrations in " + strings.Join(f.Infra.MigrationDirs, ", ") + " create no UNIQUE index covering column \"" + col + "\". Whatever prevents duplicates in Go is therefore a read followed by a write, and two requests arriving together can both pass the read before either writes. Add a unique index and let the database refuse the second one.\n\nWhy this field: " + strings.Join(cand.Evidence, "; ") + ".",
+							Detail: "The migrations in " + strings.Join(f.Infra.MigrationDirs, ", ") + " create no UNIQUE index covering column \"" + col + "\". Whatever prevents duplicates in Go is therefore a read followed by a write, and two requests arriving together can both pass the read before either writes. Add a unique index and let the database refuse the second one.\n\nWhy this field: " + strings.Join(cand.Proof, "; ") + ".",
 							Ref:    flowEntity.CodeRefOf(p.PkgPath, spec.Name.Name, relPath(p.Fset, fld.Pos(), root), pos.Line),
 							Line:   pos.Line,
 						})

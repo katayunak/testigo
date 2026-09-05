@@ -324,7 +324,7 @@ func relativeTo(p *types.Package) string { return p.Path() }
 // guessFromName is the last resort, used only when the call graph could not
 // reach a concrete implementation — typically because the real one lives behind
 // a build tag or is only wired up in main. Naming conventions are weak
-// evidence, so anything found this way should be treated as a hint.
+// proof, so anything found this way should be treated as a hint.
 func guessFromName(iface, method string) kindSet {
 	s := strings.ToLower(iface + "." + method)
 	switch {

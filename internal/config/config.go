@@ -74,7 +74,7 @@ func Load(root string) (*Config, error) {
 					"  mv %s %s 2>/dev/null || true\n"+
 					"  mv %s/* %s/ 2>/dev/null || true\n"+
 					"  rmdir %s 2>/dev/null || true\n\n"+
-					"then add %s/ to .gitignore, except %s/knowledge.json which is worth committing",
+					"then add %s/ to .gitignore, except %s/agentResponse.json which is worth committing",
 				DirName,
 				legacyConfig, filepath.Join(DirName, FileName),
 				legacyRules, filepath.Join(DirName, RulesFileName),

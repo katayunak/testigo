@@ -40,7 +40,7 @@ func fixtureFlow() *flowEntity.Flow {
 		{In: process.Ref, Kind: flowEntity.SeamDB, Target: "(*database/sql.DB).BeginTx", Line: 47},
 		{In: process.Ref, Kind: flowEntity.SeamClock, Target: "time.Now", Line: 26},
 	}
-	f.Machines = []flowEntity.StateMachine{{
+	f.States = []flowEntity.StateMachine{{
 		Type:   "example.com/paysvc/domain.PaymentStatus",
 		Field:  "Status",
 		States: []string{"StatusAuthorized", "StatusCaptured", "StatusFailed", "StatusPending"},
@@ -56,7 +56,7 @@ func TestPlanSkipsNodesWithFreshNotes(t *testing.T) {
 	id := "example.com/paysvc/api#(*Server).process"
 	f.Nodes[id].Notes = &flowEntity.Notes{Step: "reserve funds", ForHash: "h-process"}
 
-	for _, a := range Plan(f, askEntity.NewKnowledge(), askEntity.RoundUnderstand) {
+	for _, a := range Plan(f, askEntity.NewAgentResponse(), askEntity.RoundUnderstand) {
 		if a.Kind == askEntity.KindNotes && a.Subject == id {
 			t.Fatal("re-asked for notes on a function whose body has not changed")
 		}
@@ -66,7 +66,7 @@ func TestPlanSkipsNodesWithFreshNotes(t *testing.T) {
 	// no longer exists.
 	f.Nodes[id].Ref.BodyHash = "h-process-EDITED"
 	found := false
-	for _, a := range Plan(f, askEntity.NewKnowledge(), askEntity.RoundUnderstand) {
+	for _, a := range Plan(f, askEntity.NewAgentResponse(), askEntity.RoundUnderstand) {
 		if a.Kind == askEntity.KindNotes && a.Subject == id {
 			found = true
 		}
@@ -79,8 +79,8 @@ func TestPlanSkipsNodesWithFreshNotes(t *testing.T) {
 // Two runs on an unchanged repository must produce byte-identical prompts, or
 // every prompt cache misses and two runs cannot be diffed.
 func TestPlanIsDeterministic(t *testing.T) {
-	a := Plan(fixtureFlow(), askEntity.NewKnowledge(), askEntity.RoundUnderstand)
-	b := Plan(fixtureFlow(), askEntity.NewKnowledge(), askEntity.RoundUnderstand)
+	a := Plan(fixtureFlow(), askEntity.NewAgentResponse(), askEntity.RoundUnderstand)
+	b := Plan(fixtureFlow(), askEntity.NewAgentResponse(), askEntity.RoundUnderstand)
 	if len(a) != len(b) {
 		t.Fatalf("different ask counts: %d vs %d", len(a), len(b))
 	}
@@ -96,8 +96,8 @@ func TestPlanIsDeterministic(t *testing.T) {
 
 // Binding is asked first because everything else is built on it.
 func TestBindingIsAskedFirst(t *testing.T) {
-	asks := Plan(fixtureFlow(), askEntity.NewKnowledge(), askEntity.RoundUnderstand)
-	if len(asks) == 0 || asks[0].Kind != askEntity.KindBinding {
+	asks := Plan(fixtureFlow(), askEntity.NewAgentResponse(), askEntity.RoundUnderstand)
+	if len(asks) == 0 || asks[0].Kind != askEntity.KindMoneyModel {
 		t.Fatalf("first ask is %v, want binding", asks[0].Kind)
 	}
 }
@@ -105,7 +105,7 @@ func TestBindingIsAskedFirst(t *testing.T) {
 // Clock and randomness are not retry-safety questions. Asking about them costs
 // money and teaches nothing.
 func TestNoForeignEffectAskForClock(t *testing.T) {
-	for _, a := range Plan(fixtureFlow(), askEntity.NewKnowledge(), askEntity.RoundUnderstand) {
+	for _, a := range Plan(fixtureFlow(), askEntity.NewAgentResponse(), askEntity.RoundUnderstand) {
 		if a.Kind == askEntity.KindExternalEffect && strings.Contains(a.Subject, "time.Now") {
 			t.Fatal("asked whether retrying time.Now makes the money move twice")
 		}
@@ -160,18 +160,18 @@ func TestIllegalTransitionsExcludeUnsure(t *testing.T) {
 // The most common way a model fails this task is answering the illustration
 // instead of the repository.
 func TestBindingRejectsThePlaceholderExample(t *testing.T) {
-	a := &askEntity.BindingAnswer{}
+	a := &askEntity.MoneyModelAnswer{}
 	a.Money.Type = "example.com/pay/domain.Money"
-	a.Money.Evidence = "domain/money.go:14"
+	a.Money.Proof = "domain/money.go:14"
 	if err := a.Validate(); err == nil || !strings.Contains(err.Error(), "placeholder") {
 		t.Fatalf("want a placeholder rejection, got %v", err)
 	}
 }
 
 func TestBindingRequiresEvidenceForEveryClaim(t *testing.T) {
-	a := &askEntity.BindingAnswer{}
+	a := &askEntity.MoneyModelAnswer{}
 	a.TransferFunc.Symbol = "pay#(*Ledger).Post"
-	if err := a.Validate(); err == nil || !strings.Contains(err.Error(), "evidence") {
+	if err := a.Validate(); err == nil || !strings.Contains(err.Error(), "proof") {
 		t.Fatalf("a named symbol with no file:line should be rejected, got %v", err)
 	}
 }
@@ -318,12 +318,12 @@ func TestStripFenceTolerates(t *testing.T) {
 
 func TestRoundTwoIsBlockedUntilRoundOneIsAnswered(t *testing.T) {
 	f := fixtureFlow()
-	k := askEntity.NewKnowledge()
+	k := askEntity.NewAgentResponse()
 
 	if BlockedReason(f, k) == "" {
 		t.Fatal("round 2 should be blocked with no answers at all")
 	}
-	k.Binding = &askEntity.BindingAnswer{}
+	k.MoneyModel = &askEntity.MoneyModelAnswer{}
 	if r := BlockedReason(f, k); r == "" || !strings.Contains(r, "transitions") {
 		t.Fatalf("should still be blocked on transitions, got %q", r)
 	}
@@ -356,7 +356,7 @@ func TestNotesAnswerRejectedWhenTheBodyMovedUnderIt(t *testing.T) {
 	}
 
 	f.Nodes[id].Ref.BodyHash = "h-process-EDITED"
-	got, err := Collect(dir, f, askEntity.NewKnowledge(), []askEntity.Ask{ask})
+	got, err := Collect(dir, f, askEntity.NewAgentResponse(), []askEntity.Ask{ask})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,15 +395,15 @@ func TestPromptsCarryTheirLoadBearingRules(t *testing.T) {
 		prompt string
 		must   []string
 	}{
-		{"binding", prompts.Binding(f, paths, []string{"money type", "idempotency key"}), []string{
+		{"moneyModel", prompts.MoneyModel(f, paths, []string{"money type", "idempotency key"}).Render(), []string{
 			"Do not contradict it",
 			"A null answer is useful",
 			"OPEN QUESTIONS",
 		}},
-		{"transitions", prompts.Transitions(f, f.Machines[0], paths), []string{
+		{"transitions", prompts.Transitions(f, f.States[0], paths).Render(), []string{
 			"complete set", "unsure", "Is failure terminal?",
 		}},
-		{"externalEffect", prompts.ExternalEffect(f, "psp.Authorize", f.Seams[:1], paths), []string{
+		{"externalEffect", prompts.ExternalEffect(f, "psp.Authorize", f.Seams[:1], paths).Render(), []string{
 			"UNKNOWN outcome, not a failed one",
 			"You are NOT being asked whether this should be retried",
 			"unknown is treated as irreversible and unobservable",
@@ -452,7 +452,7 @@ func TestPreambleCarriesTheHoistedRules(t *testing.T) {
 func TestCasePromptCarriesItsOwnFactsAndNoMore(t *testing.T) {
 	f := fixtureFlow()
 	var concurrent, money planEntity.TestCase
-	for _, c := range testPlan.Select(f, planEntity.Bindings{}) {
+	for _, c := range testPlan.Select(f, planEntity.Facts{}) {
 		switch c.Scenario.ID {
 		case "IDEM-CONCURRENT":
 			concurrent = c
@@ -464,7 +464,7 @@ func TestCasePromptCarriesItsOwnFactsAndNoMore(t *testing.T) {
 		t.Fatal("IDEM-CONCURRENT was not selected for the fixture")
 	}
 
-	p := prompts.TestCase(concurrent, f)
+	p := prompts.TestCase(concurrent, f).Render()
 	for _, want := range []string{
 		"(example.com/paysvc/psp.Gateway).Authorize",
 		"fake via example.com/paysvc/psp.Gateway",
@@ -479,7 +479,7 @@ func TestCasePromptCarriesItsOwnFactsAndNoMore(t *testing.T) {
 
 	// The saving comes from NOT pasting the whole flow into every case.
 	if money.Scenario.ID != "" {
-		mp := prompts.TestCase(money, f)
+		mp := prompts.TestCase(money, f).Render()
 		if strings.Contains(mp, "(*database/sql.DB).BeginTx") {
 			t.Error("a currency-conversion prompt is carrying the database call graph it has no use for")
 		}
@@ -503,10 +503,10 @@ func TestSharedPreambleIsCheaperThanRepeatingIt(t *testing.T) {
 	}
 }
 
-func fullKnowledge(f *flowEntity.Flow) *askEntity.Knowledge {
-	k := askEntity.NewKnowledge()
-	k.Binding = &askEntity.BindingAnswer{}
-	for _, m := range f.Machines {
+func fullKnowledge(f *flowEntity.Flow) *askEntity.AgentResponse {
+	k := askEntity.NewAgentResponse()
+	k.MoneyModel = &askEntity.MoneyModelAnswer{}
+	for _, m := range f.States {
 		k.Transitions[m.Type] = &askEntity.TransitionsAnswer{}
 	}
 	for _, target := range prompts.SeamTargets(f) {
@@ -515,8 +515,8 @@ func fullKnowledge(f *flowEntity.Flow) *askEntity.Knowledge {
 	return k
 }
 
-// Phase 1 ranks candidates by evidence so round one does not pay to ask. When the
-// evidence decides, no question is emitted; when it is close, a narrow question
+// Phase 1 ranks candidates by proof so round one does not pay to ask. When the
+// proof decides, no question is emitted; when it is close, a narrow question
 // is. This test pins the boundary, because getting it wrong in either direction
 // costs money or costs accuracy.
 func TestEvidenceDecidesInsteadOfAsking(t *testing.T) {
@@ -541,7 +541,7 @@ func TestEvidenceDecidesInsteadOfAsking(t *testing.T) {
 	// name matches and no way to choose.
 	nameOnly := flowEntity.Candidates{{Name: "ReferenceID", Owner: "Order", Score: 1, Declarative: true}}
 	if _, ok := nameOnly.Decided(); ok {
-		t.Error("a name match with no behavioural evidence decided the question")
+		t.Error("a name match with no behavioural proof decided the question")
 	}
 
 	// The mirror image, and the one that actually shipped wrong. On a real
@@ -554,7 +554,7 @@ func TestEvidenceDecidesInsteadOfAsking(t *testing.T) {
 	// says anyone meant it to be one.
 	behaviourOnly := flowEntity.Candidates{{Name: "Phone", Owner: "Order", Score: 6}}
 	if _, ok := behaviourOnly.Decided(); ok {
-		t.Error("behavioural evidence with nothing declaring the field a key decided the question")
+		t.Error("behavioural proof with nothing declaring the field a key decided the question")
 	}
 	if behaviourOnly[0].Credible() {
 		t.Error("Phone is not credible enough to raise a finding on its own")
@@ -575,7 +575,7 @@ func TestEvidenceDecidesInsteadOfAsking(t *testing.T) {
 // function, so the pack was QUADRATIC.
 func TestRoundOneDoesNotRepeatTheFlowMap(t *testing.T) {
 	f := fixtureFlow()
-	asks := Plan(f, askEntity.NewKnowledge(), askEntity.RoundUnderstand)
+	asks := Plan(f, askEntity.NewAgentResponse(), askEntity.RoundUnderstand)
 	if len(asks) < 2 {
 		t.Skip("need at least two prompts to compare")
 	}
@@ -601,5 +601,69 @@ func TestRoundOneDoesNotRepeatTheFlowMap(t *testing.T) {
 	cost := Estimate(askEntity.RoundUnderstand, asks, pre)
 	if cost.SavedByShared <= 0 {
 		t.Error("round one reports no saving from hoisting the shared block")
+	}
+}
+
+// TestTheSameFieldCannotBeKeyAndNotKey is the regression for a contradiction a
+// person caught and the validator did not.
+//
+// On a real recharge service the agent named OrderCompleteRequest.OrderId as
+// the idempotency key and, in the same answer, listed Order.OrderID under
+// other_identifiers with could_be_key false. completeOrder.go:94 assigns one
+// directly from the other — same value, two verdicts. Every field the validator
+// policed came back clean, because the false claim lived in the one field that
+// had no rules.
+func TestTheSameFieldCannotBeKeyAndNotKey(t *testing.T) {
+	newAnswer := func() *askEntity.MainEntityAnswer {
+		a := &askEntity.MainEntityAnswer{}
+		a.MainEntity.Struct = "Order"
+		a.MainEntity.Proof = "domain/entity/order.go:9"
+		a.IdempotencyKey.Field = "OrderId"
+		a.IdempotencyKey.Proof = "domain/entity/payment.go:46"
+		return a
+	}
+
+	// The exact shape that shipped, down to the spelling difference.
+	a := newAnswer()
+	a.OtherIdentifiers = append(a.OtherIdentifiers, struct {
+		Field      string `json:"field"`
+		Purpose    string `json:"purpose"`
+		Proof      string `json:"proof"`
+		CouldBeKey bool   `json:"could_be_key"`
+	}{Field: "OrderID", Purpose: "business-level order reference", Proof: "domain/entity/order.go:12", CouldBeKey: false})
+
+	err := a.Validate()
+	if err == nil {
+		t.Fatal("accepted an answer that calls the same field both the key and not the key")
+	}
+	if !strings.Contains(err.Error(), "decide which") {
+		t.Errorf("wrong reason: %v", err)
+	}
+
+	// And a purpose with no file:line is the gap that let it through.
+	b := newAnswer()
+	b.OtherIdentifiers = append(b.OtherIdentifiers, struct {
+		Field      string `json:"field"`
+		Purpose    string `json:"purpose"`
+		Proof      string `json:"proof"`
+		CouldBeKey bool   `json:"could_be_key"`
+	}{Field: "RRN", Purpose: "bank retrieval number, arrives after authorization", Proof: "", CouldBeKey: false})
+
+	if err := b.Validate(); err == nil || !strings.Contains(err.Error(), "file and line") {
+		t.Errorf("a purpose with no citation must be refused, got %v", err)
+	}
+
+	// A properly cited, non-conflicting identifier is fine.
+	c := newAnswer()
+	c.OtherIdentifiers = append(c.OtherIdentifiers, struct {
+		Field      string `json:"field"`
+		Purpose    string `json:"purpose"`
+		Proof      string `json:"proof"`
+		CouldBeKey bool   `json:"could_be_key"`
+	}{Field: "RRN", Purpose: "bank retrieval number, arrives after authorization",
+		Proof: "domain/entity/order.go:21", CouldBeKey: false})
+
+	if err := c.Validate(); err != nil {
+		t.Errorf("a cited, non-conflicting identifier must be accepted: %v", err)
 	}
 }

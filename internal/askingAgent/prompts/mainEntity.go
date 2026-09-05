@@ -24,36 +24,21 @@ import (
 // contract between two systems, and no amount of AST walking reads a contract.
 //
 // So the question is narrow by construction: the candidates are listed, the
-// evidence is attached, and the agent chooses among them rather than searching.
-// A narrow question with evidence gets a far better answer than "find the
+// proof is attached, and the agent chooses among them rather than searching.
+// A narrow question with proof gets a far better answer than "find the
 // idempotency key", and it costs a fraction of the tokens.
-func MainEntity(f *flowEntity.Flow, entities []Entity) string {
+func MainEntity(f *flowEntity.Flow, entities []Entity) *Prompt {
+	p := New("testigo — which entity does this flow move, and what identifies a repeat?").
+		Goal("Two questions about the same struct. Both are contract questions: the analyser can see every field and still not know which one two systems agreed on.").
+		Rule("Answer only from this repository. Read the files and lines named below.",
+			"`null` is a real answer for the key. Plenty of payment systems have no deduplication key at all — saying so is a finding, and a wrong key is worse than an admitted absence, because it produces a replay test that passes while real duplicates get through.",
+			"Do not pick a field because its name looks right. `OrderID` appears on the entity AND on three request types here; only one of them is the value a retry repeats.")
+
 	var b strings.Builder
 
-	b.WriteString(`# testigo — which entity does this flow move, and what identifies a repeat?
-
-Two questions about the same struct. Both are contract questions: the analyser
-can see every field and still not know which one two systems agreed on.
-
-## Rules
-
-1. Answer only from this repository. Read the files and lines named below.
-2. Every claim carries a file:line. If you cannot point at one, answer null.
-3. ` + "`null`" + ` is a real answer for the key. Plenty of payment systems have no
-   deduplication key at all — saying so is a finding, and a wrong key is worse
-   than an admitted absence, because it produces a replay test that passes
-   while real duplicates get through.
-4. Do not pick a field because its name looks right. ` + "`OrderID`" + ` appears on
-   the entity AND on three request types here; only one of them is the value a
-   retry repeats.
-
-## What the analyser proved
-
-`)
-
-	if len(f.Machines) > 0 {
+	if len(f.States) > 0 {
 		b.WriteString("Lifecycle states found in this module:\n\n")
-		for _, m := range f.Machines {
+		for _, m := range f.States {
 			b.WriteString(fmt.Sprintf("  %s  —  %d states, written in %d place(s), field `%s`\n",
 				lastSegment(m.Type), len(m.States), len(m.Writes), m.Field))
 		}
@@ -76,7 +61,7 @@ states, which is what makes it a candidate for the main entity.
 		b.WriteString("identifier fields, with what the analyser could prove about each:\n\n")
 		for _, c := range e.IDs {
 			b.WriteString(fmt.Sprintf("  %-22s %-14s line %d\n", c.Name, c.Type, c.Line))
-			for _, ev := range c.Evidence {
+			for _, ev := range c.Proof {
 				b.WriteString("      + " + ev + "\n")
 			}
 			for _, ag := range c.Against {
@@ -86,9 +71,10 @@ states, which is what makes it a candidate for the main entity.
 		b.WriteString("\n")
 	}
 
-	b.WriteString(`## What to work out
+	p.Fact(Proof, "What the analyser proved", b.String())
 
-**1. Which struct is THE main entity of this flow?**
+	var work strings.Builder
+	work.WriteString(`**1. Which struct is THE main entity of this flow?**
 
 The one whose change IS the business event. When a row of it moves to a new
 state, money has moved or is committed to moving. Everything else — requests,
@@ -122,21 +108,22 @@ A reference that arrives back FROM a provider is worth special care. It looks
 exactly like a key and cannot be one, because this system does not have it at
 the moment it must decide whether to act.
 
-## Output
+`)
+	p.Fact(Subject, "What to work out", work.String())
 
-Reply with one JSON object and nothing else.
+	return p.Answers(`Reply with one JSON object and nothing else.
 
 ` + "```" + `
 {
   "main_entity": {
     "struct": "Order",
     "package": "example.com/pay/domain/entity",
-    "evidence": "domain/entity/order.go:9 — carries Status, written in 122 places",
+    "proof": "domain/entity/order.go:9 — carries Status, written in 122 places",
     "why": "one sentence: what real-world thing one row of it is"
   },
   "idempotency_key": {
     "field": "OrderID" | null,
-    "evidence": "domain/entity/order.go:12 — arrives in the request payload at controller/x.go:31 and is read back at repository/y.go:88 before the charge",
+    "proof": "domain/entity/order.go:12 — arrives in the request payload at controller/x.go:31 and is read back at repository/y.go:88 before the charge",
     "supplied_by": "client" | "provider" | "queue" | "unknown",
     "read_before_acting": true | false | "unknown",
     "confidence": "high" | "medium" | "low"
@@ -154,10 +141,7 @@ Reply with one JSON object and nothing else.
 If ` + "`idempotency_key.field`" + ` is null, ` + "`no_key_reason`" + ` is required. "There is no
 deduplication key and nothing else prevents a repeat" is a legitimate answer and
 a serious finding — it is the shape of a double-charge, and testigo would rather
-record it than invent a key that hides it.
-`)
-
-	return b.String()
+record it than invent a key that hides it.`).Where("testigo/flow.json")
 }
 
 // Entity is one candidate main entity, already narrowed by the scanner.
@@ -187,7 +171,7 @@ func Entities(f *flowEntity.Flow, carriers map[string]string) []Entity {
 	// places is the flow's spine; one written twice is an enum that happens to
 	// be called Status.
 	weight := map[string]int{}
-	for _, m := range f.Machines {
+	for _, m := range f.States {
 		weight[m.Type] = len(m.Writes)
 	}
 

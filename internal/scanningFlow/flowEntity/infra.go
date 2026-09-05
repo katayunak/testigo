@@ -27,8 +27,102 @@ type Infra struct {
 	// Topics are brokers subjects found in configuration.
 	Topics []Topic `json:"topics,omitempty"`
 
+	// Tables are the shapes the migrations create.
+	//
+	// A test that inserts a row has to satisfy the schema, and an agent that has
+	// not been told the schema does one of two things: it opens every migration
+	// file, which is the single most expensive thing it can do, or it invents
+	// columns and the test does not compile. Handing it the shape is cheaper
+	// than either.
+	Tables []Table `json:"tables,omitempty"`
+
+	// ForeignKeys decide the order rows must be inserted in, and what a delete
+	// does to the rows below it.
+	ForeignKeys []ForeignKey `json:"foreign_keys,omitempty"`
+
+	// Checks are invariants the database enforces itself.
+	//
+	// These are worth more than their size suggests. CHECK (balance >= 0) is a
+	// property test somebody already wrote, in a language the database will
+	// enforce for us, and a CHECK ... IN (...) list is the set of states the
+	// database will accept — which can be compared against the states the Go
+	// code actually writes. Where those two disagree, one of them is a bug.
+	Checks []Check `json:"checks,omitempty"`
+
 	// MigrationDirs are where the migrations were found, so a person can check.
 	MigrationDirs []string `json:"migration_dirs,omitempty"`
+
+	// MigrationFiles is how many were read. Zero with a non-empty MigrationDirs
+	// means the directory exists and nothing in it parsed, which is a different
+	// problem from having no migrations.
+	MigrationFiles int `json:"migration_files,omitempty"`
+}
+
+// Table is one CREATE TABLE, as the migrations declare it.
+type Table struct {
+	Name    string   `json:"name"`
+	Columns []Column `json:"columns,omitempty"`
+	File    string   `json:"file"`
+	Line    int      `json:"line"`
+}
+
+// Column is one column of a table.
+//
+// NotNull and Default are here because they decide what a test fixture has to
+// provide. A NOT NULL column with no default must be set by every insert; a
+// column with a default is one the code may legitimately never mention.
+type Column struct {
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	NotNull    bool   `json:"not_null,omitempty"`
+	Default    string `json:"default,omitempty"`
+	PrimaryKey bool   `json:"primary_key,omitempty"`
+}
+
+// ForeignKey is a reference from one table to another.
+type ForeignKey struct {
+	Table      string   `json:"table"`
+	Columns    []string `json:"columns"`
+	RefTable   string   `json:"ref_table"`
+	RefColumns []string `json:"ref_columns,omitempty"`
+	OnDelete   string   `json:"on_delete,omitempty"`
+	File       string   `json:"file"`
+	Line       int      `json:"line"`
+}
+
+// Check is a CHECK constraint.
+//
+// Values is filled when the check is an IN list or an enum, because that is the
+// database's own opinion about which states exist, and it can be compared with
+// the constants the Go code declares.
+type Check struct {
+	Table  string   `json:"table"`
+	Column string   `json:"column,omitempty"`
+	Expr   string   `json:"expr"`
+	Values []string `json:"values,omitempty"`
+	File   string   `json:"file"`
+	Line   int      `json:"line"`
+}
+
+// ColumnsOf returns the declared shape of a table, or nil.
+func (i Infra) ColumnsOf(table string) []Column {
+	for _, t := range i.Tables {
+		if t.Name == table {
+			return t.Columns
+		}
+	}
+	return nil
+}
+
+// HasTable reports whether the migrations declare a table with this name.
+func (i Infra) HasTable(table string) bool { return i.ColumnsOf(table) != nil }
+
+// Empty reports whether anything at all was read. Used to decide whether to
+// render the migration section, because a heading with nothing under it makes a
+// reader wonder what went wrong.
+func (i Infra) Empty() bool {
+	return len(i.Tables) == 0 && len(i.Constraints) == 0 &&
+		len(i.Checks) == 0 && len(i.ForeignKeys) == 0
 }
 
 // Constraint is a uniqueness rule the database will enforce.

@@ -132,12 +132,9 @@ assertion so the suite comes back green is the least.
 // The last slot is the one usually skipped and the one that does the most work —
 // a bad generated test is bad in a predictable way, and naming the way in advance
 // beats any amount of "be careful".
-func TestCase(c planEntity.TestCase, f *flowEntity.Flow) string {
+func TestCase(c planEntity.TestCase, f *flowEntity.Flow) *Prompt {
 	var b strings.Builder
 	props := c.Technique.Props()
-
-	fmt.Fprintf(&b, "# %s · %s\n\n", c.Scenario.ID, c.Scenario.Name)
-	fmt.Fprintf(&b, "Read `PREAMBLE.md` first. It holds the rules; this file holds only this case.\n\n")
 
 	fmt.Fprintf(&b, "GOAL       %s\n", c.Scenario.LookingFor)
 	fmt.Fprintf(&b, "FUNC       %s\n", c.FuncName)
@@ -168,11 +165,16 @@ func TestCase(c planEntity.TestCase, f *flowEntity.Flow) string {
 		fmt.Fprintf(&b, "- %s\n", a)
 	}
 
-	if facts := caseFacts(c, f); facts != "" {
-		b.WriteString("\n## FACTS — proved by the compiler, do not re-derive\n\n")
-		b.WriteString(facts)
-	}
-	return b.String()
+	p := NewGenerate(fmt.Sprintf("%s · %s", c.Scenario.ID, c.Scenario.Name)).
+		Goal("Write ONE test. Read `PREAMBLE.md` first: it holds the rules, this file holds only this case.").
+		Fact(Proof, "This case", b.String()).
+		Where("testigo/asks/PREAMBLE.md")
+
+	// Proof priority, and the reason is the whole design of round two: these
+	// are the facts THIS case needs and nothing else. Cutting them would make
+	// the agent go and re-derive them from source, which is what including
+	// them was meant to prevent.
+	return p.Fact(Proof, "FACTS — proved by the compiler, do not re-derive", caseFacts(c, f))
 }
 
 // caseFacts includes only what THIS case needs.
@@ -221,5 +223,6 @@ func caseFacts(c planEntity.TestCase, f *flowEntity.Flow) string {
 		}
 		b.WriteString("\n")
 	}
+
 	return b.String()
 }

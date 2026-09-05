@@ -15,19 +15,9 @@ import (
 // into something a person can follow, and short answers are cheaper to
 // regenerate when the function changes — which, on a repository under active
 // development, is constantly.
-func Notes(f *flowEntity.Flow, node *flowEntity.Node, step Step, path Path) string {
+func Notes(f *flowEntity.Flow, node *flowEntity.Node, step Step, path Path) *Prompt {
 	var b strings.Builder
 
-	b.WriteString(`# testigo — what does this step do?
-
-Describe one function in business terms, for a reader who knows payments but has
-not read this repository.
-
-Rules and the JSON shape are in PREAMBLE.md, under "notes".
-
-## What the analyser proved about this function
-
-`)
 	fmt.Fprintf(&b, "Function: %s\n", node.Ref.Symbol)
 	fmt.Fprintf(&b, "Package:  %s\n", node.Ref.Pkg)
 	fmt.Fprintf(&b, "Source:   %s:%d\n", node.Ref.File, node.Ref.Line)
@@ -70,13 +60,17 @@ Rules and the JSON shape are in PREAMBLE.md, under "notes".
 	// Worse than the size, the shape: the map grows with the function count AND
 	// there is one prompt per function, so pasting it made the pack quadratic.
 	// Eight times the functions cost seventy-three times the tokens.
-	fmt.Fprintf(&b, "\n## Where this sits in the flow\n\nYou are describing **step %d** of %q.\n"+
-		"The full step list is in PREAMBLE.md — read it once, then come back here.\n"+
-		"Steps %s are the ones immediately around it.\n",
-		step.Order, path.Label, neighbours(step, path))
-
-	
-	return b.String()
+	// No Goal: it is the same sentence for every function in the repository,
+	// and there is one of these questions per function. It lives in PREAMBLE.md
+	// under "notes".
+	return New("testigo — what does this step do?").
+		Fact(Proof, "What the analyser proved about this function", b.String()).
+		Fact(Subject, "Where this sits in the flow", fmt.Sprintf(
+			"You are describing **step %d** of %q.\n"+
+				"The full step list is in PREAMBLE.md — read it once, then come back here.\n"+
+				"Steps %s are the ones immediately around it.\n",
+			step.Order, path.Label, neighbours(step, path))).
+		Where("testigo/asks/PREAMBLE.md")
 }
 
 // neighbours names the steps either side of this one, so the prompt can point

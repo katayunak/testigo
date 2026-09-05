@@ -31,6 +31,8 @@ func main() {
 
 const usage = `testigo — test your Go fintech flows
 
+phase 1 · ScanningTheFlow
+
   testigo init    [dir]   write a starter testigo/config.json
   testigo entry   [dir]   add <pkg>#<Symbol> [label]
                           append an entry point to testigo/config.json
@@ -40,8 +42,11 @@ const usage = `testigo — test your Go fintech flows
   testigo ask     [dir]   write the prompt pack for your agent (--round 1 or 2)
   testigo collect [dir]   read the answers back, validate them, apply them
   testigo cases   [dir]   list the test plan and what it would cost, spending nothing
+  testigo report  [dir]   everything found so far, and what it cost to find
   testigo rules   [dir]   write a starter testigo/rules.json: what money movement means here
 
+Phase 1 (ScanningTheFlow) reads only. Everything testigo writes goes in testigo/;
+your source files are never touched.
 `
 
 func run(args []string) error {
@@ -84,6 +89,8 @@ func run(args []string) error {
 		return cmdCases(root)
 	case "rules":
 		return cmdRules(root)
+	case "report":
+		return cmdReport(root)
 	default:
 		fmt.Print(usage)
 		return fmt.Errorf("unknown command %q", cmd)
@@ -111,7 +118,7 @@ func cmdInit(root string) error {
 	fmt.Println("  testigo entry . add <pkg>#<Symbol> [label]")
 	fmt.Println()
 	fmt.Printf("everything testigo writes lives in %s/ — add it to .gitignore,\n", config.DirName)
-	fmt.Printf("except %s/knowledge.json, which holds the agent answers and is worth committing\n", config.DirName)
+	fmt.Printf("except %s/agentResponse.json, which holds the agent answers and is worth committing\n", config.DirName)
 
 	return nil
 }
@@ -151,7 +158,7 @@ func cmdFlow(root string) error {
 	fmt.Println("```mermaid")
 	fmt.Print(report.Flowchart(f))
 	fmt.Println("```")
-	for _, m := range f.Machines {
+	for _, m := range f.States {
 		fmt.Printf("\n## state machine: %s\n\n```mermaid\n%s```\n", m.Type, report.StateDiagram(m))
 	}
 	return nil
@@ -172,7 +179,7 @@ func printSummary(f *flowEntity.Flow, stats storage.MergeStats, path string) {
 		}
 	}
 	fmt.Printf("seams       %d injectable, %d on concrete types\n", inj, con)
-	for _, m := range f.Machines {
+	for _, m := range f.States {
 		fmt.Printf("states      %s: %d states, %d write sites\n", m.Type, len(m.States), len(m.Writes))
 	}
 	fmt.Printf("notes       %s\n", stats)
@@ -211,7 +218,7 @@ func printSummary(f *flowEntity.Flow, stats storage.MergeStats, path string) {
 	// still unknown, rather than letting a confident-looking report imply the
 	// analysis is complete.
 	var unknown []string
-	if len(f.Machines) > 0 {
+	if len(f.States) > 0 {
 		unknown = append(unknown, "which state transitions are legal")
 	}
 	if con > 0 {
@@ -245,7 +252,7 @@ func cmdAsk(root string, roundNum int) error {
 	if err != nil {
 		return fmt.Errorf("%w — run 'testigo scan' first", err)
 	}
-	knowledge, err := askingAgent.LoadKnowledge(storage.Dir(root))
+	answers, err := askingAgent.LoadAgentResponse(storage.Dir(root))
 	if err != nil {
 		return err
 	}
@@ -256,7 +263,7 @@ func cmdAsk(root string, roundNum int) error {
 
 	round := askEntity.Round(roundNum)
 	if round == askEntity.RoundGenerate {
-		if reason := askingAgent.BlockedReason(flow, knowledge); reason != "" {
+		if reason := askingAgent.BlockedReason(flow, answers); reason != "" {
 			return fmt.Errorf("round 2 needs round 1 first: %s\n\n"+
 				"Generating tests from half-collected context produces tests that look\n"+
 				"complete and check the wrong thing, which is the whole reason the rounds\n"+
@@ -264,7 +271,7 @@ func cmdAsk(root string, roundNum int) error {
 		}
 	}
 
-	asks := askingAgent.Plan(flow, knowledge, round)
+	asks := askingAgent.Plan(flow, answers, round)
 	if len(asks) == 0 {
 		fmt.Println("nothing to ask — every question for this round is already answered")
 		return nil
@@ -281,13 +288,25 @@ func cmdAsk(root string, roundNum int) error {
 	fmt.Printf("phase       2 · %s\n", model.PhaseAskingTheAgent)
 	fmt.Printf("round       %d (%s)\n", roundNum, round)
 	fmt.Printf("questions   %d\n", len(asks))
+	// Every kind, in a fixed order, and anything not in the list still gets
+	// printed. A hand-maintained list silently dropped mainEntity and then
+	// stateRoles from the breakdown, so the counts did not add up to the total
+	// and nobody could see which questions were being asked.
+	shown := map[askEntity.Kind]bool{}
 	for _, k := range []askEntity.Kind{
-		askEntity.KindBinding, askEntity.KindTransitions,
+		askEntity.KindMoneyModel, askEntity.KindMainEntity,
+		askEntity.KindStateRoles, askEntity.KindTransitions,
 		askEntity.KindExternalEffect, askEntity.KindNotes,
 		askEntity.KindTestCase,
 	} {
+		shown[k] = true
 		if byKind[k] > 0 {
 			fmt.Printf("              %-16s %d\n", k, byKind[k])
+		}
+	}
+	for k, n := range byKind {
+		if !shown[k] && n > 0 {
+			fmt.Printf("              %-16s %d\n", k, n)
 		}
 	}
 	cost := askingAgent.Estimate(round, asks, askingAgent.Preamble(flow, round))
@@ -298,7 +317,7 @@ func cmdAsk(root string, roundNum int) error {
 
 	if round == askEntity.RoundGenerate {
 		var blocked []string
-		for _, c := range askingAgent.Cases(flow, knowledge, rules) {
+		for _, c := range askingAgent.Cases(flow, answers, rules) {
 			if !c.Runnable() {
 				blocked = append(blocked, fmt.Sprintf("  %-34s %s", c.Scenario.ID, c.Blocked))
 			}
@@ -323,7 +342,7 @@ func cmdCollect(root string) error {
 	if err != nil {
 		return fmt.Errorf("%w — run 'testigo scan' first", err)
 	}
-	knowledge, err := askingAgent.LoadKnowledge(storage.Dir(root))
+	answers, err := askingAgent.LoadAgentResponse(storage.Dir(root))
 	if err != nil {
 		return err
 	}
@@ -338,7 +357,7 @@ func cmdCollect(root string) error {
 
 	_ = rules // collect validates answers; rules shape the plan, not the validation
 
-	got, err := askingAgent.Collect(storage.Dir(root), flow, knowledge, pack.Asks)
+	got, err := askingAgent.Collect(storage.Dir(root), flow, answers, pack.Asks)
 	if err != nil {
 		return err
 	}
@@ -357,7 +376,7 @@ func cmdCollect(root string) error {
 		fmt.Println()
 	}
 
-	if err := askingAgent.SaveKnowledge(storage.Dir(root), knowledge); err != nil {
+	if err := askingAgent.SaveAgentResponse(storage.Dir(root), answers); err != nil {
 		return err
 	}
 	if err := storage.Save(root, flow); err != nil {
@@ -367,7 +386,7 @@ func cmdCollect(root string) error {
 	if len(got.Cases) > 0 {
 		return applyGeneratedTests(root, got.Cases)
 	}
-	if reason := askingAgent.BlockedReason(flow, knowledge); reason != "" {
+	if reason := askingAgent.BlockedReason(flow, answers); reason != "" {
 		fmt.Printf("round 2 not ready: %s\n", reason)
 	} else {
 		fmt.Println("round 1 complete — run 'testigo ask --round 2' to generate tests")
@@ -461,7 +480,7 @@ func cmdCases(root string) error {
 	if err != nil {
 		return fmt.Errorf("%w — run 'testigo scan' first", err)
 	}
-	knowledge, err := askingAgent.LoadKnowledge(storage.Dir(root))
+	answers, err := askingAgent.LoadAgentResponse(storage.Dir(root))
 	if err != nil {
 		return err
 	}
@@ -469,7 +488,7 @@ func cmdCases(root string) error {
 	if err != nil {
 		return err
 	}
-	cases := askingAgent.Cases(flow, knowledge, rules)
+	cases := askingAgent.Cases(flow, answers, rules)
 
 	var runnable, blocked []planEntity.TestCase
 	for _, c := range cases {
@@ -480,7 +499,7 @@ func cmdCases(root string) error {
 		}
 	}
 
-	if knowledge.Binding == nil {
+	if answers.MoneyModel == nil {
 		fmt.Println("note: round 1 has not been answered, so this plan is the")
 		fmt.Println("      unfiltered catalog. Answering it usually removes several.")
 		fmt.Println()
@@ -498,7 +517,7 @@ func cmdCases(root string) error {
 		}
 	}
 
-	asks := askingAgent.Plan(flow, knowledge, askEntity.RoundGenerate)
+	asks := askingAgent.Plan(flow, answers, askEntity.RoundGenerate)
 	cost := askingAgent.Estimate(askEntity.RoundGenerate, asks, askingAgent.Preamble(flow, askEntity.RoundGenerate))
 	fmt.Printf("\ngenerating these would cost roughly %s tokens of input\n", thousands(cost.EstTokens))
 	return nil
@@ -571,5 +590,27 @@ func cmdEntry(root string, args []string) error {
 
 	fmt.Printf("added %s#%s\n", pkg, symbol)
 	fmt.Printf("%s now has %d entry point(s)\n\n", config.FileName, len(cfg.Entries))
+	return nil
+}
+
+// cmdReport prints everything testigo knows about a repository in one place.
+//
+// The findings were already reachable — they are in flow.json — but a 228 KB
+// JSON file is a thing you grep, not a thing you read. This is the version a
+// person reads, and it deliberately ends with what testigo CANNOT tell you.
+func cmdReport(root string) error {
+	flow, err := storage.Load(root)
+	if err != nil {
+		return fmt.Errorf("%w — run 'testigo scan' first", err)
+	}
+
+	// Missing answers is normal: it just means round one has not been
+	// collected. That is a state to report, not an error to return.
+	answers, _ := askingAgent.LoadAgentResponse(storage.Dir(root))
+
+	asksDir := filepath.Join(storage.Dir(root), "asks")
+	ledger := report.Measure(asksDir, filepath.Join(storage.Dir(root), "answers"))
+
+	fmt.Print(report.Report(flow, answers, ledger, asksDir))
 	return nil
 }

@@ -115,7 +115,7 @@ func scoreIdempotency(p *packages.Package, root, owner string, nm *ast.Ident, fl
 	if nameMatch {
 		c.Score++
 		c.Declarative = true
-		c.Evidence = append(c.Evidence, "the name is in the idempotency-key vocabulary")
+		c.Proof = append(c.Proof, "the name is in the idempotency-key vocabulary")
 	}
 
 	// Which struct the field sits on is the strongest structural signal there
@@ -137,7 +137,7 @@ func scoreIdempotency(p *packages.Package, root, owner string, nm *ast.Ident, fl
 		// carries Status" is still just a phone number — being on the right
 		// struct does not make an attribute into an identifier.
 		c.Score += 4
-		c.Evidence = append(c.Evidence,
+		c.Proof = append(c.Proof,
 			"the field is on "+owner+", which carries this flow's state machine, so it is the entity a retry has to match")
 	case entities[owner] != "":
 		c.Against = append(c.Against,
@@ -150,19 +150,19 @@ func scoreIdempotency(p *packages.Package, root, owner string, nm *ast.Ident, fl
 	switch org {
 	case originExternal:
 		c.Score += 3
-		c.Evidence = append(c.Evidence, "the value arrives from outside this process (header, query or request body), which is what a retry can repeat")
+		c.Proof = append(c.Proof, "the value arrives from outside this process (header, query or request body), which is what a retry can repeat")
 	case originGenerated:
 		c.Score -= 4
 		c.Against = append(c.Against, "the value is generated in this process by a UUID or random source, so a retry produces a DIFFERENT value and it cannot deduplicate anything")
 	}
 	if queried[key] || queried[nm.Name] {
 		c.Score += 3
-		c.Evidence = append(c.Evidence, "it is passed to a database call, so the code looks it up rather than only storing it")
+		c.Proof = append(c.Proof, "it is passed to a database call, so the code looks it up rather than only storing it")
 	}
 	if unique {
 		c.Score += 2
 		c.Declarative = true
-		c.Evidence = append(c.Evidence, "a migration puts a UNIQUE constraint on column \""+col+"\", so the database refuses a duplicate")
+		c.Proof = append(c.Proof, "a migration puts a UNIQUE constraint on column \""+col+"\", so the database refuses a duplicate")
 	} else if nameMatch {
 		c.Against = append(c.Against, "no migration makes column \""+col+"\" unique, so nothing stops two concurrent inserts")
 	}
@@ -393,7 +393,7 @@ func moneyCandidates(pkgs []*packages.Package, f *flowEntity.Flow, root string, 
 							File:  relPath(p.Fset, spec.Pos(), root),
 							Line:  pos.Line,
 							Score: 5,
-							Evidence: []string{
+							Proof: []string{
 								"a named type whose name means money",
 								"declared as " + types.ExprString(spec.Type),
 							},
@@ -423,8 +423,8 @@ func moneyCandidates(pkgs []*packages.Package, f *flowEntity.Flow, root string, 
 							Name: nm.Name, Owner: spec.Name.Name,
 							Type: types.ExprString(fld.Type),
 							File: relPath(p.Fset, nm.Pos(), root), Line: pos.Line,
-							Score:    2,
-							Evidence: []string{"the field name means an amount"},
+							Score: 2,
+							Proof: []string{"the field name means an amount"},
 						}
 						switch {
 						case isFloat(tv.Type):
@@ -432,14 +432,14 @@ func moneyCandidates(pkgs []*packages.Package, f *flowEntity.Flow, root string, 
 							c.Against = append(c.Against, "stored in a float, which cannot represent 0.10 exactly — this is already reported as MONEY-FLOAT")
 						case isInteger(tv.Type) && !isBasicNamed(tv.Type):
 							c.Score += 3
-							c.Evidence = append(c.Evidence, "a named integer type, so minor units with somewhere to hang the rules")
+							c.Proof = append(c.Proof, "a named integer type, so minor units with somewhere to hang the rules")
 						case isInteger(tv.Type):
 							c.Score += 2
-							c.Evidence = append(c.Evidence, "a plain integer, so minor units")
+							c.Proof = append(c.Proof, "a plain integer, so minor units")
 						}
 						if hasCurrency {
 							c.Score += 2
-							c.Evidence = append(c.Evidence, "a currency field sits beside it in the same struct")
+							c.Proof = append(c.Proof, "a currency field sits beside it in the same struct")
 						} else {
 							c.Against = append(c.Against, "no currency field in the same struct — an amount alone is a number, not money")
 						}
@@ -501,8 +501,8 @@ func canHoldAKey(p *packages.Package, fld *ast.Field) bool {
 // thing the payment flow actually moves.
 func mainEntities(pkgs []*packages.Package, f *flowEntity.Flow, local map[string]bool) map[string]string {
 	lifecycle := map[string]string{}
-	for _, m := range f.Machines {
-		// Machines are named fully qualified; the field type in source is
+	for _, m := range f.States {
+		// States are named fully qualified; the field type in source is
 		// written unqualified inside its own package and qualified outside it,
 		// so both spellings have to match.
 		lifecycle[m.Type] = m.Type
