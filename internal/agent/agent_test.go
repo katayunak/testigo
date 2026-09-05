@@ -1,9 +1,9 @@
-package askingAgent
+package agent
 
 import (
 	"encoding/json"
-	"github.com/katayunak/testigo/internal/askingAgent/askEntity"
-	"github.com/katayunak/testigo/internal/askingAgent/prompts"
+	"github.com/katayunak/testigo/internal/agent/domain"
+	"github.com/katayunak/testigo/internal/agent/prompts"
 	"github.com/katayunak/testigo/internal/testPlan/planEntity"
 	"os"
 	"path/filepath"
@@ -49,25 +49,21 @@ func fixtureFlow() *flowEntity.Flow {
 	return f
 }
 
-// Every question must be worth its cost. A node whose body has not changed
-// already has a valid answer, and asking again buys nothing.
 func TestPlanSkipsNodesWithFreshNotes(t *testing.T) {
 	f := fixtureFlow()
 	id := "example.com/paysvc/api#(*Server).process"
 	f.Nodes[id].Notes = &flowEntity.Notes{Step: "reserve funds", ForHash: "h-process"}
 
-	for _, a := range Plan(f, askEntity.NewAgentResponse(), askEntity.RoundUnderstand) {
-		if a.Kind == askEntity.KindNotes && a.Subject == id {
+	for _, a := range Plan(f, domain.NewAgentResponse(), domain.RoundUnderstand) {
+		if a.Kind == domain.KindNotes && a.Subject == id {
 			t.Fatal("re-asked for notes on a function whose body has not changed")
 		}
 	}
 
-	// ...but a changed body must be re-asked, or the notes describe code that
-	// no longer exists.
 	f.Nodes[id].Ref.BodyHash = "h-process-EDITED"
 	found := false
-	for _, a := range Plan(f, askEntity.NewAgentResponse(), askEntity.RoundUnderstand) {
-		if a.Kind == askEntity.KindNotes && a.Subject == id {
+	for _, a := range Plan(f, domain.NewAgentResponse(), domain.RoundUnderstand) {
+		if a.Kind == domain.KindNotes && a.Subject == id {
 			found = true
 		}
 	}
@@ -76,11 +72,9 @@ func TestPlanSkipsNodesWithFreshNotes(t *testing.T) {
 	}
 }
 
-// Two runs on an unchanged repository must produce byte-identical prompts, or
-// every prompt cache misses and two runs cannot be diffed.
 func TestPlanIsDeterministic(t *testing.T) {
-	a := Plan(fixtureFlow(), askEntity.NewAgentResponse(), askEntity.RoundUnderstand)
-	b := Plan(fixtureFlow(), askEntity.NewAgentResponse(), askEntity.RoundUnderstand)
+	a := Plan(fixtureFlow(), domain.NewAgentResponse(), domain.RoundUnderstand)
+	b := Plan(fixtureFlow(), domain.NewAgentResponse(), domain.RoundUnderstand)
 	if len(a) != len(b) {
 		t.Fatalf("different ask counts: %d vs %d", len(a), len(b))
 	}
@@ -94,41 +88,36 @@ func TestPlanIsDeterministic(t *testing.T) {
 	}
 }
 
-// Binding is asked first because everything else is built on it.
 func TestBindingIsAskedFirst(t *testing.T) {
-	asks := Plan(fixtureFlow(), askEntity.NewAgentResponse(), askEntity.RoundUnderstand)
-	if len(asks) == 0 || asks[0].Kind != askEntity.KindMoneyModel {
+	asks := Plan(fixtureFlow(), domain.NewAgentResponse(), domain.RoundUnderstand)
+	if len(asks) == 0 || asks[0].Kind != domain.KindMoneyModel {
 		t.Fatalf("first ask is %v, want binding", asks[0].Kind)
 	}
 }
 
-// Clock and randomness are not retry-safety questions. Asking about them costs
-// money and teaches nothing.
 func TestNoForeignEffectAskForClock(t *testing.T) {
-	for _, a := range Plan(fixtureFlow(), askEntity.NewAgentResponse(), askEntity.RoundUnderstand) {
-		if a.Kind == askEntity.KindExternalEffect && strings.Contains(a.Subject, "time.Now") {
+	for _, a := range Plan(fixtureFlow(), domain.NewAgentResponse(), domain.RoundUnderstand) {
+		if a.Kind == domain.KindExternalEffect && strings.Contains(a.Subject, "time.Now") {
 			t.Fatal("asked whether retrying time.Now makes the money move twice")
 		}
 	}
 }
 
-// The payoff of a bounded question: completeness is mechanical.
 func TestTransitionsMustCoverEveryDeclaredState(t *testing.T) {
 	states := []string{"StatusPending", "StatusAuthorized", "StatusCaptured", "StatusFailed"}
 
-	missing := &askEntity.TransitionsAnswer{MayMoveTo: map[string][]string{
+	missing := &domain.TransitionsAnswer{MayMoveTo: map[string][]string{
 		"StatusPending":    {"StatusAuthorized"},
 		"StatusAuthorized": {"StatusCaptured"},
 		"StatusCaptured":   {},
-		// StatusFailed omitted
 	}}
 	err := missing.ValidateAgainst(states)
 	if err == nil || !strings.Contains(err.Error(), "StatusFailed") {
 		t.Fatalf("a forgotten state should be an error, got %v", err)
 	}
 
-	invented := &askEntity.TransitionsAnswer{MayMoveTo: map[string][]string{
-		"StatusPending":    {"StatusSettled"}, // not a declared state
+	invented := &domain.TransitionsAnswer{MayMoveTo: map[string][]string{
+		"StatusPending":    {"StatusSettled"},
 		"StatusAuthorized": {}, "StatusCaptured": {}, "StatusFailed": {},
 	}}
 	if err := invented.ValidateAgainst(states); err == nil || !strings.Contains(err.Error(), "StatusSettled") {
@@ -136,11 +125,9 @@ func TestTransitionsMustCoverEveryDeclaredState(t *testing.T) {
 	}
 }
 
-// Illegal transitions are the complement of the allowed set, minus the pairs the
-// agent explicitly said it was unsure about. Guesses must not become tests.
 func TestIllegalTransitionsExcludeUnsure(t *testing.T) {
 	states := []string{"StatusPending", "StatusCaptured"}
-	a := &askEntity.TransitionsAnswer{MayMoveTo: map[string][]string{
+	a := &domain.TransitionsAnswer{MayMoveTo: map[string][]string{
 		"StatusPending":  {"StatusCaptured"},
 		"StatusCaptured": {},
 	}}
@@ -157,31 +144,26 @@ func TestIllegalTransitionsExcludeUnsure(t *testing.T) {
 	}
 }
 
-// The most common way a model fails this task is answering the illustration
-// instead of the repository.
 func TestBindingRejectsThePlaceholderExample(t *testing.T) {
-	a := &askEntity.MoneyModelAnswer{}
+	a := &domain.MoneyModelAnswer{}
 	a.Money.Type = "example.com/pay/domain.Money"
-	a.Money.Proof = "domain/money.go:14"
+	a.Money.Proof = domain.Proof{Symbol: "Money", At: "domain/money.go:14"}
 	if err := a.Validate(); err == nil || !strings.Contains(err.Error(), "placeholder") {
 		t.Fatalf("want a placeholder rejection, got %v", err)
 	}
 }
 
 func TestBindingRequiresEvidenceForEveryClaim(t *testing.T) {
-	a := &askEntity.MoneyModelAnswer{}
+	a := &domain.MoneyModelAnswer{}
 	a.TransferFunc.Symbol = "pay#(*Ledger).Post"
 	if err := a.Validate(); err == nil || !strings.Contains(err.Error(), "proof") {
 		t.Fatalf("a named symbol with no file:line should be rejected, got %v", err)
 	}
 }
 
-// Every default in ExternalEffectAnswer leans the same way, and it is chosen
-// rather than accidental. Treating an irreversible effect as reversible means a
-// missing test and money moved twice. The reverse costs one unnecessary test.
 func TestUnknownExternalEffectIsTreatedAsIrreversible(t *testing.T) {
 	for _, raw := range []string{`"unknown"`, `null`, `""`, `"maybe"`, `{}`} {
-		a := &askEntity.ExternalEffectAnswer{
+		a := &domain.ExternalEffectAnswer{
 			ChangesExternalState: json.RawMessage(raw),
 			ReversibleByRollback: json.RawMessage(raw),
 			OutcomeObservable:    json.RawMessage(raw),
@@ -200,7 +182,7 @@ func TestUnknownExternalEffectIsTreatedAsIrreversible(t *testing.T) {
 			t.Errorf("accepts_dedup_key %s was treated as deduplicated", raw)
 		}
 	}
-	clear := &askEntity.ExternalEffectAnswer{
+	clear := &domain.ExternalEffectAnswer{
 		ChangesExternalState: json.RawMessage(`true`),
 		ReversibleByRollback: json.RawMessage(`true`),
 	}
@@ -209,11 +191,9 @@ func TestUnknownExternalEffectIsTreatedAsIrreversible(t *testing.T) {
 	}
 }
 
-// A state cannot be final and still have somewhere to go, unless someone wrote
-// down why. That contradiction produces a confidently wrong test.
 func TestFinalStateContradictionIsRejected(t *testing.T) {
 	states := []string{"StatusPending", "StatusCaptured", "StatusRefunded"}
-	a := &askEntity.TransitionsAnswer{
+	a := &domain.TransitionsAnswer{
 		MayMoveTo: map[string][]string{
 			"StatusPending":  {"StatusCaptured"},
 			"StatusCaptured": {"StatusRefunded"},
@@ -226,7 +206,6 @@ func TestFinalStateContradictionIsRejected(t *testing.T) {
 		t.Fatalf("want a final-state contradiction, got %v", err)
 	}
 
-	// ...unless it is declared as a real business exception, with a reason.
 	a.FinalStateExceptions = append(a.FinalStateExceptions, struct {
 		From string `json:"from"`
 		To   string `json:"to"`
@@ -243,9 +222,8 @@ func TestFinalStateContradictionIsRejected(t *testing.T) {
 	}
 }
 
-// A sleep in a concurrency test makes its green result meaningless.
 func TestGeneratedCaseRejectsSleep(t *testing.T) {
-	c := &askEntity.CaseAnswer{Status: "written", ReachedAssertions: []string{"fails if never called"}}
+	c := &domain.CaseAnswer{Status: "written", ReachedAssertions: []string{"fails if never called"}}
 	c.File.Path = "api/idempotency_testigo_test.go"
 	c.File.Content = "package api\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestX(t *testing.T) { time.Sleep(time.Second) }\n"
 
@@ -255,8 +233,6 @@ func TestGeneratedCaseRejectsSleep(t *testing.T) {
 	}
 }
 
-// A small test that opens a socket or reads the wall clock is not small, and the
-// difference is checkable rather than a matter of trust.
 func TestSizeIsEnforcedNotDescribed(t *testing.T) {
 	cases := map[string]string{
 		"time.Now": "package api\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestX(t *testing.T) { _ = time.Now() }\n",
@@ -274,16 +250,14 @@ func TestSizeIsEnforcedNotDescribed(t *testing.T) {
 	if problems := testPlan.CheckSize("x_test.go", clean, planEntity.SizeSmall); len(problems) != 0 {
 		t.Errorf("a clean small test was rejected: %v", problems)
 	}
-	// Medium tests are defined by permission, and permission is not checkable.
+
 	if problems := testPlan.CheckSize("x_test.go", cases["sql.Open"], planEntity.SizeMedium); len(problems) != 0 {
 		t.Errorf("a medium test was held to the small predicate: %v", problems)
 	}
 }
 
-// A test that cannot prove the interesting situation happened reports green
-// having checked nothing.
 func TestWrittenCaseMustProveItDidSomething(t *testing.T) {
-	c := &askEntity.CaseAnswer{Status: "written"}
+	c := &domain.CaseAnswer{Status: "written"}
 	c.File.Path = "api/x_testigo_test.go"
 	c.File.Content = "package api\n\nimport \"testing\"\n\nfunc TestX(t *testing.T) {}\n"
 	err := c.Validate(planEntity.SizeSmall)
@@ -292,16 +266,13 @@ func TestWrittenCaseMustProveItDidSomething(t *testing.T) {
 	}
 }
 
-// A blocked case with no reason is indistinguishable from one that was skipped.
 func TestBlockedCaseMustSayWhy(t *testing.T) {
-	c := &askEntity.CaseAnswer{Status: "blocked"}
+	c := &domain.CaseAnswer{Status: "blocked"}
 	if err := c.Validate(planEntity.SizeSmall); err == nil || !strings.Contains(err.Error(), "no reason") {
 		t.Fatalf("want a missing-reason rejection, got %v", err)
 	}
 }
 
-// Being strict about a markdown fence would be principled and would waste money:
-// the answer is right, the wrapping is wrong, and re-running costs tokens.
 func TestStripFenceTolerates(t *testing.T) {
 	want := `{"step":"reserve funds"}`
 	for _, in := range []string{
@@ -318,29 +289,27 @@ func TestStripFenceTolerates(t *testing.T) {
 
 func TestRoundTwoIsBlockedUntilRoundOneIsAnswered(t *testing.T) {
 	f := fixtureFlow()
-	k := askEntity.NewAgentResponse()
+	k := domain.NewAgentResponse()
 
 	if BlockedReason(f, k) == "" {
 		t.Fatal("round 2 should be blocked with no answers at all")
 	}
-	k.MoneyModel = &askEntity.MoneyModelAnswer{}
+	k.MoneyModel = &domain.MoneyModelAnswer{}
 	if r := BlockedReason(f, k); r == "" || !strings.Contains(r, "transitions") {
 		t.Fatalf("should still be blocked on transitions, got %q", r)
 	}
-	k.Transitions["example.com/paysvc/domain.PaymentStatus"] = &askEntity.TransitionsAnswer{}
+	k.Transitions["example.com/paysvc/domain.PaymentStatus"] = &domain.TransitionsAnswer{}
 	if r := BlockedReason(f, k); r == "" {
 		t.Fatal("should still be blocked on retry safety of the seams")
 	}
 	for _, target := range prompts.SeamTargets(f) {
-		k.ExternalEffects[target] = &askEntity.ExternalEffectAnswer{}
+		k.ExternalEffects[target] = &domain.ExternalEffectAnswer{}
 	}
 	if r := BlockedReason(f, k); r != "" {
 		t.Fatalf("should be unblocked now, got %q", r)
 	}
 }
 
-// A note written about a body that changed while the agent was working describes
-// code that no longer exists.
 func TestNotesAnswerRejectedWhenTheBodyMovedUnderIt(t *testing.T) {
 	dir := t.TempDir()
 	f := fixtureFlow()
@@ -349,14 +318,14 @@ func TestNotesAnswerRejectedWhenTheBodyMovedUnderIt(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, answersDir), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	ask := askEntity.Ask{Kind: askEntity.KindNotes, Subject: id, ForHash: "h-process"}
+	ask := domain.Ask{Kind: domain.KindNotes, Subject: id, ForHash: "h-process"}
 	body := `{"step":"reserve funds","purpose":"holds the money","confidence":"high"}`
 	if err := os.WriteFile(filepath.Join(dir, answersDir, ask.AnswerFile()), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	f.Nodes[id].Ref.BodyHash = "h-process-EDITED"
-	got, err := Collect(dir, f, askEntity.NewAgentResponse(), []askEntity.Ask{ask})
+	got, err := Collect(dir, f, domain.NewAgentResponse(), []domain.Ask{ask})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,9 +342,9 @@ func TestWriteTestRefusesDangerousPaths(t *testing.T) {
 	for _, path := range []string{
 		"../escape_test.go",
 		"/etc/passwd_test.go",
-		"api/helper.go", // not a _test.go file: would ship in the binary
+		"api/helper.go",
 	} {
-		g := &askEntity.CaseAnswer{}
+		g := &domain.CaseAnswer{}
 		g.File.Path = path
 		g.File.Content = "package api\n"
 		if _, err := WriteTest(dir, g); err == nil {
@@ -384,8 +353,6 @@ func TestWriteTestRefusesDangerousPaths(t *testing.T) {
 	}
 }
 
-// The prompts are the product. If a rule that stops a specific failure mode gets
-// edited out, this test says so.
 func TestPromptsCarryTheirLoadBearingRules(t *testing.T) {
 	f := fixtureFlow()
 	paths := prompts.Paths(f)
@@ -411,12 +378,7 @@ func TestPromptsCarryTheirLoadBearingRules(t *testing.T) {
 			"Can the outcome be checked afterwards",
 		}},
 	}
-	// A rule has to REACH the agent. It does not have to be in every prompt.
-	//
-	// Round one now hoists the fixed blocks into PREAMBLE.md, which the agent
-	// reads once, because repeating them made a 73-function service cost a
-	// million tokens. So the assertion is "the agent is told this", not "this
-	// prompt repeats it" — and the preamble counts.
+
 	pre := UnderstandPreambleFor(f)
 	for _, c := range cases {
 		for _, must := range c.must {
@@ -427,13 +389,10 @@ func TestPromptsCarryTheirLoadBearingRules(t *testing.T) {
 	}
 }
 
-// UnderstandPreambleFor is a test shorthand for the round-one shared block.
 func UnderstandPreambleFor(f *flowEntity.Flow) string {
-	return Preamble(f, askEntity.RoundUnderstand)
+	return Preamble(f, domain.RoundUnderstand)
 }
 
-// The shared preamble must keep the rules that were hoisted out of the per-case
-// prompts. If one is edited away, nothing else carries it.
 func TestPreambleCarriesTheHoistedRules(t *testing.T) {
 	for _, must := range []string{
 		"Never derive an expected value from the implementation",
@@ -448,7 +407,6 @@ func TestPreambleCarriesTheHoistedRules(t *testing.T) {
 	}
 }
 
-// Facts must reach the case prompt, and only the facts that case needs.
 func TestCasePromptCarriesItsOwnFactsAndNoMore(t *testing.T) {
 	f := fixtureFlow()
 	var concurrent, money planEntity.TestCase
@@ -477,7 +435,6 @@ func TestCasePromptCarriesItsOwnFactsAndNoMore(t *testing.T) {
 		}
 	}
 
-	// The saving comes from NOT pasting the whole flow into every case.
 	if money.Scenario.ID != "" {
 		mp := prompts.TestCase(money, f).Render()
 		if strings.Contains(mp, "(*database/sql.DB).BeginTx") {
@@ -486,14 +443,13 @@ func TestCasePromptCarriesItsOwnFactsAndNoMore(t *testing.T) {
 	}
 }
 
-// Hoisting the shared rules must actually be cheaper, not just tidier.
 func TestSharedPreambleIsCheaperThanRepeatingIt(t *testing.T) {
 	f := fixtureFlow()
-	asks := Plan(f, fullKnowledge(f), askEntity.RoundGenerate)
+	asks := Plan(f, fullKnowledge(f), domain.RoundGenerate)
 	if len(asks) < 2 {
 		t.Skip("need at least two cases to compare")
 	}
-	cost := Estimate(askEntity.RoundGenerate, asks, Preamble(f, askEntity.RoundGenerate))
+	cost := Estimate(domain.RoundGenerate, asks, Preamble(f, domain.RoundGenerate))
 	if cost.SavedByShared <= 0 {
 		t.Fatal("no saving reported from the shared preamble")
 	}
@@ -503,22 +459,18 @@ func TestSharedPreambleIsCheaperThanRepeatingIt(t *testing.T) {
 	}
 }
 
-func fullKnowledge(f *flowEntity.Flow) *askEntity.AgentResponse {
-	k := askEntity.NewAgentResponse()
-	k.MoneyModel = &askEntity.MoneyModelAnswer{}
+func fullKnowledge(f *flowEntity.Flow) *domain.AgentResponse {
+	k := domain.NewAgentResponse()
+	k.MoneyModel = &domain.MoneyModelAnswer{}
 	for _, m := range f.States {
-		k.Transitions[m.Type] = &askEntity.TransitionsAnswer{}
+		k.Transitions[m.Type] = &domain.TransitionsAnswer{}
 	}
 	for _, target := range prompts.SeamTargets(f) {
-		k.ExternalEffects[target] = &askEntity.ExternalEffectAnswer{}
+		k.ExternalEffects[target] = &domain.ExternalEffectAnswer{}
 	}
 	return k
 }
 
-// Phase 1 ranks candidates by proof so round one does not pay to ask. When the
-// proof decides, no question is emitted; when it is close, a narrow question
-// is. This test pins the boundary, because getting it wrong in either direction
-// costs money or costs accuracy.
 func TestEvidenceDecidesInsteadOfAsking(t *testing.T) {
 	clear := flowEntity.Candidates{
 		{Name: "IdempotencyKey", Owner: "Payment", Score: 7, Declarative: true},
@@ -536,22 +488,11 @@ func TestEvidenceDecidesInsteadOfAsking(t *testing.T) {
 		t.Error("a one-point gap is a real question, not a decision")
 	}
 
-	// A field that matched only on its name must never win alone. That was the
-	// original bug: an Order carrying ID, ReferenceID and TraceID had three
-	// name matches and no way to choose.
 	nameOnly := flowEntity.Candidates{{Name: "ReferenceID", Owner: "Order", Score: 1, Declarative: true}}
 	if _, ok := nameOnly.Decided(); ok {
 		t.Error("a name match with no behavioural proof decided the question")
 	}
 
-	// The mirror image, and the one that actually shipped wrong. On a real
-	// recharge service Order.Phone scored 6 on behaviour alone — it arrives in
-	// the request and it is passed to a database call, both true, both true of
-	// every other query parameter in the repo. Nothing named it a key, and a
-	// phone number is the TARGET of a topup, not a deduplication key.
-	//
-	// Behaviour says a value COULD be a key. Only a name or a unique constraint
-	// says anyone meant it to be one.
 	behaviourOnly := flowEntity.Candidates{{Name: "Phone", Owner: "Order", Score: 6}}
 	if _, ok := behaviourOnly.Decided(); ok {
 		t.Error("behavioural proof with nothing declaring the field a key decided the question")
@@ -565,29 +506,18 @@ func TestEvidenceDecidesInsteadOfAsking(t *testing.T) {
 	}
 }
 
-// TestRoundOneDoesNotRepeatTheFlowMap is the regression for the bug that made a
-// 73-function service cost a million tokens to ask about.
-//
-// Every round-one prompt used to paste the whole step list. Measured on a real
-// service that was 34 KB per prompt and 94% of each one; two prompts compared
-// byte for byte came out 99% identical. Worse than the size was the shape — the
-// map grows with the function count and there is roughly one prompt per
-// function, so the pack was QUADRATIC.
 func TestRoundOneDoesNotRepeatTheFlowMap(t *testing.T) {
 	f := fixtureFlow()
-	asks := Plan(f, askEntity.NewAgentResponse(), askEntity.RoundUnderstand)
+	asks := Plan(f, domain.NewAgentResponse(), domain.RoundUnderstand)
 	if len(asks) < 2 {
 		t.Skip("need at least two prompts to compare")
 	}
 
-	// The map is in the preamble, so the preamble is allowed to be large.
-	pre := Preamble(f, askEntity.RoundUnderstand)
+	pre := Preamble(f, domain.RoundUnderstand)
 	if !strings.Contains(pre, "ENTRY POINT") {
 		t.Fatal("round one's preamble does not carry the flow map")
 	}
 
-	// No individual prompt may. "step N" pointing into the shared map is fine;
-	// a second copy of the steps is not.
 	for _, a := range asks {
 		if strings.Count(a.Prompt, "ENTRY POINT") > 1 {
 			t.Errorf("%s: prompt contains the flow map more than once", a.Kind)
@@ -597,40 +527,29 @@ func TestRoundOneDoesNotRepeatTheFlowMap(t *testing.T) {
 		}
 	}
 
-	// And the whole point: hoisting has to be cheaper than repeating.
-	cost := Estimate(askEntity.RoundUnderstand, asks, pre)
+	cost := Estimate(domain.RoundUnderstand, asks, pre)
 	if cost.SavedByShared <= 0 {
 		t.Error("round one reports no saving from hoisting the shared block")
 	}
 }
 
-// TestTheSameFieldCannotBeKeyAndNotKey is the regression for a contradiction a
-// person caught and the validator did not.
-//
-// On a real recharge service the agent named OrderCompleteRequest.OrderId as
-// the idempotency key and, in the same answer, listed Order.OrderID under
-// other_identifiers with could_be_key false. completeOrder.go:94 assigns one
-// directly from the other — same value, two verdicts. Every field the validator
-// policed came back clean, because the false claim lived in the one field that
-// had no rules.
 func TestTheSameFieldCannotBeKeyAndNotKey(t *testing.T) {
-	newAnswer := func() *askEntity.MainEntityAnswer {
-		a := &askEntity.MainEntityAnswer{}
+	newAnswer := func() *domain.MainEntityAnswer {
+		a := &domain.MainEntityAnswer{}
 		a.MainEntity.Struct = "Order"
-		a.MainEntity.Proof = "domain/entity/order.go:9"
+		a.MainEntity.Proof = domain.Proof{Symbol: "Order", At: "domain/entity/order.go:9"}
 		a.IdempotencyKey.Field = "OrderId"
-		a.IdempotencyKey.Proof = "domain/entity/payment.go:46"
+		a.IdempotencyKey.Proof = domain.Proof{Symbol: "OrderId", At: "domain/entity/payment.go:46"}
 		return a
 	}
 
-	// The exact shape that shipped, down to the spelling difference.
 	a := newAnswer()
-	a.OtherIdentifiers = append(a.OtherIdentifiers, struct {
-		Field      string `json:"field"`
-		Purpose    string `json:"purpose"`
-		Proof      string `json:"proof"`
-		CouldBeKey bool   `json:"could_be_key"`
-	}{Field: "OrderID", Purpose: "business-level order reference", Proof: "domain/entity/order.go:12", CouldBeKey: false})
+	a.OtherIdentifiers = append(a.OtherIdentifiers, domain.Identifier{
+		Field:      "OrderID",
+		Purpose:    "business-level order reference",
+		Proof:      domain.Proof{Symbol: "Order.OrderID", At: "domain/entity/order.go:12"},
+		CouldBeKey: false,
+	})
 
 	err := a.Validate()
 	if err == nil {
@@ -640,28 +559,24 @@ func TestTheSameFieldCannotBeKeyAndNotKey(t *testing.T) {
 		t.Errorf("wrong reason: %v", err)
 	}
 
-	// And a purpose with no file:line is the gap that let it through.
 	b := newAnswer()
-	b.OtherIdentifiers = append(b.OtherIdentifiers, struct {
-		Field      string `json:"field"`
-		Purpose    string `json:"purpose"`
-		Proof      string `json:"proof"`
-		CouldBeKey bool   `json:"could_be_key"`
-	}{Field: "RRN", Purpose: "bank retrieval number, arrives after authorization", Proof: "", CouldBeKey: false})
+	b.OtherIdentifiers = append(b.OtherIdentifiers, domain.Identifier{
+		Field:      "RRN",
+		Purpose:    "bank retrieval number, arrives after authorization",
+		CouldBeKey: false,
+	})
 
 	if err := b.Validate(); err == nil || !strings.Contains(err.Error(), "file and line") {
 		t.Errorf("a purpose with no citation must be refused, got %v", err)
 	}
 
-	// A properly cited, non-conflicting identifier is fine.
 	c := newAnswer()
-	c.OtherIdentifiers = append(c.OtherIdentifiers, struct {
-		Field      string `json:"field"`
-		Purpose    string `json:"purpose"`
-		Proof      string `json:"proof"`
-		CouldBeKey bool   `json:"could_be_key"`
-	}{Field: "RRN", Purpose: "bank retrieval number, arrives after authorization",
-		Proof: "domain/entity/order.go:21", CouldBeKey: false})
+	c.OtherIdentifiers = append(c.OtherIdentifiers, domain.Identifier{
+		Field:      "RRN",
+		Purpose:    "bank retrieval number, arrives after authorization",
+		Proof:      domain.Proof{Symbol: "Order.RRN", At: "domain/entity/order.go:21"},
+		CouldBeKey: false,
+	})
 
 	if err := c.Validate(); err != nil {
 		t.Errorf("a cited, non-conflicting identifier must be accepted: %v", err)

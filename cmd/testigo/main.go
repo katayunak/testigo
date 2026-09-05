@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/katayunak/testigo/internal"
-	"github.com/katayunak/testigo/internal/askingAgent"
-	"github.com/katayunak/testigo/internal/askingAgent/askEntity"
+	"github.com/katayunak/testigo/internal/agent"
+	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/config"
 	"github.com/katayunak/testigo/internal/report"
 	"github.com/katayunak/testigo/internal/scanningFlow"
@@ -40,6 +40,8 @@ phase 1 · ScanningTheFlow
   testigo flow    [dir]   print the flow as a Mermaid diagram
 
   testigo ask     [dir]   write the prompt pack for your agent (--round 1 or 2)
+                          --explain shows what the planner asked for and what it skipped
+                          --budget N caps the weighted tokens it will commit
   testigo collect [dir]   read the answers back, validate them, apply them
   testigo cases   [dir]   list the test plan and what it would cost, spending nothing
   testigo report  [dir]   everything found so far, and what it cost to find
@@ -58,6 +60,8 @@ func run(args []string) error {
 	cmd, rest := args[0], args[1:]
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	round := fs.Int("round", 1, "which round of questions to write: 1 collects context, 2 asks for tests")
+	budget := fs.Int("budget", 0, "stop planning asks once this many weighted tokens are committed; 0 means no ceiling")
+	explain := fs.Bool("explain", false, "print what the planner chose, what it skipped and why, then carry on")
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
@@ -82,7 +86,7 @@ func run(args []string) error {
 	case "flow":
 		return cmdFlow(root)
 	case "ask":
-		return cmdAsk(root, *round)
+		return cmdAsk(root, *round, *budget, *explain)
 	case "collect":
 		return cmdCollect(root)
 	case "cases":
@@ -97,7 +101,6 @@ func run(args []string) error {
 	}
 }
 
-// cmdInit initialized the file for scanning the flow
 func cmdInit(root string) error {
 	p := config.Path(root)
 	if _, err := os.Stat(p); err == nil {
@@ -110,8 +113,7 @@ func cmdInit(root string) error {
 	if err := os.WriteFile(p, []byte(config.Example), 0o644); err != nil {
 		return err
 	}
-	// No candidate list follows this. testigo does not guess entry points; the
-	// user declares them, and scan refuses to run on an empty list.
+
 	fmt.Printf("wrote %s\n", p)
 	fmt.Println("declare your entry points in it before scanning:")
 	fmt.Println("  edit the \"entries\" array by hand, or")
@@ -184,8 +186,7 @@ func printSummary(f *flowEntity.Flow, stats storage.MergeStats, path string) {
 	}
 	fmt.Printf("notes       %s\n", stats)
 	if f.GeneratedFiles > 0 {
-		// Said out loud on purpose. A filter nobody mentions reads as an empty
-		// result, and on a gRPC service this one is doing a lot of work.
+
 		fmt.Printf("generated   %d file(s) marked DO NOT EDIT; %d finding(s) from them not reported\n",
 			f.GeneratedFiles, f.GeneratedFindings)
 	}
@@ -214,9 +215,6 @@ func printSummary(f *flowEntity.Flow, stats storage.MergeStats, path string) {
 		}
 	}
 
-	// The whole point of separating facts from context: say plainly what is
-	// still unknown, rather than letting a confident-looking report imply the
-	// analysis is complete.
 	var unknown []string
 	if len(f.States) > 0 {
 		unknown = append(unknown, "which state transitions are legal")
@@ -244,15 +242,12 @@ func min(a, b int) int {
 	return b
 }
 
-// cmdAsk writes the prompt pack. It never contacts a network and never needs a
-// key: the pack is markdown and JSON on disk, so any agent can answer it and a
-// person can answer it by hand when the agent gets one wrong.
-func cmdAsk(root string, roundNum int) error {
+func cmdAsk(root string, roundNum int, budget int, explain bool) error {
 	flow, err := storage.Load(root)
 	if err != nil {
 		return fmt.Errorf("%w — run 'testigo scan' first", err)
 	}
-	answers, err := askingAgent.LoadAgentResponse(storage.Dir(root))
+	answers, err := agent.LoadAgentResponse(storage.Dir(root))
 	if err != nil {
 		return err
 	}
@@ -261,9 +256,9 @@ func cmdAsk(root string, roundNum int) error {
 		return err
 	}
 
-	round := askEntity.Round(roundNum)
-	if round == askEntity.RoundGenerate {
-		if reason := askingAgent.BlockedReason(flow, answers); reason != "" {
+	round := domain.Round(roundNum)
+	if round == domain.RoundGenerate {
+		if reason := agent.BlockedReason(flow, answers); reason != "" {
 			return fmt.Errorf("round 2 needs round 1 first: %s\n\n"+
 				"Generating tests from half-collected context produces tests that look\n"+
 				"complete and check the wrong thing, which is the whole reason the rounds\n"+
@@ -271,33 +266,33 @@ func cmdAsk(root string, roundNum int) error {
 		}
 	}
 
-	asks := askingAgent.Plan(flow, answers, round)
+	asks, plan := agent.PlanWith(flow, answers, round, rules, budget)
+	if explain && round == domain.RoundUnderstand {
+		fmt.Println(plan.Explain())
+	}
 	if len(asks) == 0 {
 		fmt.Println("nothing to ask — every question for this round is already answered")
 		return nil
 	}
-	pack, err := askingAgent.Write(storage.Dir(root), round, asks, askingAgent.Preamble(flow, round))
+	pack, err := agent.Write(storage.Dir(root), round, asks, agent.Preamble(flow, round))
 	if err != nil {
 		return err
 	}
 
-	byKind := map[askEntity.Kind]int{}
+	byKind := map[domain.Kind]int{}
 	for _, a := range asks {
 		byKind[a.Kind]++
 	}
 	fmt.Printf("phase       2 · %s\n", model.PhaseAskingTheAgent)
 	fmt.Printf("round       %d (%s)\n", roundNum, round)
 	fmt.Printf("questions   %d\n", len(asks))
-	// Every kind, in a fixed order, and anything not in the list still gets
-	// printed. A hand-maintained list silently dropped mainEntity and then
-	// stateRoles from the breakdown, so the counts did not add up to the total
-	// and nobody could see which questions were being asked.
-	shown := map[askEntity.Kind]bool{}
-	for _, k := range []askEntity.Kind{
-		askEntity.KindMoneyModel, askEntity.KindMainEntity,
-		askEntity.KindStateRoles, askEntity.KindTransitions,
-		askEntity.KindExternalEffect, askEntity.KindNotes,
-		askEntity.KindTestCase,
+
+	shown := map[domain.Kind]bool{}
+	for _, k := range []domain.Kind{
+		domain.KindMoneyModel, domain.KindMainEntity,
+		domain.KindStateRoles, domain.KindTransitions,
+		domain.KindExternalEffect, domain.KindNotes,
+		domain.KindTestCase,
 	} {
 		shown[k] = true
 		if byKind[k] > 0 {
@@ -309,15 +304,15 @@ func cmdAsk(root string, roundNum int) error {
 			fmt.Printf("              %-16s %d\n", k, n)
 		}
 	}
-	cost := askingAgent.Estimate(round, asks, askingAgent.Preamble(flow, round))
+	cost := agent.Estimate(round, asks, agent.Preamble(flow, round))
 	fmt.Printf("est. cost   ~%s tokens across %d prompt(s)\n", thousands(cost.EstTokens), cost.Prompts)
 	if cost.SavedByShared > 0 {
 		fmt.Printf("            ~%s saved by hoisting the shared rules into PREAMBLE.md\n", thousands(cost.SavedByShared))
 	}
 
-	if round == askEntity.RoundGenerate {
+	if round == domain.RoundGenerate {
 		var blocked []string
-		for _, c := range askingAgent.Cases(flow, answers, rules) {
+		for _, c := range agent.Cases(flow, answers, rules) {
 			if !c.Runnable() {
 				blocked = append(blocked, fmt.Sprintf("  %-34s %s", c.Scenario.ID, c.Blocked))
 			}
@@ -335,14 +330,12 @@ func cmdAsk(root string, roundNum int) error {
 	return nil
 }
 
-// cmdCollect reads the answers, checks them against what the compiler proved,
-// and applies only the ones that survive.
 func cmdCollect(root string) error {
 	flow, err := storage.Load(root)
 	if err != nil {
 		return fmt.Errorf("%w — run 'testigo scan' first", err)
 	}
-	answers, err := askingAgent.LoadAgentResponse(storage.Dir(root))
+	answers, err := agent.LoadAgentResponse(storage.Dir(root))
 	if err != nil {
 		return err
 	}
@@ -350,14 +343,14 @@ func cmdCollect(root string) error {
 	if err != nil {
 		return err
 	}
-	pack, err := askingAgent.ReadPack(storage.Dir(root))
+	pack, err := agent.ReadPack(storage.Dir(root))
 	if err != nil {
 		return fmt.Errorf("%w — run 'testigo ask' first", err)
 	}
 
-	_ = rules // collect validates answers; rules shape the plan, not the validation
+	_ = rules
 
-	got, err := askingAgent.Collect(storage.Dir(root), flow, answers, pack.Asks)
+	got, err := agent.Collect(storage.Dir(root), flow, answers, pack.Asks)
 	if err != nil {
 		return err
 	}
@@ -376,7 +369,7 @@ func cmdCollect(root string) error {
 		fmt.Println()
 	}
 
-	if err := askingAgent.SaveAgentResponse(storage.Dir(root), answers); err != nil {
+	if err := agent.SaveAgentResponse(storage.Dir(root), answers); err != nil {
 		return err
 	}
 	if err := storage.Save(root, flow); err != nil {
@@ -386,7 +379,7 @@ func cmdCollect(root string) error {
 	if len(got.Cases) > 0 {
 		return applyGeneratedTests(root, got.Cases)
 	}
-	if reason := askingAgent.BlockedReason(flow, answers); reason != "" {
+	if reason := agent.BlockedReason(flow, answers); reason != "" {
 		fmt.Printf("round 2 not ready: %s\n", reason)
 	} else {
 		fmt.Println("round 1 complete — run 'testigo ask --round 2' to generate tests")
@@ -394,7 +387,7 @@ func cmdCollect(root string) error {
 	return nil
 }
 
-func applyGeneratedTests(root string, cases []*askEntity.CaseAnswer) error {
+func applyGeneratedTests(root string, cases []*domain.CaseAnswer) error {
 	var ran []struct {
 		file  string
 		names []string
@@ -409,7 +402,7 @@ func applyGeneratedTests(root string, cases []*askEntity.CaseAnswer) error {
 			}
 			continue
 		}
-		out, err := askingAgent.WriteTest(root, c)
+		out, err := agent.WriteTest(root, c)
 		if err != nil {
 			fmt.Printf("  REFUSED   %s: %v\n", c.CaseID, err)
 			continue
@@ -443,7 +436,7 @@ func applyGeneratedTests(root string, cases []*askEntity.CaseAnswer) error {
 
 	fmt.Printf("\nrunning with -race...\n\n")
 	for _, r := range ran {
-		out, passed := askingAgent.RunTests(root, r.file, r.names)
+		out, passed := agent.RunTests(root, r.file, r.names)
 		fmt.Println(out)
 		if !passed {
 			fmt.Println("A red result may be the point. Check it against any")
@@ -468,19 +461,12 @@ func thousands(n int) string {
 	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }
 
-// cmdCases shows the plan without writing a prompt or spending a token.
-//
-// Worth having its own command because the decision it supports is "is this
-// worth paying for", and that decision has to be available BEFORE the money is
-// spent. It also shows the blocked cases, which are the more interesting half:
-// a repository where fifteen scenarios are blocked on concrete seams has just
-// been told the most useful thing testigo knows about it.
 func cmdCases(root string) error {
 	flow, err := storage.Load(root)
 	if err != nil {
 		return fmt.Errorf("%w — run 'testigo scan' first", err)
 	}
-	answers, err := askingAgent.LoadAgentResponse(storage.Dir(root))
+	answers, err := agent.LoadAgentResponse(storage.Dir(root))
 	if err != nil {
 		return err
 	}
@@ -488,7 +474,7 @@ func cmdCases(root string) error {
 	if err != nil {
 		return err
 	}
-	cases := askingAgent.Cases(flow, answers, rules)
+	cases := agent.Cases(flow, answers, rules)
 
 	var runnable, blocked []planEntity.TestCase
 	for _, c := range cases {
@@ -517,18 +503,12 @@ func cmdCases(root string) error {
 		}
 	}
 
-	asks := askingAgent.Plan(flow, answers, askEntity.RoundGenerate)
-	cost := askingAgent.Estimate(askEntity.RoundGenerate, asks, askingAgent.Preamble(flow, askEntity.RoundGenerate))
+	asks := agent.Plan(flow, answers, domain.RoundGenerate)
+	cost := agent.Estimate(domain.RoundGenerate, asks, agent.Preamble(flow, domain.RoundGenerate))
 	fmt.Printf("\ngenerating these would cost roughly %s tokens of input\n", thousands(cost.EstTokens))
 	return nil
 }
 
-// cmdRules scaffolds the business rules file.
-//
-// The one thing testigo cannot work out from code. "Money movement" is not the
-// same event in a wallet, a switch, and a service-activation system, and a tool
-// that assumed one definition would generate confident wrong tests for the other
-// two. Two minutes writing this down removes a whole class of noise.
 func cmdRules(root string) error {
 	if err := os.MkdirAll(config.Dir(root), 0o755); err != nil {
 		return err
@@ -548,7 +528,6 @@ func cmdRules(root string) error {
 	return nil
 }
 
-// cmdEntry appends one entry point to testigo.json.
 func cmdEntry(root string, args []string) error {
 	if len(args) > 0 && args[0] != "add" {
 		args = args[1:]
@@ -576,7 +555,6 @@ func cmdEntry(root string, args []string) error {
 		return fmt.Errorf("%w\n\nrun 'testigo init' first", err)
 	}
 
-	// skips adding redundant entry points
 	for _, e := range cfg.Entries {
 		if e.Pkg == pkg && e.Symbol == symbol {
 			return fmt.Errorf("%s#%s is already an entry point", pkg, symbol)
@@ -593,20 +571,13 @@ func cmdEntry(root string, args []string) error {
 	return nil
 }
 
-// cmdReport prints everything testigo knows about a repository in one place.
-//
-// The findings were already reachable — they are in flow.json — but a 228 KB
-// JSON file is a thing you grep, not a thing you read. This is the version a
-// person reads, and it deliberately ends with what testigo CANNOT tell you.
 func cmdReport(root string) error {
 	flow, err := storage.Load(root)
 	if err != nil {
 		return fmt.Errorf("%w — run 'testigo scan' first", err)
 	}
 
-	// Missing answers is normal: it just means round one has not been
-	// collected. That is a state to report, not an error to return.
-	answers, _ := askingAgent.LoadAgentResponse(storage.Dir(root))
+	answers, _ := agent.LoadAgentResponse(storage.Dir(root))
 
 	asksDir := filepath.Join(storage.Dir(root), "asks")
 	ledger := report.Measure(asksDir, filepath.Join(storage.Dir(root), "answers"))

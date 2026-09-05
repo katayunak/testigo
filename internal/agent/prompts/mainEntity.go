@@ -8,25 +8,6 @@ import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// MainEntity asks the one question the scanner provably cannot answer.
-//
-// Everything up to here is derivable. testigo knows which named types are
-// lifecycles, which structs carry them, which fields arrive from outside the
-// process, which are handed to a database call, and which columns a migration
-// makes unique. That narrows a real recharge service from eight equally-scored
-// fields — Phone, Name, three config structs — down to a handful of order
-// identifiers on the entity that carries Status.
-//
-// It cannot get further, and the reason is not a missing heuristic. On that
-// service the entity carries ID, UserID, OrderID, ProviderID, RRN and TID. All
-// six are identifiers. All six are strings or UUIDs on the struct the payment
-// moves through. Which one a CLIENT repeats when it retries is a fact about the
-// contract between two systems, and no amount of AST walking reads a contract.
-//
-// So the question is narrow by construction: the candidates are listed, the
-// proof is attached, and the agent chooses among them rather than searching.
-// A narrow question with proof gets a far better answer than "find the
-// idempotency key", and it costs a fraction of the tokens.
 func MainEntity(f *flowEntity.Flow, entities []Entity) *Prompt {
 	p := New("testigo — which entity does this flow move, and what identifies a repeat?").
 		Goal("Two questions about the same struct. Both are contract questions: the analyser can see every field and still not know which one two systems agreed on.").
@@ -118,25 +99,35 @@ the moment it must decide whether to act.
   "main_entity": {
     "struct": "Order",
     "package": "example.com/pay/domain/entity",
-    "proof": "domain/entity/order.go:9 — carries Status, written in 122 places",
+    "proof": { "symbol": "Order", "at": "domain/entity/order.go:9" },
     "why": "one sentence: what real-world thing one row of it is"
   },
   "idempotency_key": {
     "field": "OrderID" | null,
-    "proof": "domain/entity/order.go:12 — arrives in the request payload at controller/x.go:31 and is read back at repository/y.go:88 before the charge",
+    "proof": { "symbol": "Order.OrderID", "at": "domain/entity/order.go:12" },
     "supplied_by": "client" | "provider" | "queue" | "unknown",
     "read_before_acting": true | false | "unknown",
     "confidence": "high" | "medium" | "low"
   },
   "other_identifiers": [
-    { "field": "ID",     "purpose": "surrogate primary key, generated here", "could_be_key": false },
-    { "field": "RRN",    "purpose": "bank retrieval number, arrives after authorization", "could_be_key": false },
-    { "field": "UserID", "purpose": "who owns the order", "could_be_key": false }
+    { "field": "ID",     "purpose": "surrogate primary key, generated here",              "proof": { "symbol": "Order.ID",     "at": "domain/entity/order.go:10" }, "could_be_key": false },
+    { "field": "RRN",    "purpose": "bank retrieval number, arrives after authorization", "proof": { "symbol": "Order.RRN",    "at": "domain/entity/order.go:21" }, "could_be_key": false },
+    { "field": "UserID", "purpose": "who owns the order",                                 "proof": { "symbol": "Order.UserID", "at": "domain/entity/order.go:14" }, "could_be_key": false }
   ],
   "no_key_reason": "fill this in ONLY if idempotency_key.field is null: say what stops duplicates instead, or say nothing does",
   "notes": ""
 }
 ` + "```" + `
+
+Every ` + "`proof`" + ` is ` + "`{ \"symbol\", \"at\" }`" + ` and ` + "`at`" + ` must be a real ` + "`file.go:line`" + `.
+Every entry in ` + "`other_identifiers`" + ` needs one too — an uncited identifier is the
+one field nothing checks, and that is where a wrong answer gets through. Point
+` + "`at`" + ` at the declaration; put anything you want to say about it in ` + "`why`" + ` or
+` + "`notes`" + `, not inside the citation.
+
+For the key, the line worth citing is where the value ARRIVES, and the reason to
+believe it is where the value is READ BACK before the charge. If those are two
+different files, cite the arrival and say the read-back line in ` + "`notes`" + `.
 
 If ` + "`idempotency_key.field`" + ` is null, ` + "`no_key_reason`" + ` is required. "There is no
 deduplication key and nothing else prevents a repeat" is a legitimate answer and
@@ -144,7 +135,6 @@ a serious finding — it is the shape of a double-charge, and testigo would rath
 record it than invent a key that hides it.`).Where("testigo/flow.json")
 }
 
-// Entity is one candidate main entity, already narrowed by the scanner.
 type Entity struct {
 	Name         string
 	Pkg          string
@@ -153,23 +143,11 @@ type Entity struct {
 	Money        []string
 	IDs          flowEntity.Candidates
 
-	// weight is how many places the lifecycle it carries is written. It ranks
-	// the entities: a status written in 122 places is the flow's spine, one
-	// written twice is an enum that happens to be called Status.
 	weight int
 }
 
-// Entities groups the ranked candidates by the struct they belong to, keeping
-// only structs that carry a lifecycle state.
-//
-// Grouping is what makes the prompt small. Listing 40 ranked fields across the
-// repository asks the agent to do the narrowing testigo already did; listing
-// two structs with their identifier fields asks it to do only the part that
-// needs judgement.
 func Entities(f *flowEntity.Flow, carriers map[string]string) []Entity {
-	// How many places each lifecycle type is written. A status written in 122
-	// places is the flow's spine; one written twice is an enum that happens to
-	// be called Status.
+
 	weight := map[string]int{}
 	for _, m := range f.States {
 		weight[m.Type] = len(m.Writes)
@@ -198,12 +176,6 @@ func Entities(f *flowEntity.Flow, carriers map[string]string) []Entity {
 	for _, e := range byOwner {
 		e.IDs.Sort()
 
-		// An entity with nothing DECLARING any of its fields a key is not a
-		// candidate for this question, it is a struct that happens to carry a
-		// status. On the recharge service that rule is the difference between
-		// four entities worth asking about and fifteen — Provider, Package,
-		// Contact and Type all carry Status and offer nothing but Name, Lang
-		// and Message.
 		declared := 0
 		for _, c := range e.IDs {
 			if c.Declarative {
@@ -218,8 +190,6 @@ func Entities(f *flowEntity.Flow, carriers map[string]string) []Entity {
 		out = append(out, *e)
 	}
 
-	// Heaviest lifecycle first: the entity the flow actually moves should be the
-	// first thing read, not the tenth.
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].weight != out[j].weight {
 			return out[i].weight > out[j].weight
@@ -236,22 +206,11 @@ func Entities(f *flowEntity.Flow, carriers map[string]string) []Entity {
 }
 
 const (
-	// maxEntities caps the prompt. Beyond a handful the question stops being
-	// "choose between these" and becomes "search this list", which is the
-	// expensive open question this prompt exists to avoid.
 	maxEntities = 4
-	// maxOtherIDs is how many behaviour-only fields ride along per entity. They
-	// are there so the agent can see what it is rejecting; they are not the
-	// question, so they are capped.
+
 	maxOtherIDs = 3
 )
 
-// trimIDs keeps every declared candidate and only a few of the rest.
-//
-// The behaviour-only fields matter — question 3 asks what the other identifiers
-// are for, and an agent cannot answer that about fields it was never shown —
-// but Price, Lang and Message are not identifiers by any reading, and paying to
-// print them is paying for noise.
 func trimIDs(ids flowEntity.Candidates) flowEntity.Candidates {
 	var kept flowEntity.Candidates
 	others := 0
@@ -268,8 +227,6 @@ func trimIDs(ids flowEntity.Candidates) flowEntity.Candidates {
 	return kept
 }
 
-// lastSegment trims a fully qualified type down to pkg.Type, which is how a
-// person refers to it and how it appears in the source the agent will read.
 func lastSegment(qualified string) string {
 	if i := strings.LastIndex(qualified, "/"); i >= 0 {
 		return qualified[i+1:]

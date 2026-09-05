@@ -7,25 +7,6 @@ import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// StateRoles asks what part each state plays, instead of asking which of N×N
-// transitions are legal.
-//
-// The old question asked an agent to fill in a matrix. Nine states is
-// eighty-one cells, every cell a separate chance to be wrong, and the answer
-// costs output tokens — which bill at five times input. This asks for one
-// classification per state, and testigo derives the matrix in Go.
-//
-// It is not only cheaper, it is more accurate, and the proof is a real run.
-// An agent given the matrix question about a recharge service produced a
-// correct answer and buried two facts in its notes that the shape could not
-// hold: that ENABLE and DISABLE belong to providers rather than orders, and
-// that FAILEDSIMTYPE is never stored at all. Both are roles here, so both
-// become structured answers a validator can check rather than prose nobody
-// reads.
-//
-// maxWriteSites is how many examples per state the question carries. Three is
-// enough to see what kind of code sets a state; the hundredth is noise a reader
-// pays for.
 const maxWriteSites = 3
 
 func StateRoles(f *flowEntity.Flow, m flowEntity.StateMachine) *Prompt {
@@ -50,16 +31,10 @@ func StateRoles(f *flowEntity.Flow, m flowEntity.StateMachine) *Prompt {
 		fmt.Fprintf(&b, "  %s\n", s)
 		switch {
 		case never[s]:
-			// Already proved. Saying it here stops the agent going to look.
+
 			b.WriteString("      nothing in this module ever assigns it\n")
 		default:
-			// A few write sites, not all of them.
-			//
-			// The old question printed every one. On a real service that is 122
-			// lines for a single state, and the 123rd tells a reader nothing the
-			// first three did not: the question is what ROLE the state plays,
-			// and three examples answer it. The rest are in flow.json for
-			// anyone who wants them.
+
 			shown := written[s]
 			if len(shown) > maxWriteSites {
 				shown = shown[:maxWriteSites]
@@ -77,8 +52,6 @@ func StateRoles(f *flowEntity.Flow, m flowEntity.StateMachine) *Prompt {
 		}
 	}
 
-	// The goal and the rules are in StateRolesPreamble: they are identical for
-	// every state machine in the repository, and this pack has four.
 	p := New("testigo — what part does each state play?").
 		Fact(Proof, "The type and its declared states", b.String())
 
@@ -121,9 +94,6 @@ arrives weeks later. If this repository models refunds or reversals, those are
 
 	p.Fact(Subject, "What to decide, per state", decide.String())
 
-	// Only the part that VARIES. The JSON example is identical for every state
-	// machine in the repository and lives in StateRolesPreamble; copying it here
-	// would be 1.2 KB times the number of state machines to say the same thing.
 	var out strings.Builder
 	fmt.Fprintf(&out, `The shape is in PREAMBLE.md, under "stateRoles". Every declared state above
 must appear exactly once in `+"`roles`"+`.
@@ -134,7 +104,6 @@ There are %d state(s). That is %d role assignments, not %d matrix cells.
 	return p.Answers(out.String()).Where("testigo/flow.json")
 }
 
-// StateRolesPreamble is the shared half, written once into PREAMBLE.md.
 const StateRolesPreamble = `
 ## stateRoles — classifying one state machine
 

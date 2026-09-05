@@ -8,21 +8,11 @@ import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// Step is one function in an entry point's path, with everything phase 1 proved
-// about it attached.
-//
-// This is the unit every prompt is built from. The agent is never handed a raw
-// file and asked to find its way: it is handed an ordered list of steps, each
-// already annotated with what touches the database, what leaves the process,
-// and where the status changes. The reading is done. Only the context is left.
 type Step struct {
 	Order int
-	// Depth is how many calls deep this step sits from the entry point. Used to
-	// indent the rendering, so nesting is visible: a provider call INSIDE the
-	// function that opened the transaction is a different situation from one
-	// beside it.
+
 	Depth  int
-	Ref    string // node ID
+	Ref    string
 	Symbol string
 	File   string
 	Line   int
@@ -31,20 +21,12 @@ type Step struct {
 	States []flowEntity.StateWrite
 }
 
-// Path is one entry point and the steps reachable from it.
 type Path struct {
 	Entry flowEntity.EntryPoint
 	Label string
 	Steps []Step
 }
 
-// Paths orders the flow into one readable sequence per entry point.
-//
-// The order is a breadth-first walk of the call graph. It is not the true
-// execution order — a compiler cannot know which branch runs — and the prompts
-// say so explicitly rather than letting the agent assume otherwise. What it IS
-// is a complete list of what the entry point can reach, which is the part that
-// matters for asking "where could this fail".
 func Paths(f *flowEntity.Flow) []Path {
 	seamsBy := map[string][]flowEntity.Seam{}
 	for _, s := range f.Seams {
@@ -57,9 +39,6 @@ func Paths(f *flowEntity.Flow) []Path {
 		}
 	}
 
-	// Within a function, sort by line. The order of the calls inside one body is
-	// the strongest ordering information static analysis has, and leaving it
-	// unsorted throws it away.
 	for id := range seamsBy {
 		sort.SliceStable(seamsBy[id], func(i, j int) bool { return seamsBy[id][i].Line < seamsBy[id][j].Line })
 	}
@@ -79,29 +58,11 @@ func Paths(f *flowEntity.Flow) []Path {
 		}
 		path := Path{Entry: entry, Label: label}
 
-		// Depth-first, following each call in the order it appears INSIDE the
-		// caller's body. Where a function is declared in the file is irrelevant. Node.Calls is already sorted by call-site position, so this
-		// walk produces the sequence a person would read off the page:
-		//
-		//	CreatePayment
-		//	  process
-		//	    alreadySeen
-		//	    Authorize
-		//	    Post
-		//
-		// rather than the sideways sweep breadth-first gives, which puts
-		// alreadySeen, Authorize and Post at the same level and loses the fact
-		// that all three happen inside the transaction process opened.
-		//
-		// This is CALL-SITE order, not execution order, and every prompt says so.
-		// A branch may skip a call, a loop may repeat one, and `go` runs one
-		// concurrently. But source order is what the code says, and it is the
-		// only ordering a compiler can honestly offer.
 		seen := map[string]bool{}
 		var walk func(nodeID string, depth int)
 		walk = func(nodeID string, depth int) {
 			if seen[nodeID] {
-				return // recursion, or a helper reached from two places
+				return
 			}
 			seen[nodeID] = true
 			node, ok := f.Nodes[nodeID]
@@ -129,7 +90,6 @@ func Paths(f *flowEntity.Flow) []Path {
 	return out
 }
 
-// Render writes a path as the fact block that goes into a prompt.
 func (p Path) Render() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ENTRY POINT: %s\n", p.Label)
@@ -145,9 +105,7 @@ func (p Path) Render() string {
 		if tags := factTags(s.Facts); len(tags) > 0 {
 			fmt.Fprintf(&b, "%s        proved: %s\n", pad, strings.Join(tags, ", "))
 		}
-		// Seams are printed in line order, which is the point of this whole
-		// rendering: "the provider call at line 64 happens after BeginTx at 52
-		// and before Commit at 76" is exactly the sequence a crash test needs.
+
 		for _, seam := range s.Seams {
 			injectable := "NOT injectable (concrete type)"
 			if seam.Injectable {
@@ -190,13 +148,6 @@ func factTags(f flowEntity.Facts) []string {
 	return tags
 }
 
-// RenderHeader names the entry point and points at PREAMBLE.md instead of
-// reprinting the steps.
-//
-// Every round-one prompt used to carry the whole step list. On a real service
-// that is 34 KB, and with 105 prompts in the pack it was paid for 105 times.
-// The steps have not moved: they are in PREAMBLE.md, once, and the agent has
-// already read them by the time it opens a question.
 func (p Path) RenderHeader() string {
 	return fmt.Sprintf("ENTRY POINT: %s\n  %s#%s\n  %d step(s) — the full list is in PREAMBLE.md\n",
 		p.Label, p.Entry.Pkg, p.Entry.Symbol, len(p.Steps))

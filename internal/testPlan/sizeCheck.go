@@ -9,19 +9,6 @@ import (
 	"strings"
 )
 
-// CheckSize verifies that generated code actually is the size it claims.
-//
-// This is the reason Google's taxonomy earns its place over Fowler's. "This is a
-// unit test" is a claim in a comment that nobody can check. "This test opens no
-// socket, touches no disk, never sleeps, and does not read the wall clock" is a
-// predicate over the syntax tree, and a small test that violates it is caught
-// here rather than by someone chasing a flake three months from now.
-//
-// Small is the only size enforced, because it is the only one defined by
-// absence. Medium and Large are defined by what they are permitted to do, and
-// permission is not checkable.
-//
-//	https://testing.googleblog.com/2010/12/test-sizes.html
 func CheckSize(filename, src string, want planEntity.Size) []string {
 	if want != planEntity.SizeSmall {
 		return nil
@@ -70,8 +57,7 @@ func CheckSize(filename, src string, want planEntity.Size) []string {
 			pos := fset.Position(call.Pos())
 			problems = append(problems, fmt.Sprintf("line %d: %s — %s", pos.Line, name, why))
 		}
-		// Package-level rand is seeded from the clock, so a failure cannot be
-		// reproduced from the output alone.
+
 		if (name == "rand.Intn" || name == "rand.Int63" || name == "rand.Float64") && !seenRandSeeded {
 			pos := fset.Position(call.Pos())
 			problems = append(problems, fmt.Sprintf("line %d: %s uses the global source — seed it with rand.New(rand.NewSource(seed)) and log the seed, or a failure cannot be reproduced", pos.Line, name))

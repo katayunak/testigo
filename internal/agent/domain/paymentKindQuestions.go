@@ -1,30 +1,6 @@
-package askEntity
+package domain
 
-// PaymentTypeQuestions maps a payment type to the questions that only matter for
-// that type.
-//
-// Two rules decide what belongs here, and both are about not wasting money.
-//
-// First: nothing generic. Money representation, idempotency-key semantics and
-// timeout handling apply to every payment system alive, so they are asked once
-// in the base round and never repeated per kind. A question earns a place below
-// only if it would be WASTED on a repository of a different kind.
-//
-// Second: nothing the compiler knows. "Is there a unique index on order_id" is
-// not a question, it is a fact in a migration file, and phase 1 read it. What is
-// left is the class of thing no amount of reading the source can settle — what
-// the business INTENDS, what the provider does on its side of the wire, and what
-// is supposed to happen when reality disagrees with the code.
-//
-// The sources are PSP documentation and ledger engineering writeups rather than
-// invention: Stripe on capture windows, dunning and refund failure; Adyen on the
-// chargeback lifecycle; Reloadly on top-up statuses, where FAILED and REFUNDED
-// mean opposite things about whether money was taken; Modern Treasury and
-// TigerBeetle on pending vs posted balances; Square's Books on corrections being
-// new rows rather than updates.
 var PaymentTypeQuestions = map[PaymentType][]Question{
-
-	// ---------------------------------------------------------------- spine
 
 	SpineDoubleEntry: {
 		{
@@ -107,8 +83,6 @@ var PaymentTypeQuestions = map[PaymentType][]Question{
 			Problem: "The answer names the fields that are only here, and those are exactly the ones whose loss is unrecoverable and whose writes must be durable.",
 		},
 	},
-
-	// --------------------------------------------------------------- motion
 
 	MotionOneShot: {
 		{
@@ -402,8 +376,6 @@ var PaymentTypeQuestions = map[PaymentType][]Question{
 			Problem: "The rebate calculation is the part that is regulated and the part that is guessed.",
 		},
 	},
-
-	// -------------------------------------------------------------- overlay
 
 	OverlayRefundReversal: {
 		{

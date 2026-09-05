@@ -7,19 +7,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/askingAgent/askEntity"
+	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// Ledger is what testigo can honestly say about what a run cost.
-//
-// The honesty matters more than the numbers. testigo writes markdown and reads
-// JSON; it never makes an API call, which is the whole reason it works with any
-// agent and needs no key. The direct consequence is that it CANNOT know what a
-// model actually spent. It knows the size of what it asked for and the size of
-// what came back, and it says so rather than presenting an estimate as a bill.
 type Ledger struct {
-	AskBytes     int // every .md in asks/, including the preamble
+	AskBytes     int
 	PreambleByes int
 	Prompts      int
 	AnswerBytes  int
@@ -27,9 +20,7 @@ type Ledger struct {
 	Missing      int
 }
 
-// Report renders the whole state of a repository: what was proved, what was
-// found, what is still unknown, and what it cost to get there.
-func Report(f *flowEntity.Flow, k *askEntity.AgentResponse, l Ledger, asksDir string) string {
+func Report(f *flowEntity.Flow, k *domain.AgentResponse, l Ledger, asksDir string) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "testigo report — %s\n", f.Module)
@@ -42,7 +33,6 @@ func Report(f *flowEntity.Flow, k *askEntity.AgentResponse, l Ledger, asksDir st
 		fmt.Fprintf(&b, "           %s#%s  (%s)\n", e.Pkg, e.Symbol, label)
 	}
 
-	// ---- what the compiler proved -------------------------------------
 	inj, con := 0, 0
 	for _, s := range f.Seams {
 		if s.Injectable {
@@ -55,9 +45,7 @@ func Report(f *flowEntity.Flow, k *askEntity.AgentResponse, l Ledger, asksDir st
 	fmt.Fprintf(&b, "  %d function(s) reachable from the entry points\n", len(f.Nodes))
 	fmt.Fprintf(&b, "  %d seam(s): %d injectable, %d on concrete types\n", len(f.Seams), inj, con)
 	if con > 0 {
-		// Worth its own line. An uninjectable seam is not a style problem, it
-		// is a test that cannot be written, and most serious payment bugs only
-		// appear when something downstream fails.
+
 		fmt.Fprintf(&b, "           %d of them cannot be made to fail in a test\n", con)
 	}
 	for _, m := range f.States {
@@ -69,7 +57,6 @@ func Report(f *flowEntity.Flow, k *askEntity.AgentResponse, l Ledger, asksDir st
 			f.GeneratedFiles, f.GeneratedFindings)
 	}
 
-	// ---- findings ------------------------------------------------------
 	if len(f.Findings) > 0 {
 		bySeverity := map[flowEntity.Severity]int{}
 		byID := map[string]int{}
@@ -96,7 +83,6 @@ func Report(f *flowEntity.Flow, k *askEntity.AgentResponse, l Ledger, asksDir st
 		fmt.Fprintf(&b, "\n  every one with its file and line: %s\n", "testigo/flow.json")
 	}
 
-	// ---- what is still unknown ----------------------------------------
 	b.WriteString("\nSTILL UNKNOWN — phase 2 asks an agent\n")
 	switch {
 	case l.Prompts == 0:
@@ -120,8 +106,7 @@ func Report(f *flowEntity.Flow, k *askEntity.AgentResponse, l Ledger, asksDir st
 			if key := k.MainEntity.IdempotencyKey.Field; key != "" {
 				fmt.Fprintf(&b, ", idempotency key %s\n", key)
 			} else {
-				// The most valuable answer in the pack, and it must not read
-				// like a blank.
+
 				b.WriteString(", NO IDEMPOTENCY KEY — see no_key_reason\n")
 			}
 		}
@@ -133,7 +118,6 @@ func Report(f *flowEntity.Flow, k *askEntity.AgentResponse, l Ledger, asksDir st
 		}
 	}
 
-	// ---- the ledger ----------------------------------------------------
 	b.WriteString("\nTOKENS\n")
 	if l.AskBytes > 0 {
 		fmt.Fprintf(&b, "  written to ask     %7s est. input across %d prompt(s)\n",
@@ -164,9 +148,6 @@ func Report(f *flowEntity.Flow, k *askEntity.AgentResponse, l Ledger, asksDir st
 	return b.String()
 }
 
-// tokens converts bytes to the rough token count everyone actually reasons in.
-// Four bytes per token is wrong in the third digit and right in the first,
-// which is the correct precision for a number nobody should be billed on.
 func tokens(b int) string {
 	t := b / 4
 	if t >= 1000 {
@@ -194,8 +175,6 @@ func shortType(q string) string {
 	return q
 }
 
-// Measure counts what is on disk. It reads sizes, never contents, so a large
-// pack costs nothing to report on.
 func Measure(asksDir, answersDir string) Ledger {
 	var l Ledger
 	if entries, err := os.ReadDir(asksDir); err == nil {
@@ -212,7 +191,7 @@ func Measure(asksDir, answersDir string) Ledger {
 			case "PREAMBLE.md":
 				l.PreambleByes = int(info.Size())
 			case "INSTRUCTIONS.md":
-				// procedure, not a question
+
 			default:
 				l.Prompts++
 			}

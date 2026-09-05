@@ -1,4 +1,4 @@
-package askEntity
+package domain
 
 import (
 	"strings"
@@ -7,8 +7,6 @@ import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// flowWith builds the smallest flow that carries a vocabulary. Only the fields
-// the classifier reads are set, so a test says exactly which signal it is about.
 func flowWith(tables []flowEntity.Table, entities []string, fields []string, symbols []string) *flowEntity.Flow {
 	f := flowEntity.NewFlow("example.com/x")
 	f.Infra.Tables = tables
@@ -33,10 +31,6 @@ func table(name string, cols ...string) flowEntity.Table {
 	return t
 }
 
-// TestClassifyTellsTheKindsApart. The whole saving depends on this: a repository
-// classified wrongly is asked a set of questions that cannot apply to it, which
-// is worse than asking nothing, because a plausible answer to an irrelevant
-// question becomes a test.
 func TestClassifyTellsTheKindsApart(t *testing.T) {
 	for _, c := range []struct {
 		name      string
@@ -90,9 +84,7 @@ func TestClassifyTellsTheKindsApart(t *testing.T) {
 		},
 		{
 			name: "airtime top-up with no migrations at all",
-			// This is the real case. The recharge service this tool was first
-			// run against has no .sql files, so every signal has to come off
-			// Go struct fields and function names.
+
 			flow: flowWith(nil,
 				[]string{"Order", "Contact", "Package", "Provider", "RetryableOrder"},
 				[]string{"Phone", "Price", "BasePrice", "Discount", "Fee", "ProviderTraceID"},
@@ -131,7 +123,6 @@ func TestClassifyTellsTheKindsApart(t *testing.T) {
 	}
 }
 
-// TestClassificationCutsTheQuestionSet is the cost argument, asserted.
 func TestClassificationCutsTheQuestionSet(t *testing.T) {
 	all := 0
 	for _, qs := range PaymentTypeQuestions {
@@ -150,17 +141,13 @@ func TestClassificationCutsTheQuestionSet(t *testing.T) {
 	if len(asked) == 0 {
 		t.Fatal("a classified repository was asked nothing")
 	}
-	// The number matters. Asking all of them would mean the classification
-	// bought nothing, and asking one would mean it is not covering the kind.
+
 	if len(asked) > all/3 {
 		t.Errorf("asked %d of %d questions; classification is not narrowing anything", len(asked), all)
 	}
 	t.Logf("asked %d of %d", len(asked), all)
 }
 
-// TestEveryQuestionIsWellFormed. These are shipped as data, so nothing at
-// compile time checks them. A duplicate ID silently overwrites an answer, and an
-// empty problem field wastes the one line that makes the answer usable.
 func TestEveryQuestionIsWellFormed(t *testing.T) {
 	seen := map[string]PaymentType{}
 	for kind, qs := range PaymentTypeQuestions {
@@ -188,9 +175,6 @@ func TestEveryQuestionIsWellFormed(t *testing.T) {
 	}
 }
 
-// TestMissingOverlayIsAFinding. The absence of a flow is information. A top-up
-// service with no reversal path cannot give money back when a provider takes it
-// and delivers nothing, and that happens every day.
 func TestMissingOverlayIsAFinding(t *testing.T) {
 	c := Classification{Spine: SpineStateless, Motions: []PaymentType{MotionTopup}}
 	missing := c.MissingOverlays()

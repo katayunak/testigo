@@ -11,37 +11,16 @@ import (
 	"github.com/katayunak/testigo/internal/scanningFlow/patterns"
 )
 
-// origin is where a field's value comes from. It is the strongest single signal
-// available about what a field IS, and it is completely invisible to a name.
 type origin int
 
 const (
 	originUnknown origin = iota
-	// originExternal: the value arrived from outside this process — a header, a
-	// query parameter, a form value, a request body field.
+
 	originExternal
-	// originGenerated: the value was created here, by a UUID library or a random
-	// source.
+
 	originGenerated
 )
 
-// idempotencyCandidates ranks the fields that might be the idempotency key.
-//
-// Name matching alone cannot do this, and the failing case is ordinary rather
-// than exotic. An Order carrying ID, ReferenceID, TraceID and IdempotencyKey has
-// four fields in the vocabulary, and picking by name is a coin flip.
-//
-// What separates them is BEHAVIOUR, and three behaviours are visible in source:
-//
-//  1. Where the value comes from. An idempotency key is supplied by the CLIENT.
-//     A field assigned from uuid.New() in this process cannot be one — the whole
-//     point is that a retry sends the same value, and a value generated per
-//     attempt is different every attempt. This single check eliminates most
-//     false candidates, and it is the one a name can never give you.
-//  2. Whether the code looks it up before doing the work. A key that is stored
-//     but never read before the money moves prevents nothing.
-//  3. Whether the database enforces uniqueness on it. Already known from the
-//     migrations, at no cost.
 func idempotencyCandidates(pkgs []*packages.Package, f *flowEntity.Flow, root string, local map[string]bool) flowEntity.Candidates {
 	origins := fieldOrigins(pkgs, local)
 	queried := fieldsPassedToQueries(pkgs, local)
@@ -86,19 +65,13 @@ func scoreIdempotency(p *packages.Package, root, owner string, nm *ast.Ident, fl
 	key := owner + "." + nm.Name
 	org := origins[key]
 	if org == originUnknown {
-		org = origins[nm.Name] // same field name, assigned somewhere we could not tie to the type
+		org = origins[nm.Name]
 	}
 
-	// A dedup key has to CARRY a value that a retry can repeat, so the type has
-	// to be able to hold one. `AcceptsDedupKey bool` and `DedupKeyArgument
-	// []string` both match the name vocabulary and neither is a key. Filtering
-	// here rather than at the finding keeps them out of the prompts too.
 	if !canHoldAKey(p, fld) {
 		return flowEntity.Candidate{}, false
 	}
 
-	// A field is only worth scoring if SOMETHING points at it. A name match, an
-	// external origin, or a unique index each qualify; nothing at all does not.
 	col := columnOf(fld, nm.Name)
 	_, unique := f.Infra.CoversColumn("", col)
 	if !nameMatch && org != originExternal && !unique {
@@ -118,24 +91,9 @@ func scoreIdempotency(p *packages.Package, root, owner string, nm *ast.Ident, fl
 		c.Proof = append(c.Proof, "the name is in the idempotency-key vocabulary")
 	}
 
-	// Which struct the field sits on is the strongest structural signal there
-	// is, and it was being ignored.
-	//
-	// In a payment system the entity that carries the lifecycle state IS the
-	// business object: the thing whose change is the event. Its identity fields
-	// are the ones a retry has to match. A field on a config struct or a
-	// notification DTO is not a candidate for anything, however it flows.
-	//
-	// On a real recharge service this one signal separated entity.Order — which
-	// carries Status through 122 write sites — from HealthCheck, RetryConfig
-	// and Service, all of which had scored an identical 6 on behaviour alone.
 	switch {
 	case entities[owner] != "" && c.Declarative:
-		// Membership AMPLIFIES a declaration; it does not manufacture one.
-		// "OrderID on the struct that carries Status" is a far stronger key
-		// candidate than the same name on a DTO. "Phone on the struct that
-		// carries Status" is still just a phone number — being on the right
-		// struct does not make an attribute into an identifier.
+
 		c.Score += 4
 		c.Proof = append(c.Proof,
 			"the field is on "+owner+", which carries this flow's state machine, so it is the entity a retry has to match")
@@ -169,13 +127,10 @@ func scoreIdempotency(p *packages.Package, root, owner string, nm *ast.Ident, fl
 	return c, true
 }
 
-// fieldOrigins walks every assignment and struct literal in the module and
-// records where each field's value came from.
 func fieldOrigins(pkgs []*packages.Package, local map[string]bool) map[string]origin {
 	out := map[string]origin{}
 	note := func(field string, o origin) {
-		// Generated beats external: if a field is ever assigned from a UUID
-		// source, it cannot be a client-supplied key, whatever else assigns it.
+
 		if out[field] == originGenerated {
 			return
 		}
@@ -221,20 +176,16 @@ func fieldOrigins(pkgs []*packages.Package, local map[string]bool) map[string]or
 	return out
 }
 
-// originOf classifies one expression.
 func originOf(e ast.Expr) origin {
 	call, ok := e.(*ast.CallExpr)
 	if !ok {
-		// r.Header, req.IdempotencyKey and friends: a field read off something
-		// that looks like an inbound request.
+
 		if sel, ok := e.(*ast.SelectorExpr); ok && looksLikeRequest(sel.X) {
 			return originExternal
 		}
 		return originUnknown
 	}
-	// A bare call: uuid(), newID(), generateRef(). Local helpers wrapping a
-	// generator are extremely common, and missing them was a real bug — an ID
-	// assigned from a local uuid() helper scored as high as the genuine key.
+
 	if id, ok := call.Fun.(*ast.Ident); ok {
 		if generatesIdentity(id.Name) {
 			return originGenerated
@@ -269,9 +220,6 @@ func originOf(e ast.Expr) origin {
 	return originUnknown
 }
 
-// generatesIdentity matches a function that MAKES an identifier rather than
-// receiving one. A value produced here is different on every attempt, so it can
-// never deduplicate a retry, whatever it is named.
 func generatesIdentity(name string) bool {
 	n := strings.ToLower(name)
 	for _, w := range []string{"uuid", "ulid", "ksuid", "xid", "nanoid", "snowflake", "objectid"} {
@@ -318,8 +266,6 @@ func headerish(e ast.Expr) bool {
 	return false
 }
 
-// fieldsPassedToQueries records fields handed to a database call. A key that is
-// only ever stored, never looked up, prevents nothing.
 func fieldsPassedToQueries(pkgs []*packages.Package, local map[string]bool) map[string]bool {
 	out := map[string]bool{}
 	for _, p := range pkgs {
@@ -360,15 +306,6 @@ func queryMethod(name string) bool {
 	return false
 }
 
-// moneyCandidates ranks the types that carry an amount of money.
-//
-// Round one used to ask an agent "which type is money?" while this package was
-// already computing the answer for its own findings. That was paying for
-// something we had. Now phase 1 ranks the candidates and the prompt only asks
-// when the ranking is genuinely close.
-//
-// Representation is not asked at all any more. Whether an amount is an integer,
-// a float or a decimal is a fact in the type, and the type checker knows it.
 func moneyCandidates(pkgs []*packages.Package, f *flowEntity.Flow, root string, local map[string]bool) flowEntity.Candidates {
 	var out flowEntity.Candidates
 	for _, p := range pkgs {
@@ -383,8 +320,7 @@ func moneyCandidates(pkgs []*packages.Package, f *flowEntity.Flow, root string, 
 				}
 				st, ok := spec.Type.(*ast.StructType)
 				if !ok {
-					// A named scalar type called Money, Amount, Cents: money by
-					// construction, and the strongest candidate there is.
+
 					if patterns.MoneyType.MatchString(spec.Name.Name) {
 						pos := p.Fset.Position(spec.Pos())
 						out = append(out, flowEntity.Candidate{
@@ -454,15 +390,9 @@ func moneyCandidates(pkgs []*packages.Package, f *flowEntity.Flow, root string, 
 	return out
 }
 
-// canHoldAKey reports whether a field's type could carry a deduplication key.
-//
-// Strings and integers can. Everything else — bools, slices, maps, structs,
-// funcs, channels — cannot, whatever the field is called. Named types are
-// followed to their underlying type so a `type IdempotencyKey string` still
-// counts.
 func canHoldAKey(p *packages.Package, fld *ast.Field) bool {
 	if p.TypesInfo == nil {
-		return true // no type information: do not filter on a guess
+		return true
 	}
 	tv, ok := p.TypesInfo.Types[fld.Type]
 	if !ok {
@@ -485,26 +415,10 @@ func canHoldAKey(p *packages.Package, fld *ast.Field) bool {
 	return basic.Info()&(types.IsString|types.IsInteger) != 0
 }
 
-// mainEntities is the set of struct names that carry one of the flow's
-// lifecycle states.
-//
-// This is what "main entity" means in a payment system, and testigo can derive
-// it rather than ask: scanningFlow already proved which named types are
-// lifecycles, so any struct with a field of one of those types is an object the
-// flow moves through its states. Its identity fields are the ones a retry has
-// to match.
-//
-// The signal is worth having because behaviour alone could not tell these
-// apart. On a real recharge service, HealthCheck.Name, RetryConfig.Name,
-// Service.Name and Order.Phone all scored an identical 6 on "arrives from
-// outside" plus "passed to a database call". Only one of those structs is the
-// thing the payment flow actually moves.
 func mainEntities(pkgs []*packages.Package, f *flowEntity.Flow, local map[string]bool) map[string]string {
 	lifecycle := map[string]string{}
 	for _, m := range f.States {
-		// States are named fully qualified; the field type in source is
-		// written unqualified inside its own package and qualified outside it,
-		// so both spellings have to match.
+
 		lifecycle[m.Type] = m.Type
 		if i := strings.LastIndex(m.Type, "/"); i >= 0 {
 			lifecycle[m.Type[i+1:]] = m.Type

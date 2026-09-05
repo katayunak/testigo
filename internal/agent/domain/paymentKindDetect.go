@@ -1,4 +1,4 @@
-package askEntity
+package domain
 
 import (
 	"sort"
@@ -7,21 +7,6 @@ import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// Classify decides what kind of payment system this repository is, from what
-// phase 1 already proved.
-//
-// Doing this in Go rather than asking is the whole argument of the tool applied
-// to itself. "What kind of payment system is this" is a question an agent would
-// answer well — and it would cost a turn, and the turn would re-read the
-// accumulated context, and the answer would be a word that a hundred lines of
-// evidence-weighted matching produces for nothing.
-//
-// The matching is deliberately weighted rather than boolean. Every signal below
-// is independent and none of them is proof: a repository matching two of the
-// eight double-entry signals is a wallet with an aspirational schema, not a
-// ledger. So signals accumulate, the winner has to beat the runner-up by a
-// margin, and where it does not the type goes in Unsure and gets asked about —
-// one question instead of nineteen wrong ones.
 func Classify(f *flowEntity.Flow) Classification {
 	e := gather(f)
 	c := Classification{Why: map[PaymentType][]string{}}
@@ -32,10 +17,6 @@ func Classify(f *flowEntity.Flow) Classification {
 		c.Why[t] = append(c.Why[t], why)
 	}
 
-	// ------------------------------------------------------------- spine
-	//
-	// The one signal that separates a ledger from a wallet: does a money write
-	// touch one row, or two rows with opposing signs that must sum to zero?
 	if e.anyTable("entries", "postings", "ledger_entries", "journal_entries", "book_entries") {
 		note(SpineDoubleEntry, 3, "a table of entries or postings exists")
 	}
@@ -65,9 +46,7 @@ func Classify(f *flowEntity.Flow) Classification {
 	case score[SpineWallet] >= score[SpineDoubleEntry]+2:
 		c.Spine = SpineWallet
 	case score[SpineWallet] > 0 || score[SpineDoubleEntry] > 0:
-		// Close. Pick the leader but say it is not settled, because the two
-		// have almost disjoint question sets and guessing wrong wastes all of
-		// them.
+
 		c.Spine = SpineWallet
 		if score[SpineDoubleEntry] > score[SpineWallet] {
 			c.Spine = SpineDoubleEntry
@@ -78,15 +57,10 @@ func Classify(f *flowEntity.Flow) Classification {
 		c.Why[SpineStateless] = []string{"no balance column and no entries table was found"}
 	}
 
-	// ------------------------------------------------------------ motion
-	//
-	// A repository can have several, and usually does.
 	motion := func(t PaymentType, n int, why string) {
 		note(t, n, why)
 	}
 
-	// Top-up: value is delivered to somebody who is not the payer, named by a
-	// string the customer typed.
 	if e.anyColumn("phone", "phone_number", "msisdn", "mobile", "meter_number",
 		"decoder_number", "smartcard", "subscriber", "beneficiary", "sim", "sim_type") {
 		motion(MotionTopup, 4, "a beneficiary identifier that is not the payer")
@@ -99,16 +73,12 @@ func Classify(f *flowEntity.Flow) Classification {
 	if e.anySymbol("recharge", "topup", "airtime", "getstatus", "get_status", "requery", "inquiry") {
 		motion(MotionTopup, 2, "functions named for recharge or provider requery")
 	}
-	// A provider reference that only exists after the fact, plus a way to go and
-	// ask about it later. Together these say the outcome is not known when the
-	// call returns, which is the shape of every top-up integration.
+
 	if e.anyColumn("provider_trace_id", "rrn", "stan", "tid", "provider_ref", "external_ref") &&
 		e.anySymbol("status", "inquiry", "retry", "requery") {
 		motion(MotionTopup, 3, "a provider reference that arrives late, and something that goes back to ask about it")
 	}
-	// Two amounts that legitimately differ. A one-shot purchase has one price;
-	// a top-up has what the customer pays and what the subscriber receives, with
-	// commission or discount between them.
+
 	if e.anyColumn("price", "amount") &&
 		e.anyColumn("base_price", "discount", "commission", "markup", "face_value",
 			"delivered_amount", "payment_price") {
@@ -136,9 +106,7 @@ func Classify(f *flowEntity.Flow) Classification {
 		e.anySymbol("payout", "disburse", "withdraw") {
 		motion(MotionPayout, 4, "payout or withdrawal paths")
 	}
-	// Split into three because one of these alone means nothing. A merchant_id
-	// column exists in plenty of systems that are not marketplaces; a fee the
-	// platform keeps out of somebody else's money does not.
+
 	if e.anyTable("splits", "seller_transfers", "sub_merchants") {
 		motion(MotionMarketplace, 3, "a table of splits or per-seller transfers")
 	}
@@ -157,9 +125,6 @@ func Classify(f *flowEntity.Flow) Classification {
 		motion(MotionInstallments, 4, "an instalment schedule")
 	}
 
-	// One-shot is the fallback: an order table with a status and no second
-	// amount, no balance and no schedule. It is only claimed when nothing more
-	// specific fired, because almost every system has an order table.
 	for t, s := range score {
 		if t.Axis() == AxisMotion && s >= 4 {
 			c.Motions = append(c.Motions, t)
@@ -170,7 +135,6 @@ func Classify(f *flowEntity.Flow) Classification {
 		c.Why[MotionOneShot] = []string{"a status machine with no capture, balance, schedule or beneficiary dimension"}
 	}
 
-	// ----------------------------------------------------------- overlay
 	if e.anySymbol("refund", "reverse", "reversal", "chargeback", "dispute", "cancel") ||
 		e.anyState("REFUND", "REFUNDED", "REVERSED", "CHARGEBACK") ||
 		e.anyTable("refunds", "reversals", "disputes") {
@@ -183,9 +147,7 @@ func Classify(f *flowEntity.Flow) Classification {
 		c.Overlays = append(c.Overlays, OverlayReconciliation)
 	} else if e.anyColumn("retry_config", "retry_cron_input", "inquiry_cron_input") ||
 		(e.anySymbol("cron", "task", "job", "sweep") && e.anySymbol("status", "retry", "inquiry")) {
-		// A cron that goes back and asks a provider what happened IS
-		// reconciliation, whatever it is called. Naming it only by the word
-		// "reconcile" misses every system that spells it "get status task".
+
 		note(OverlayReconciliation, 4, "a scheduled job re-checks outcomes against a provider, which is reconciliation under another name")
 		c.Overlays = append(c.Overlays, OverlayReconciliation)
 	}
@@ -199,26 +161,13 @@ func Classify(f *flowEntity.Flow) Classification {
 	return c
 }
 
-// evidence is the flattened view of a flow that the rules above match against.
-// Built once because every rule scans all of it.
 type evidence struct {
-	// tables and columns come from the migrations. On a repository with no
-	// migrations these are empty, which is common and is not a failure.
 	tables  map[string]bool
 	columns map[string]bool
 
-	// fields are the Go-side names: struct fields phase 1 ranked as money or
-	// identity, and the names of the types the flow moves.
-	//
-	// These matter more than the columns do. A Go service often keeps its
-	// schema somewhere this tool cannot see — an ORM, a separate repository, a
-	// DBA's console — and then the struct is the only written-down shape there
-	// is. The recharge service that this was first run against has no .sql
-	// files at all, and its Contact.Phone, Order.BasePrice and Order.Discount
-	// say "top-up" as clearly as any column would.
 	fields map[string]bool
 
-	symbols    string // all function names, lowercased, joined
+	symbols    string
 	states     map[string]bool
 	currencies map[string]bool
 }
@@ -234,16 +183,14 @@ func gather(f *flowEntity.Flow) evidence {
 			e.columns[strings.ToLower(c.Name)] = true
 		}
 	}
-	// Constraints name tables the schema parser may have missed.
+
 	for _, c := range f.Infra.Constraints {
 		e.tables[strings.ToLower(c.Table)] = true
 		for _, col := range c.Columns {
 			e.columns[strings.ToLower(col)] = true
 		}
 	}
-	// Go-side names. Both the field and its snake_case form go in, so one rule
-	// can match "phone_number" whether it came from a migration or from a struct
-	// field called PhoneNumber.
+
 	addField := func(name string) {
 		if name == "" {
 			return
@@ -285,8 +232,6 @@ func gather(f *flowEntity.Flow) evidence {
 	return e
 }
 
-// anyTable matches a table name, or the Go type that would be stored in it. A
-// table called "wallets" and a struct called Wallet are the same fact.
 func (e evidence) anyTable(names ...string) bool {
 	for _, n := range names {
 		if e.tables[n] || e.fields[n] || e.fields[strings.TrimSuffix(n, "s")] {
@@ -296,9 +241,6 @@ func (e evidence) anyTable(names ...string) bool {
 	return false
 }
 
-// anyColumn matches a database column OR a Go struct field of the same name.
-// The two are the same claim about the data made in two places, and a repository
-// usually only writes it down in one of them.
 func (e evidence) anyColumn(names ...string) bool {
 	for _, n := range names {
 		if e.columns[n] || e.fields[n] {
@@ -308,8 +250,6 @@ func (e evidence) anyColumn(names ...string) bool {
 	return false
 }
 
-// snakeLower turns PhoneNumber into phone_number, so struct fields and column
-// names land in the same vocabulary.
 func snakeLower(s string) string {
 	var b strings.Builder
 	for i, r := range s {
@@ -324,9 +264,6 @@ func snakeLower(s string) string {
 	return b.String()
 }
 
-// anySymbol matches on substring, not equality, because a function is called
-// RefundOrder rather than Refund. That over-matches on purpose: a spare question
-// costs a few lines, a missing one costs a whole class of bug.
 func (e evidence) anySymbol(subs ...string) bool {
 	for _, s := range subs {
 		if strings.Contains(e.symbols, s) {
@@ -354,8 +291,6 @@ func (e evidence) anyState(names ...string) bool {
 
 func (e evidence) distinctCurrencies() bool { return len(e.currencies) > 1 }
 
-// Fields exposes the gathered vocabulary. Used by the report and by tests to
-// explain why a classification came out the way it did.
 func Fields(f *flowEntity.Flow) []string {
 	e := gather(f)
 	out := make([]string, 0, len(e.fields)+len(e.columns))

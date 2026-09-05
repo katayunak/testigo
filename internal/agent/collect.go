@@ -1,10 +1,11 @@
-package askingAgent
+package agent
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/katayunak/testigo/internal/askingAgent/askEntity"
+	"github.com/katayunak/testigo/internal/agent/domain"
+	"github.com/katayunak/testigo/internal/agent/planner"
 	"github.com/katayunak/testigo/internal/testPlan/planEntity"
 	"os"
 	"path/filepath"
@@ -15,12 +16,11 @@ import (
 	"github.com/katayunak/testigo/internal/testPlan"
 )
 
-// Collected reports what came back and what did not.
 type Collected struct {
 	Answered []string
 	Missing  []string
 	Invalid  map[string]error
-	Cases    []*askEntity.CaseAnswer
+	Cases    []*domain.CaseAnswer
 }
 
 func (c Collected) OK() bool { return len(c.Missing) == 0 && len(c.Invalid) == 0 }
@@ -37,19 +37,7 @@ func (c Collected) String() string {
 	return b.String()
 }
 
-// Collect reads the answers, checks them against what the compiler proved, and
-// applies the valid ones.
-//
-// The checking is the point. An answer file is text a model wrote; treating it
-// as trusted input would put unverified claims straight into the report, which
-// is exactly the failure this tool exists to avoid. So every answer is measured
-// against phase 1's facts before it is allowed in: states must be states that
-// exist, symbols must carry proof, and the placeholder names from the prompt
-// must not appear.
-//
-// None of that can tell whether an answer is CORRECT. It can tell whether the
-// answer is about this repository at all, which catches most of what goes wrong.
-func Collect(sidecarDir string, f *flowEntity.Flow, k *askEntity.AgentResponse, asks []askEntity.Ask) (*Collected, error) {
+func Collect(sidecarDir string, f *flowEntity.Flow, k *domain.AgentResponse, asks []domain.Ask) (*Collected, error) {
 	dir := filepath.Join(sidecarDir, answersDir)
 	out := &Collected{Invalid: map[string]error{}}
 
@@ -58,13 +46,6 @@ func Collect(sidecarDir string, f *flowEntity.Flow, k *askEntity.AgentResponse, 
 		machineByType[m.Type] = m
 	}
 
-	// One file per batch, and each file holds every answer of that kind.
-	//
-	// The split back out happens here, so apply() below never learns that the
-	// questions were grouped: it still validates one answer against one ask,
-	// with exactly the checks it had before. A batched reply is therefore
-	// checked as strictly as an individual one, and one bad entry fails only
-	// itself.
 	for _, batch := range Batches(asks) {
 		path := filepath.Join(dir, batch.AnswerFile())
 		raw, err := os.ReadFile(path)
@@ -111,17 +92,13 @@ func Collect(sidecarDir string, f *flowEntity.Flow, k *askEntity.AgentResponse, 
 		}
 
 		if matched == 0 {
-			// A file that parses but matches nothing is the wrong SHAPE, not a
-			// set of missing answers, and the two need opposite fixes. Reporting
-			// "62 missing" sends someone to write 62 answers that are already
-			// there under the wrong keys.
+
 			out.Invalid[batch.ID()] = shapeError(batch, byKey)
 		}
 	}
 	return out, nil
 }
 
-// shapeError says what the file actually contained and what it should have.
 func shapeError(b Batch, got map[string]json.RawMessage) error {
 	keys := make([]string, 0, len(got))
 	for k := range got {
@@ -136,12 +113,12 @@ func shapeError(b Batch, got map[string]json.RawMessage) error {
 		b.ID(), strings.Join(keys, ", "), b.Asks[0].ID(), len(b.Asks)-1, b.Asks[0].ID())
 }
 
-func apply(ask askEntity.Ask, raw []byte, f *flowEntity.Flow, k *askEntity.AgentResponse,
+func apply(ask domain.Ask, raw []byte, f *flowEntity.Flow, k *domain.AgentResponse,
 	machines map[string]flowEntity.StateMachine, out *Collected) error {
 
 	switch ask.Kind {
-	case askEntity.KindMoneyModel:
-		var a askEntity.MoneyModelAnswer
+	case domain.KindMoneyModel:
+		var a domain.MoneyModelAnswer
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return fmt.Errorf("not valid JSON: %w", err)
 		}
@@ -150,8 +127,8 @@ func apply(ask askEntity.Ask, raw []byte, f *flowEntity.Flow, k *askEntity.Agent
 		}
 		k.MoneyModel = &a
 
-	case askEntity.KindMainEntity:
-		var a askEntity.MainEntityAnswer
+	case domain.KindMainEntity:
+		var a domain.MainEntityAnswer
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return fmt.Errorf("not valid JSON: %w", err)
 		}
@@ -160,31 +137,67 @@ func apply(ask askEntity.Ask, raw []byte, f *flowEntity.Flow, k *askEntity.Agent
 		}
 		k.MainEntity = &a
 
-		// Feed it forward. Round two plans replay and concurrency tests around
-		// the key, and an answer nobody reads is an answer nobody paid for.
 		if k.MoneyModel != nil && a.IdempotencyKey.Field != "" && k.MoneyModel.Idempotency.KeyField == "" {
 			k.MoneyModel.Idempotency.KeyField = a.IdempotencyKey.Field
 			k.MoneyModel.Idempotency.Proof = a.IdempotencyKey.Proof
 		}
 
-	case askEntity.KindPaymentKind:
-		var a askEntity.PaymentKindAnswer
+	case domain.KindQuestions:
+		var answers map[string]*domain.QuestionAnswer
+		if err := json.Unmarshal(raw, &answers); err != nil {
+			return fmt.Errorf("not valid JSON: %w", err)
+		}
+		class := domain.Classify(f)
+		d := planner.Demanded(f, FactsFrom(k, nil))
+		needs := domain.Needed(class, d.Scenarios, d.Techniques, nil)
+		if k.PaymentKind == nil {
+			k.PaymentKind = map[string]*domain.QuestionAnswer{}
+		}
+
+		byID := map[string]domain.Question{}
+		for _, n := range needs {
+			byID[n.Question.ID] = n.Question
+		}
+		kept := 0
+		for id, ans := range answers {
+			q, known := byID[id]
+			if !known {
+				out.Invalid[id] = fmt.Errorf("not one of the questions asked; check the key against %s.md", ask.ID())
+				continue
+			}
+			if ans == nil {
+				out.Invalid[id] = fmt.Errorf("null answer")
+				continue
+			}
+			if err := ans.Validate(q); err != nil {
+				out.Invalid[id] = err
+				continue
+			}
+			k.PaymentKind[id] = ans
+			kept++
+		}
+		for _, n := range needs {
+			if _, ok := answers[n.Question.ID]; !ok {
+				out.Missing = append(out.Missing, n.Question.ID)
+			}
+		}
+		if kept == 0 {
+			return fmt.Errorf("none of the %d answers in this file was usable", len(answers))
+		}
+		k.Classification = &class
+
+	case domain.KindPaymentKind:
+		var a domain.PaymentKindAnswer
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return fmt.Errorf("not valid JSON: %w", err)
 		}
-		class := askEntity.Classify(f)
+		class := domain.Classify(f)
 		if k.PaymentKind == nil {
-			k.PaymentKind = map[string]*askEntity.QuestionAnswer{}
+			k.PaymentKind = map[string]*domain.QuestionAnswer{}
 		}
 
-		// Per question, not per file.
-		//
-		// This ask carries fifteen questions, so failing the whole file over one
-		// bad entry throws away fourteen answers somebody paid for and sends
-		// them back to redo all fifteen. Each answer is checked on its own, the
-		// good ones are kept, and the bad ones are named individually.
 		kept := 0
-		byID := map[string]askEntity.Question{}
+		byID := map[string]domain.Question{}
 		for _, q := range class.Questions() {
 			byID[q.ID] = q
 		}
@@ -215,8 +228,8 @@ func apply(ask askEntity.Ask, raw []byte, f *flowEntity.Flow, k *askEntity.Agent
 		}
 		k.Classification = &class
 
-	case askEntity.KindStateRoles:
-		var a askEntity.StateRolesAnswer
+	case domain.KindStateRoles:
+		var a domain.StateRolesAnswer
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return fmt.Errorf("not valid JSON: %w", err)
 		}
@@ -227,14 +240,12 @@ func apply(ask askEntity.Ask, raw []byte, f *flowEntity.Flow, k *askEntity.Agent
 		if err := a.ValidateAgainst(m.States); err != nil {
 			return err
 		}
-		// The matrix is DERIVED, never asked for. Everything downstream still
-		// reads TransitionsAnswer, so the question changed shape without the
-		// rest of testigo having to know.
+
 		k.Transitions[ask.Subject] = a.Transitions(m.NeverAssigned)
 		k.StateRoles[ask.Subject] = &a
 
-	case askEntity.KindTransitions:
-		var a askEntity.TransitionsAnswer
+	case domain.KindTransitions:
+		var a domain.TransitionsAnswer
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return fmt.Errorf("not valid JSON: %w", err)
 		}
@@ -247,16 +258,16 @@ func apply(ask askEntity.Ask, raw []byte, f *flowEntity.Flow, k *askEntity.Agent
 		}
 		k.Transitions[ask.Subject] = &a
 
-	case askEntity.KindExternalEffect:
-		var a askEntity.ExternalEffectAnswer
+	case domain.KindExternalEffect:
+		var a domain.ExternalEffectAnswer
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return fmt.Errorf("not valid JSON: %w", err)
 		}
 		a.Target = ask.Subject
 		k.ExternalEffects[ask.Subject] = &a
 
-	case askEntity.KindNotes:
-		var a askEntity.NotesAnswer
+	case domain.KindNotes:
+		var a domain.NotesAnswer
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return fmt.Errorf("not valid JSON: %w", err)
 		}
@@ -267,8 +278,7 @@ func apply(ask askEntity.Ask, raw []byte, f *flowEntity.Flow, k *askEntity.Agent
 		if !ok {
 			return fmt.Errorf("answer is about %q, which is no longer in the flow", ask.Subject)
 		}
-		// Pinning the answer to the hash it was asked about is what stops a
-		// note describing code that changed while the agent was working.
+
 		if ask.ForHash != "" && ask.ForHash != node.Ref.BodyHash {
 			return fmt.Errorf("%s changed while this question was being answered; re-ask it", node.Ref.Symbol)
 		}
@@ -280,8 +290,8 @@ func apply(ask askEntity.Ask, raw []byte, f *flowEntity.Flow, k *askEntity.Agent
 			ForHash:     node.Ref.BodyHash,
 		}
 
-	case askEntity.KindTestCase:
-		var a askEntity.CaseAnswer
+	case domain.KindTestCase:
+		var a domain.CaseAnswer
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return fmt.Errorf("not valid JSON: %w", err)
 		}
@@ -301,13 +311,6 @@ func apply(ask askEntity.Ask, raw []byte, f *flowEntity.Flow, k *askEntity.Agent
 	return nil
 }
 
-// stripFence tolerates the most common thing an agent does wrong: wrapping the
-// JSON in a markdown fence despite being told not to.
-//
-// Being strict here would be principled and would waste the user's money — the
-// answer is right, the packaging is wrong, and re-running the prompt costs
-// tokens to fix a problem three lines of code can fix. Be strict about content,
-// forgiving about formatting.
 func stripFence(b []byte) []byte {
 	s := strings.TrimSpace(string(b))
 	if !strings.HasPrefix(s, "```") {
@@ -322,47 +325,37 @@ func stripFence(b []byte) []byte {
 	return []byte(strings.TrimSpace(s))
 }
 
-// LoadAgentResponse reads .testigo/agentResponse.json, or returns an empty one.
-func LoadAgentResponse(sidecarDir string) (*askEntity.AgentResponse, error) {
+func LoadAgentResponse(sidecarDir string) (*domain.AgentResponse, error) {
 	b, err := os.ReadFile(filepath.Join(sidecarDir, "agentResponse.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		b, err = readRenamedFile(sidecarDir)
 	}
 	if errors.Is(err, os.ErrNotExist) {
-		return askEntity.NewAgentResponse(), nil
+		return domain.NewAgentResponse(), nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	var k askEntity.AgentResponse
+	var k domain.AgentResponse
 	if err := json.Unmarshal(b, &k); err != nil {
 		return nil, fmt.Errorf("agentResponse.json is corrupt: %w", err)
 	}
-	if k.SchemaVersion != askEntity.AgentResponseSchema {
+	if k.SchemaVersion != domain.AgentResponseSchema {
 		return nil, fmt.Errorf("agentResponse.json is schema v%d, this binary speaks v%d: delete it and re-run the round",
-			k.SchemaVersion, askEntity.AgentResponseSchema)
+			k.SchemaVersion, domain.AgentResponseSchema)
 	}
 	if k.Transitions == nil {
-		k.Transitions = map[string]*askEntity.TransitionsAnswer{}
+		k.Transitions = map[string]*domain.TransitionsAnswer{}
 	}
 	if k.ExternalEffects == nil {
-		k.ExternalEffects = map[string]*askEntity.ExternalEffectAnswer{}
+		k.ExternalEffects = map[string]*domain.ExternalEffectAnswer{}
 	}
 	if k.StateRoles == nil {
-		k.StateRoles = map[string]*askEntity.StateRolesAnswer{}
+		k.StateRoles = map[string]*domain.StateRolesAnswer{}
 	}
 	return &k, nil
 }
 
-// readRenamedFile finds answers written before this file was called
-// agentResponse.json.
-//
-// This exists because those answers cost money. A real round one on a recharge
-// service was 35 KB of paid replies, and a rename that silently starts from an
-// empty file spends that again for nothing. The old key name is accepted too:
-// the money-model answer used to be stored under "binding".
-//
-// Delete this once nobody has a knowledge.json left.
 func readRenamedFile(sidecarDir string) ([]byte, error) {
 	b, err := os.ReadFile(filepath.Join(sidecarDir, "knowledge.json"))
 	if err != nil {
@@ -382,8 +375,7 @@ func readRenamedFile(sidecarDir string) ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// SaveAgentResponse writes it back, atomically.
-func SaveAgentResponse(sidecarDir string, k *askEntity.AgentResponse) error {
+func SaveAgentResponse(sidecarDir string, k *domain.AgentResponse) error {
 	if err := os.MkdirAll(sidecarDir, 0o755); err != nil {
 		return err
 	}

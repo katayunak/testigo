@@ -8,17 +8,6 @@ import (
 	"github.com/katayunak/testigo/internal/testPlan/planEntity"
 )
 
-// Select turns the catalog into the list of cases worth generating for one flow.
-//
-// This is where the token saving happens, and it happens before a single token
-// is spent. Twenty-two scenarios live in the catalog; a repository with no state
-// machine, one entry point and concrete seams might match four. The other
-// eighteen are never rendered, never sent, and never paid for.
-//
-// Blocked cases are kept rather than dropped. A repository where nothing can be
-// fault-injected should be told that in the same list as the tests it did get,
-// because "your seams are concrete so eleven of these are impossible" is more
-// useful than a short list with no explanation.
 func Select(f *flowEntity.Flow, b planEntity.Facts) []planEntity.TestCase {
 	seamsByKind := map[flowEntity.SeamKind][]flowEntity.Seam{}
 	var injectable []flowEntity.Seam
@@ -59,13 +48,6 @@ func Select(f *flowEntity.Flow, b planEntity.Facts) []planEntity.TestCase {
 		}
 		c.Scope = scopeFor(technique)
 
-		// The seams this case actually needs: the right kinds, reachable from
-		// the entry point it is about, and one entry per distinct target.
-		//
-		// Over-including here is the most expensive habit available. The facts
-		// block is the largest part of a prompt, and pasting every seam in the
-		// repository into all nineteen cases multiplies the biggest block by
-		// nineteen while making each one harder to read.
 		var candidates []flowEntity.Seam
 		if len(sc.Requires.SeamKinds) > 0 {
 			for _, k := range sc.Requires.SeamKinds {
@@ -121,7 +103,6 @@ func scopeFor(t planEntity.Technique) planEntity.Scope {
 	return planEntity.ScopeUnit
 }
 
-// funcName turns a scenario ID into a Go test name that reads as a sentence.
 func funcName(s planEntity.Scenario) string {
 	parts := strings.Split(strings.ToLower(s.ID), "-")
 	var b strings.Builder
@@ -135,12 +116,6 @@ func funcName(s planEntity.Scenario) string {
 	return b.String()
 }
 
-// target picks where the generated file goes.
-//
-// It lands in the entry point's package, because that is where the code under
-// test lives and where a Go test needs to be to reach anything unexported. The
-// testigo suffix makes generated files obvious in a directory listing and
-// trivial to delete as a group.
 func target(f *flowEntity.Flow, s planEntity.Scenario, size planEntity.Size) (pkg, file string) {
 	dir := "."
 	pkgPath := ""
@@ -159,11 +134,6 @@ func target(f *flowEntity.Flow, s planEntity.Scenario, size planEntity.Size) (pk
 	return pkgPath, dir + "/" + strings.ToLower(string(s.Family)) + suffix
 }
 
-// reachableFrom returns the nodes the FIRST entry point can reach.
-//
-// First rather than all, because a scenario is about one path. A webhook has its
-// own idempotency question with its own answer, and merging both paths into one
-// prompt produces a test that tries to be about both and is about neither.
 func reachableFrom(f *flowEntity.Flow) map[string]bool {
 	seen := map[string]bool{}
 	if len(f.Entries) == 0 {
@@ -192,7 +162,6 @@ func reachableFrom(f *flowEntity.Flow) map[string]bool {
 	return seen
 }
 
-// scopeSeams keeps one seam per distinct target, reachable from the entry point.
 func scopeSeams(in []flowEntity.Seam, reachable map[string]bool) []flowEntity.Seam {
 	seen := map[string]bool{}
 	var out []flowEntity.Seam

@@ -8,24 +8,6 @@ import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// Migrations hands the agent the database schema, so it never opens a migration
-// file.
-//
-// This is the cheapest information testigo owns. A migration is the only place
-// where the shape of the data is written down once, in full, by a person who
-// meant it — and reading it costs nothing, because phase 1 already did. An agent
-// that has NOT been told the schema does one of two things when asked to write
-// an integration test: it opens every file under db/migrations, which on a real
-// service is tens of thousands of tokens and the single most expensive thing it
-// can do, or it invents column names and the test does not compile.
-//
-// So this goes in PREAMBLE.md, written once, read once, and every question is
-// answered in its light.
-//
-// What is deliberately NOT here: every table in the database. A real service has
-// dozens and the flow touches five. The rest are listed by name only, with a
-// pointer to flow.json, because a name is enough for an agent to ask for more
-// and a full column list is not worth what it costs.
 func Migrations(f *flowEntity.Flow) string {
 	in := f.Infra
 	if in.Empty() {
@@ -33,8 +15,7 @@ func Migrations(f *flowEntity.Flow) string {
 			return fmt.Sprintf("\n## The database\n\nMigrations were found in %s but nothing in them parsed. Treat the\nschema as unknown, and say so rather than guessing column names.\n",
 				strings.Join(in.MigrationDirs, ", "))
 		}
-		// Saying this plainly stops the agent going to look for something that
-		// is not there, which is a whole turn.
+
 		return "\n## The database\n\nNo migration files were found in this repository. Do not guess a schema:\nif a test needs one, say what it needs and why.\n"
 	}
 
@@ -48,9 +29,6 @@ them again costs more than every question in this pack put together.
 
 `, strings.Join(in.MigrationDirs, ", "), in.MigrationFiles)
 
-	// Her snippet, unchanged. Uniqueness comes first because it is the one fact
-	// that decides whether a duplicate request can be inserted twice, which is
-	// the most expensive bug this tool exists to find.
 	if len(f.Infra.Constraints) > 0 {
 		b.WriteString("UNIQUENESS, from the migrations\n")
 		for _, c := range f.Infra.Constraints {
@@ -147,7 +125,7 @@ func columnNote(c flowEntity.Column) string {
 	}
 	switch {
 	case c.NotNull && c.Default == "":
-		// The one fact a fixture author cannot do without.
+
 		parts = append(parts, "NOT NULL, no default - every insert must set it")
 	case c.NotNull:
 		parts = append(parts, "not null, default "+c.Default)
@@ -157,17 +135,9 @@ func columnNote(c flowEntity.Column) string {
 	return strings.Join(parts, ", ")
 }
 
-// relevantTables splits the schema into the tables this flow touches and the
-// rest.
-//
-// The rule is deliberately generous — a table is kept if anything in the flow
-// mentions it — because a missing table costs the agent a turn to ask for, and a
-// spare table costs eight lines. Wrong in the cheap direction.
 func relevantTables(f *flowEntity.Flow) (keep, rest []flowEntity.Table) {
 	want := map[string]bool{}
 
-	// Tables that carry a uniqueness rule are load-bearing by definition: that
-	// is what phase 1 looked at to decide whether duplicates are possible.
 	for _, c := range f.Infra.Constraints {
 		want[c.Table] = true
 	}
@@ -177,21 +147,18 @@ func relevantTables(f *flowEntity.Flow) (keep, rest []flowEntity.Table) {
 		}
 	}
 
-	// Tables named like the entities the flow moves. "Order" -> orders, order.
 	for entity := range f.Entities {
 		for _, n := range tableNamesFor(entity) {
 			want[n] = true
 		}
 	}
-	// And like the types that carry money.
+
 	for _, c := range f.MoneyTypes {
 		for _, n := range tableNamesFor(c.Owner) {
 			want[n] = true
 		}
 	}
 
-	// A table holding a column that phase 1 ranked as an idempotency key is part
-	// of the flow whatever it is called.
 	keyed := map[string]bool{}
 	for _, c := range f.IdempotencyKeys {
 		keyed[strings.ToLower(snake(c.Name))] = true
@@ -218,9 +185,6 @@ func relevantTables(f *flowEntity.Flow) (keep, rest []flowEntity.Table) {
 	return keep, rest
 }
 
-// tableNamesFor guesses what a Go type is called in the database. Go structs are
-// CamelCase and singular, tables are usually snake_case and plural, and nobody
-// writes that mapping down.
 func tableNamesFor(goType string) []string {
 	if i := strings.LastIndex(goType, "."); i >= 0 {
 		goType = goType[i+1:]
@@ -254,18 +218,9 @@ func snake(s string) string {
 	return b.String()
 }
 
-// stateMismatch compares the states the database accepts with the states the Go
-// code declares.
-//
-// This is free and it finds real bugs. Two lists that were written months apart
-// and are meant to be the same thing rarely are: a state added to Go and not to
-// the migration makes every write of it fail in production, and a state the
-// database still allows that Go dropped is a row nothing can handle.
 func stateMismatch(f *flowEntity.Flow) string {
 	var out strings.Builder
-	// A schema usually states its state list twice — a CREATE TYPE ... AS ENUM
-	// and a CHECK ... IN (...) that repeats it. Both produce the same finding,
-	// and printing it twice makes a reader wonder whether they are different.
+
 	said := map[string]bool{}
 	for _, c := range f.Infra.Checks {
 		if len(c.Values) == 0 {
@@ -281,9 +236,7 @@ func stateMismatch(f *flowEntity.Flow) string {
 			for _, s := range m.States {
 				goSide[strings.ToUpper(s)] = true
 			}
-			// Only compare lists that clearly describe the same thing. Two
-			// unrelated sets overlapping in nothing is not a mismatch, it is two
-			// different enums.
+
 			shared := 0
 			for s := range goSide {
 				if db[s] {

@@ -24,8 +24,6 @@ func isInteger(t types.Type) bool {
 	return ok && b.Info()&types.IsInteger != 0
 }
 
-// moneyFindings runs the checks that need no agent, no call graph and no
-// running code
 func moneyFindings(pkgs []*packages.Package, root string) []flowEntity.Finding {
 	var out []flowEntity.Finding
 	for _, p := range pkgs {
@@ -54,7 +52,7 @@ func moneyFindings(pkgs []*packages.Package, root string) []flowEntity.Finding {
 					}
 
 					if isFloat(tv.Type) {
-						return true // already reported as MONEY-FLOAT
+						return true
 					}
 
 					a := fns.at(t.Pos())
@@ -134,9 +132,6 @@ func checkStruct(p *packages.Package, root, typeName string, st *ast.StructType)
 	return out
 }
 
-// isBasicNamed reports whether the type is an unnamed basic type, i.e. a plain
-// int64 rather than a domain type like Cents. A named type at least gives the
-// codebase somewhere to hang the currency rules.
 func isBasicNamed(t types.Type) bool {
 	_, isBasic := t.(*types.Basic)
 	return isBasic
@@ -172,9 +167,6 @@ func checkSignature(p *packages.Package, root string, fd *ast.FuncDecl) []flowEn
 	return out
 }
 
-// moneyTypesIn reports which money-shaped types flow through a function. It is
-// how the report can say "these are the steps that actually move money" rather
-// than listing every function in the call graph with equal weight.
 func (g *graph) moneyTypesIn(fn *ssa.Function) []string {
 	seen := map[string]bool{}
 	sig := fn.Signature
@@ -198,20 +190,7 @@ func (g *graph) moneyTypesIn(fn *ssa.Function) []string {
 			seen[types.TypeString(t, relativeTo)] = true
 			return
 		}
-		// A struct that CARRIES money is money for this purpose.
-		//
-		// Only the signature used to be read, and only for type names in the
-		// money vocabulary. On a real recharge service that found nothing at
-		// all: money there never travels as a bare Price argument, it travels
-		// inside entity.Order, whose name says nothing about money. The scanner
-		// then reported "no money-shaped type flows through the reachable
-		// functions" and dropped SEVEN scenarios — every conservation, split,
-		// currency and round-trip test — on a repository whose main entity has
-		// four money fields.
-		//
-		// The proof was already in the same program. moneyCandidates had
-		// scored Order.Price, Order.Fee, Order.BasePrice and Order.Discount.
-		// This function simply never asked it.
+
 		if fields, isStruct := n.Underlying().(*types.Struct); isStruct {
 			for i := 0; i < fields.NumFields(); i++ {
 				fld := fields.Field(i)
@@ -242,8 +221,6 @@ func (g *graph) moneyTypesIn(fn *ssa.Function) []string {
 	return out
 }
 
-// moneyShapedType reports whether a type NAME is in the money vocabulary,
-// following pointers and slices to the thing itself.
 func moneyShapedType(t types.Type) bool {
 	for {
 		switch x := t.(type) {

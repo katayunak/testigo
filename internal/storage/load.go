@@ -9,7 +9,6 @@ import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// Load reads the previous run's flow
 func Load(root string) (*flowEntity.Flow, error) {
 	b, err := os.ReadFile(Path(root))
 	if errors.Is(err, os.ErrNotExist) {

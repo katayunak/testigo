@@ -6,20 +6,6 @@ import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// UnderstandPreamble is everything round one repeats, written once.
-//
-// The map of the flow used to be pasted into every prompt. Measured on a real
-// 73-function payment service that was 34 KB per prompt, 94% of each one, and
-// two prompts compared byte for byte came out 99% identical. The whole round-one
-// pack reached a million tokens to ask about 73 functions.
-//
-// The shape was the real problem. The map grows with the function count, and
-// there is roughly one prompt per function, so pasting it made the pack
-// QUADRATIC: eight times the functions cost seventy-three times the tokens. A
-// service twice the size of that one would not cost twice as much.
-//
-// Hoisting it makes the pack linear again. The agent reads the map once and
-// every prompt refers to it by step number.
 func UnderstandPreamble(f *flowEntity.Flow, paths []Path) string {
 	var b strings.Builder
 
@@ -37,12 +23,6 @@ with a line here, you have misread the source.
 What is NOT here is why any of it exists. That is what the questions ask for.
 `)
 
-	// The schema, before the flow.
-	//
-	// It goes here because it is the cheapest information testigo owns and the
-	// most expensive for an agent to go and get: reading every migration file is
-	// the single largest avoidable cost in a round. Stating it once, up front,
-	// means no question has to carry it and no answer has to guess at it.
 	b.WriteString(Migrations(f))
 
 	b.WriteString(`
@@ -83,12 +63,12 @@ not read this repository.
 1. Business terms, not mechanics. "Reserves the funds and records the hold" is
    useful. "Calls ExecContext with an INSERT statement" is not — the analyser
    already knows that and it is printed below.
-2. Two sentences at most for ` + "`" + ` + "` + "`" + `purpose` + "`" + `" + ` + "`" + `. If it needs more, the function is doing
+2. Two sentences at most for ` + "`purpose`" + `. If it needs more, the function is doing
    more than one thing, and saying THAT is the useful note.
-3. ` + "`" + ` + "` + "`" + `effects` + "`" + `" + ` + "`" + ` lists only what survives the function returning: rows written,
+3. ` + "`effects`" + ` lists only what survives the function returning: rows written,
    messages published, money moved, provider state changed. Not local variables,
    not logging.
-4. ` + "`" + ` + "` + "`" + `assumptions` + "`" + `" + ` + "`" + ` lists what this function needs its CALLER to have already
+4. ` + "`assumptions`" + ` lists what this function needs its CALLER to have already
    guaranteed — validated input, an open transaction, an acquired lock, a
    checked balance. This is the field that finds bugs, because an assumption
    nobody enforces is a bug waiting for an unusual call order.
@@ -159,30 +139,30 @@ moment somebody regenerates the key on the second attempt.
 
 Reply with one JSON object and nothing else.
 
+Five verdicts and nothing else.
+
 ` + "```" + `
 {
   "changes_external_state": true | false | "unknown",
   "reversible_by_rollback": true | false | "unknown",
   "outcome_observable":     true | false | "unknown",
   "accepts_dedup_key":      true | false | "unknown",
-  "dedup_key_argument": "the parameter carrying the key, or null",
-  "moves_money": true | false | "unknown",
-  "undo": { "exists": false, "symbol": null, "proof": "" },
-  "failure_modes": ["timeout", "5xx", "connection_reset", "duplicate_response"],
-  "basis": "read_implementation" | "vendor_documentation" | "inference",
-  "notes": ""
+  "moves_money":            true | false | "unknown"
 }
 ` + "```" + `
+
+` + "`\"unknown\"`" + ` is read as the unsafe answer: not reversible, not observable, not
+deduplicated. Send no prose — no notes, no failure list, no basis. A sentence
+costs five times what a verdict does and nothing reads it.
 
 On ` + "`moves_money`" + `: use THIS repository's meaning, which is not always a
 transfer between accounts. In a service-activation system the money moves when a
 status is reported to a settlement provider. In a wallet, it moves when the
-balance row changes. If ` + "`testigo.rules.json`" + ` defines it, follow that; otherwise say
-what you observed and explain your reading in ` + "`notes`" + `.
+balance row changes. If ` + "`testigo.rules.json`" + ` defines it, follow that.
 
-The timeout case deserves its own thought. A call that times out has an
-UNKNOWN outcome, not a failed one. The far side may have processed it. If this call can
-time out, and question 3 is false, say so plainly in ` + "`notes`" + `. That combination is
+A call that times out has an UNKNOWN outcome, not a failed one — the far side may
+have processed it. That is what ` + "`outcome_observable`" + ` is for: answer it false if
+this call can time out and nothing can be asked afterwards. That combination is
 the most expensive shape in payments and it is invisible to every test that only
 exercises clean success and clean failure.
 

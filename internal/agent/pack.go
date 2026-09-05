@@ -1,4 +1,4 @@
-package askingAgent
+package agent
 
 import (
 	"encoding/json"
@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/askingAgent/askEntity"
+	"github.com/katayunak/testigo/internal/agent/domain"
 )
 
 const (
@@ -15,19 +15,12 @@ const (
 	answersDir = "answers"
 )
 
-// Pack is what a run of `testigo ask` produced.
 type Pack struct {
-	Round askEntity.Round `json:"round"`
-	Asks  []askEntity.Ask `json:"asks"`
-	Dir   string          `json:"-"`
+	Round domain.Round `json:"round"`
+	Asks  []domain.Ask `json:"asks"`
+	Dir   string       `json:"-"`
 }
 
-// Cost is a rough token estimate for a pack, reported before anything is spent.
-//
-// Four characters per token is a crude approximation and deliberately so — the
-// number is here to make a decision visible, not to bill anyone. Seeing "this
-// pack is about 9k tokens" before handing it to an agent is the difference
-// between choosing to spend it and finding out afterwards.
 type Cost struct {
 	Prompts       int
 	Chars         int
@@ -36,14 +29,12 @@ type Cost struct {
 	SavedByShared int
 }
 
-func Estimate(round askEntity.Round, asks []askEntity.Ask, preamble string) Cost {
+func Estimate(round domain.Round, asks []domain.Ask, preamble string) Cost {
 	c := Cost{Prompts: len(asks)}
 	for _, a := range asks {
 		c.Chars += len(a.Prompt)
 	}
-	// Both rounds hoist. Round one hoists the flow map, which is far larger than
-	// round two's shared rules and was the whole reason a 73-function service
-	// cost a million tokens to ask about.
+
 	c.SharedChars = len(preamble)
 	if len(asks) > 1 {
 		c.SavedByShared = len(preamble) * (len(asks) - 1) / 4
@@ -52,16 +43,7 @@ func Estimate(round askEntity.Round, asks []askEntity.Ask, preamble string) Cost
 	return c
 }
 
-// Write lays the pack out on disk under .testigo/.
-//
-// Files rather than an API call, so testigo does not care which agent you use,
-// does not need a key, and does not need the network — which matters more than
-// it sounds when the network is the thing that has been failing. The prompts are
-// plain markdown a person can read and correct before spending anything on them,
-// and the answers are plain JSON a person can hand-write when the agent gets one
-// wrong. Every other transport can be added later behind the same two
-// directories.
-func Write(sidecarDir string, round askEntity.Round, asks []askEntity.Ask, preamble string) (*Pack, error) {
+func Write(sidecarDir string, round domain.Round, asks []domain.Ask, preamble string) (*Pack, error) {
 	adir := filepath.Join(sidecarDir, asksDir)
 	rdir := filepath.Join(sidecarDir, answersDir)
 	for _, d := range []string{adir, rdir} {
@@ -70,9 +52,6 @@ func Write(sidecarDir string, round askEntity.Round, asks []askEntity.Ask, pream
 		}
 	}
 
-	// Old asks are removed so the directory always describes THIS run. A stale
-	// prompt left behind is worse than a missing one: an agent will answer it,
-	// and the answer will be applied to code that has since changed.
 	old, _ := filepath.Glob(filepath.Join(adir, "*.md"))
 	for _, f := range old {
 		if err := os.Remove(f); err != nil {
@@ -80,10 +59,6 @@ func Write(sidecarDir string, round askEntity.Round, asks []askEntity.Ask, pream
 		}
 	}
 
-	// One file per KIND, not one per question.
-	//
-	// Sixty-six files is sixty-six turns, and a turn is the unit the bill is
-	// actually denominated in. See batch.go.
 	for _, b := range Batches(asks) {
 		path := filepath.Join(adir, b.ID()+".md")
 		if err := os.WriteFile(path, []byte(b.Prompt()), 0o644); err != nil {
@@ -102,8 +77,7 @@ func Write(sidecarDir string, round askEntity.Round, asks []askEntity.Ask, pream
 	if err := os.WriteFile(filepath.Join(adir, "INSTRUCTIONS.md"), []byte(instructions(round, asks)), 0o644); err != nil {
 		return nil, err
 	}
-	// Both rounds get a preamble now. Round one's carries the flow map, which
-	// used to be pasted into all 105 prompts.
+
 	if preamble != "" {
 		if err := os.WriteFile(filepath.Join(adir, "PREAMBLE.md"), []byte(preamble), 0o644); err != nil {
 			return nil, err
@@ -112,7 +86,7 @@ func Write(sidecarDir string, round askEntity.Round, asks []askEntity.Ask, pream
 	return pack, nil
 }
 
-func instructions(round askEntity.Round, asks []askEntity.Ask) string {
+func instructions(round domain.Round, asks []domain.Ask) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `# testigo — round %d (%s)
 
@@ -156,13 +130,6 @@ keys are the answer keys printed above each question.
 
 `, int(round), round, len(asks), len(Batches(asks)))
 
-	// Grouped by kind, not listed one by one.
-	//
-	// This used to print all 106 questions with their titles: 21 KB of file
-	// names in a file whose job is to explain the procedure. manifest.json
-	// already holds the list in a form a program can read, and `ls asks/` holds
-	// it in a form a person can read. A prose index of a directory is the
-	// directory, retyped and paid for.
 	for _, batch := range Batches(asks) {
 		fmt.Fprintf(&b, "`asks/%s.md`  ->  `answers/%s`   (%d question(s))\n",
 			batch.ID(), batch.AnswerFile(), len(batch.Asks))
@@ -186,17 +153,12 @@ the states the compiler found, that named symbols carry proof, that nothing
 came back as the placeholder example. Anything malformed is reported with the
 exact problem so you can fix that one file rather than redo the round.
 `)
-	if round == askEntity.RoundUnderstand {
+	if round == domain.RoundUnderstand {
 		b.WriteString("\nThen `testigo ask --round 2` uses these answers to generate tests.\n")
 	}
 	return b.String()
 }
 
-// ReadPack loads the manifest written by the last `testigo ask`.
-//
-// The prompts are not reloaded, only the identities. Collect needs to know which
-// questions were asked and what shape each answer should be — it does not need
-// to re-read a megabyte of prompt text to check a JSON file.
 func ReadPack(sidecarDir string) (*Pack, error) {
 	b, err := os.ReadFile(filepath.Join(sidecarDir, asksDir, "manifest.json"))
 	if err != nil {

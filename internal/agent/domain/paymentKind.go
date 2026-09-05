@@ -1,41 +1,17 @@
-package askEntity
+package domain
 
 import "sort"
 
-// PaymentType is one shape a payment system can have.
-//
-// A repository is almost never ONE of these. An airtime recharge service keeps a
-// customer balance (a wallet), delivers value to a phone number (a top-up), and
-// runs a nightly reconciler — three different sets of bugs in one binary. So the
-// types are split across three axes and a repository gets several:
-//
-//	spine    how value is held at rest.        Exactly one.
-//	motion   how money moves.                  One or more.
-//	overlay  flows that sit alongside a motion One or more, often zero, and a
-//	         and have their own failures.      zero here is itself a finding.
-//
-// The point of the split is what it saves. There are about ninety questions
-// below. A wallet + top-up + reconciliation service is asked nineteen of them
-// and never sees the other seventy — no marketplace question, no subscription
-// proration question, no escrow question. Questions that cannot apply are never
-// written to a file, never read, and never paid for.
 type PaymentType string
 
-// Spine — how value is held at rest.
 const (
-	// SpineDoubleEntry: money moves as balanced legs. Two or more rows with
-	// opposing signs that must sum to zero, and a balance that is derived.
 	SpineDoubleEntry PaymentType = "double_entry"
 
-	// SpineWallet: one mutable balance column that goes up and down.
 	SpineWallet PaymentType = "wallet"
 
-	// SpineStateless: no balance is held here at all. The money lives at the
-	// PSP or the bank, and this system only records what it asked for.
 	SpineStateless PaymentType = "stateless"
 )
 
-// Motion — how money moves.
 const (
 	MotionOneShot      PaymentType = "one_shot"
 	MotionAuthCapture  PaymentType = "auth_capture"
@@ -49,14 +25,12 @@ const (
 	MotionInstallments PaymentType = "installments"
 )
 
-// Overlay — flows that live alongside a motion.
 const (
 	OverlayRefundReversal PaymentType = "refund_reversal"
 	OverlayReconciliation PaymentType = "reconciliation"
 	OverlayFX             PaymentType = "fx_conversion"
 )
 
-// Axis says which of the three a type belongs to.
 type Axis string
 
 const (
@@ -79,11 +53,8 @@ var axisOf = map[PaymentType]Axis{
 
 func (p PaymentType) Axis() Axis { return axisOf[p] }
 
-// Known reports whether this is a type testigo has questions for. Guards against
-// a hand-edited config naming something that does not exist.
 func (p PaymentType) Known() bool { _, ok := axisOf[p]; return ok }
 
-// Human is the name to print. The slug is for files and JSON; this is for people.
 func (p PaymentType) Human() string {
 	if h, ok := humanName[p]; ok {
 		return h
@@ -110,23 +81,16 @@ var humanName = map[PaymentType]string{
 	OverlayFX:             "currency conversion",
 }
 
-// Classification is what testigo decided this repository is.
 type Classification struct {
 	Spine    PaymentType   `json:"spine"`
 	Motions  []PaymentType `json:"motions,omitempty"`
 	Overlays []PaymentType `json:"overlays,omitempty"`
 
-	// Why records the evidence for each decision, so a person can disagree with
-	// it. A classification without its reasons is a number nobody can argue
-	// with, and the classifier is a pile of heuristics that will be wrong.
 	Why map[PaymentType][]string `json:"why,omitempty"`
 
-	// Unsure lists the types that scored close to something else. These are
-	// what the classification question asks about, when it is asked at all.
 	Unsure []PaymentType `json:"unsure,omitempty"`
 }
 
-// All returns every type in the classification, spine first.
 func (c Classification) All() []PaymentType {
 	out := make([]PaymentType, 0, 1+len(c.Motions)+len(c.Overlays))
 	if c.Spine != "" {
@@ -136,8 +100,6 @@ func (c Classification) All() []PaymentType {
 	return append(out, c.Overlays...)
 }
 
-// Questions returns the questions worth asking about this repository, and only
-// those.
 func (c Classification) Questions() []Question {
 	var out []Question
 	seen := map[string]bool{}
@@ -153,13 +115,6 @@ func (c Classification) Questions() []Question {
 	return out
 }
 
-// MissingOverlays names the overlays this kind of system normally has and this
-// repository does not.
-//
-// Absence of a flow is a finding, not a reason to skip a question. A top-up
-// service with no reversal path is not a simple system: it is a system that
-// cannot give money back when a provider takes it and delivers nothing, which
-// happens every day.
 func (c Classification) MissingOverlays() []PaymentType {
 	expected := map[PaymentType][]PaymentType{
 		MotionTopup:       {OverlayRefundReversal, OverlayReconciliation},

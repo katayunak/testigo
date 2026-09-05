@@ -7,20 +7,8 @@ import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// Transitions asks which state transitions must be impossible.
-//
-// This is the cleanest bounded question testigo has. The state set is complete
-// — the compiler guarantees it — so the answer space is a finite N x N matrix
-// and every claim is checkable against it. Compare that with "explain this
-// payment flow", where nothing constrains the answer and nothing verifies it.
-//
-// The question is asked per state rather than per pair. Listing "which states
-// may X move to" is how a person actually reasons about a state machine, and it
-// makes completeness mechanical: every declared state must appear as a key, so
-// a forgotten state is a validation error rather than a silent gap.
 func Transitions(f *flowEntity.Flow, m flowEntity.StateMachine, paths []Path) *Prompt {
-	// Goal and rules are per-kind constant and live in PREAMBLE.md under
-	// "transitions". One state machine or ten, they are written once.
+
 	p := New("testigo — which transitions must be impossible?")
 
 	var b strings.Builder

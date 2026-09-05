@@ -1,4 +1,4 @@
-package askingAgent
+package agent
 
 import (
 	"encoding/json"
@@ -7,20 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/katayunak/testigo/internal/askingAgent/askEntity"
+	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// TestBatchingCutsTurnsNotJustBytes is the cost argument, asserted.
-//
-// A real run cost $4.95 for round one on a 73-function service. The pack was 49k
-// tokens; the other 9.7 MILLION were cache reads, because sixty-six questions
-// answered one at a time is sixty-six turns and every turn re-reads everything
-// said so far. Compacting prompts attacks the wrong term of cost = turns x
-// context. This asserts the term that matters went down.
 func TestBatchingCutsTurnsNotJustBytes(t *testing.T) {
 	f := fixtureFlow()
-	asks := Plan(f, askEntity.NewAgentResponse(), askEntity.RoundUnderstand)
+	asks := Plan(f, domain.NewAgentResponse(), domain.RoundUnderstand)
 	if len(asks) < 4 {
 		t.Fatalf("fixture produced %d asks; too few to say anything about batching", len(asks))
 	}
@@ -30,9 +23,6 @@ func TestBatchingCutsTurnsNotJustBytes(t *testing.T) {
 		t.Errorf("%d asks became %d files: batching bought nothing", len(asks), len(batches))
 	}
 
-	// Every ask must land in exactly one batch. A question that falls out of
-	// the grouping is never written, never answered, and never reported
-	// missing — it just silently is not asked.
 	seen := map[string]int{}
 	for _, b := range batches {
 		for _, a := range b.Asks {
@@ -47,12 +37,9 @@ func TestBatchingCutsTurnsNotJustBytes(t *testing.T) {
 	t.Logf("%d questions in %d files", len(asks), len(batches))
 }
 
-// TestBatchPromptNamesEveryAnswerKey. The keys are the contract between the
-// question file and the answer file. A key the prompt does not print is a key
-// the agent cannot use, and collect reports it as missing forever.
 func TestBatchPromptNamesEveryAnswerKey(t *testing.T) {
 	f := fixtureFlow()
-	for _, b := range Batches(Plan(f, askEntity.NewAgentResponse(), askEntity.RoundUnderstand)) {
+	for _, b := range Batches(Plan(f, domain.NewAgentResponse(), domain.RoundUnderstand)) {
 		if b.Single() {
 			continue
 		}
@@ -65,16 +52,13 @@ func TestBatchPromptNamesEveryAnswerKey(t *testing.T) {
 	}
 }
 
-// TestOneBadEntryFailsOnlyItself. The whole reason batching is safe: grouping
-// the questions must not group the failures. If one malformed answer discarded
-// the rest, a batch would be strictly worse than separate files.
 func TestOneBadEntryFailsOnlyItself(t *testing.T) {
 	f := fixtureFlow()
-	asks := Plan(f, askEntity.NewAgentResponse(), askEntity.RoundUnderstand)
+	asks := Plan(f, domain.NewAgentResponse(), domain.RoundUnderstand)
 
 	var batch Batch
 	for _, b := range Batches(asks) {
-		if b.Kind == askEntity.KindStateRoles && len(b.Asks) >= 1 {
+		if b.Kind == domain.KindStateRoles && len(b.Asks) >= 1 {
 			batch = b
 		}
 	}
@@ -94,8 +78,7 @@ func TestOneBadEntryFailsOnlyItself(t *testing.T) {
 		{"state": "StatusCaptured", "final": true, "evidence": "api/server.go:46"},
 		{"state": "StatusFailed", "final": true, "evidence": "api/server.go:47"},
 	}}
-	// A state that does not exist. The answer parses; it is simply not about
-	// this repository.
+
 	bad := map[string]any{"roles": []map[string]any{
 		{"state": "NOT_A_STATE", "final": true, "evidence": "x.go:1"},
 	}}
@@ -113,7 +96,7 @@ func TestOneBadEntryFailsOnlyItself(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := Collect(dir, f, askEntity.NewAgentResponse(), batch.Asks)
+	got, err := Collect(dir, f, domain.NewAgentResponse(), batch.Asks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,15 +111,9 @@ func TestOneBadEntryFailsOnlyItself(t *testing.T) {
 	}
 }
 
-// TestWrongShapeIsAnErrorNotSixtyMissingAnswers.
-//
-// A file that parses but matches no key used to be reported as every question
-// missing, which sends a person to write sixty answers that are already there
-// under the wrong names. The two problems need opposite fixes, so they must not
-// look the same.
 func TestWrongShapeIsAnErrorNotSixtyMissingAnswers(t *testing.T) {
 	f := fixtureFlow()
-	asks := Plan(f, askEntity.NewAgentResponse(), askEntity.RoundUnderstand)
+	asks := Plan(f, domain.NewAgentResponse(), domain.RoundUnderstand)
 
 	var batch Batch
 	for _, b := range Batches(asks) {
@@ -154,12 +131,12 @@ func TestWrongShapeIsAnErrorNotSixtyMissingAnswers(t *testing.T) {
 	if err := os.MkdirAll(answers, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Valid JSON, valid-looking, and about nothing.
+
 	if err := os.WriteFile(filepath.Join(answers, batch.AnswerFile()), []byte(`{"roles": []}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := Collect(dir, f, askEntity.NewAgentResponse(), batch.Asks)
+	got, err := Collect(dir, f, domain.NewAgentResponse(), batch.Asks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,9 +151,6 @@ func TestWrongShapeIsAnErrorNotSixtyMissingAnswers(t *testing.T) {
 	}
 }
 
-// TestMigrationsReachTheAgentOnce. The schema is the cheapest information
-// testigo owns and the most expensive for an agent to go and get. It belongs in
-// the preamble, read once — not in every question, and not nowhere.
 func TestMigrationsReachTheAgentOnce(t *testing.T) {
 	f := fixtureFlow()
 	f.Infra.MigrationDirs = []string{"db/migrations"}
@@ -198,11 +172,11 @@ func TestMigrationsReachTheAgentOnce(t *testing.T) {
 
 	pre := UnderstandPreambleFor(f)
 	for _, must := range []string{
-		"payments",        // the table
-		"idempotency_key", // the column
-		"unique_index",    // her uniqueness block
-		"amount > 0",      // the database's own invariant
-		"NOT NULL",        // what a fixture must set
+		"payments",
+		"idempotency_key",
+		"unique_index",
+		"amount > 0",
+		"NOT NULL",
 		"db/migrations/1.sql:9",
 	} {
 		if !strings.Contains(pre, must) {
@@ -210,9 +184,7 @@ func TestMigrationsReachTheAgentOnce(t *testing.T) {
 		}
 	}
 
-	// And not repeated per question, which is what made a round cost a million
-	// tokens in the first place.
-	for _, a := range Plan(f, askEntity.NewAgentResponse(), askEntity.RoundUnderstand) {
+	for _, a := range Plan(f, domain.NewAgentResponse(), domain.RoundUnderstand) {
 		if strings.Contains(a.Prompt, "amount > 0") {
 			t.Errorf("%s repeats the schema that is already in PREAMBLE.md", a.ID())
 		}

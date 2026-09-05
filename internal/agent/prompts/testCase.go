@@ -8,17 +8,6 @@ import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// Preamble is written once per pack and read once by the agent.
-//
-// Everything here used to be repeated inside every prompt. On a pack of twelve
-// test cases that is eleven redundant copies of the same eight hundred tokens,
-// paid for on every request. Hoisting it into one file the agent reads at the
-// start cuts a pack roughly in half, and it costs nothing structurally: these
-// rules are identical for every case by construction, which is exactly the
-// property that makes a shared prefix safe.
-//
-// It is also the piece a caching transport would mark as a stable prefix, so the
-// same split pays twice if testigo ever gains an API path.
 const Preamble = `# testigo — how to write these tests
 
 Each ` + "`case-*.md`" + ` file describes ONE test. They share these rules. Read this
@@ -125,13 +114,6 @@ run and names a real gap is the most valuable thing this produces. Weakening an
 assertion so the suite comes back green is the least.
 `
 
-// TestCase renders one case.
-//
-// The shape follows the slots that actually change an answer: what the outcome
-// is, what is fixed, what counts as done, and what a wrong answer looks like.
-// The last slot is the one usually skipped and the one that does the most work —
-// a bad generated test is bad in a predictable way, and naming the way in advance
-// beats any amount of "be careful".
 func TestCase(c planEntity.TestCase, f *flowEntity.Flow) *Prompt {
 	var b strings.Builder
 	props := c.Technique.Props()
@@ -170,20 +152,9 @@ func TestCase(c planEntity.TestCase, f *flowEntity.Flow) *Prompt {
 		Fact(Proof, "This case", b.String()).
 		Where("testigo/asks/PREAMBLE.md")
 
-	// Proof priority, and the reason is the whole design of round two: these
-	// are the facts THIS case needs and nothing else. Cutting them would make
-	// the agent go and re-derive them from source, which is what including
-	// them was meant to prevent.
 	return p.Fact(Proof, "FACTS — proved by the compiler, do not re-derive", caseFacts(c, f))
 }
 
-// caseFacts includes only what THIS case needs.
-//
-// The temptation is to paste the whole flow into every prompt so the agent
-// "has context". That is the most expensive habit available: on a twelve-case
-// pack it multiplies the largest block in the prompt by twelve, and most of it
-// is irrelevant to any given case. A currency-conversion test does not need the
-// call graph. A concurrency test does not need the state machine.
 func caseFacts(c planEntity.TestCase, f *flowEntity.Flow) string {
 	var b strings.Builder
 

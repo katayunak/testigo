@@ -5,19 +5,7 @@ import (
 	"github.com/katayunak/testigo/internal/testPlan/planEntity"
 )
 
-// Catalog is every failure mode testigo knows how to test for.
-//
-// Written by hand, from the published practice of companies that move money at
-// scale. This is the part that cannot be generated and should not be: it is the
-// difference between testigo and a single prompt saying "write some tests", and
-// it is the only thing standing between a generated suite and the failure where
-// the test encodes the bug.
-//
-// Sources are on every entry. An entry with no source is an entry someone
-// invented, and a reader should be able to tell at a glance which is which.
 var Catalog = []planEntity.Scenario{
-
-	// ── idempotency ────────────────────────────────────────────────────────
 
 	{
 		ID:     "IDEM-REPLAY",
@@ -151,8 +139,6 @@ exhaustive over the real failure surface rather than a sample of it.`,
 		Source:     "brandur.org/idempotency-keys recovery points; Airbnb Orpheus",
 	},
 
-	// ── failure and timeouts ───────────────────────────────────────────────
-
 	{
 		ID:     "TIMEOUT-UNKNOWN-OUTCOME",
 		Name:   "A provider timeout is not treated as a failure",
@@ -245,8 +231,6 @@ manual investigation; the unsafe default costs a customer's money.`,
 		Severity:   flowEntity.SevHigh,
 		Source:     "Airbnb Orpheus: retryable vs non-retryable, defaulting to non-retryable",
 	},
-
-	// ── consistency and concurrency ────────────────────────────────────────
 
 	{
 		ID:     "CONSERVATION-UNDER-CONCURRENCY",
@@ -407,8 +391,6 @@ the version that keeps being true as the code changes.`,
 		Source:     "Airbnb Orpheus phase rules; brandur atomic phases",
 	},
 
-	// ── state machine ──────────────────────────────────────────────────────
-
 	{
 		ID:     "ILLEGAL-TRANSITION-REFUSED",
 		Name:   "Transitions that should be impossible are refused",
@@ -500,8 +482,6 @@ a real customer's card is declined once and they can never pay.`,
 		Source:     "Stripe PaymentIntent lifecycle: status returns to requires_payment_method",
 	},
 
-	// ── ordering ───────────────────────────────────────────────────────────
-
 	{
 		ID:     "WEBHOOK-ORDER-INDEPENDENT",
 		Name:   "Provider events applied in any order reach the same state",
@@ -564,8 +544,6 @@ only whether they are harmless when they do.`,
 		Severity:   flowEntity.SevHigh,
 		Source:     "brandur.org/job-drain; Wise tw-tkms outbox",
 	},
-
-	// ── money arithmetic ───────────────────────────────────────────────────
 
 	{
 		ID:     "MONEY-ROUND-TRIP-EXACT",
@@ -682,8 +660,6 @@ the type system is not doing that work.`,
 		Source:     "Adyen and Stripe both require currency alongside every amount",
 	},
 
-	// ── reconciliation ─────────────────────────────────────────────────────
-
 	{
 		ID:     "RECONCILER-IS-IDEMPOTENT",
 		Name:   "Running the reconciler twice changes nothing the second time",
@@ -740,7 +716,6 @@ crash leaves something for the catch-up job to find.`,
 	},
 }
 
-// ByID returns a scenario from the catalog.
 func ByID(id string) (planEntity.Scenario, bool) {
 	for _, s := range Catalog {
 		if s.ID == id {

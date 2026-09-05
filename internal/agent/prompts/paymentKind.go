@@ -4,23 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/askingAgent/askEntity"
+	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// PaymentKind asks the questions that only apply to this kind of payment system.
-//
-// The classification itself is NOT asked. Which kind this is was worked out in
-// Go from the migrations, the struct fields and the function names, and it goes
-// in as CONTEXT the agent rechecks — not as a question it is paid to answer.
-//
-// What that buys is the whole point. Seventy-nine questions exist across sixteen
-// kinds. A repository is asked the fifteen or so that can apply to it, and never
-// sees a subscription proration question or a marketplace liability question,
-// because those cannot be true of it. A question that cannot apply is not
-// cheaper when asked briefly; it is worth nothing at any price, and a plausible
-// answer to it becomes a test.
-func PaymentKind(f *flowEntity.Flow, c askEntity.Classification) *Prompt {
+func PaymentKind(f *flowEntity.Flow, c domain.Classification) *Prompt {
 	qs := c.Questions()
 	if len(qs) == 0 {
 		return nil
@@ -30,9 +18,6 @@ func PaymentKind(f *flowEntity.Flow, c askEntity.Classification) *Prompt {
 		Goal("Answer what static analysis cannot reach: what the business INTENDS, what the provider does on its side of the wire, and what is supposed to happen when reality disagrees with the code.").
 		Ask(qs...)
 
-	// Proof priority: everything below is scoped by the classification. An agent
-	// that cannot see which kind this is has no way to tell whether a question
-	// applies to it.
 	var what strings.Builder
 	fmt.Fprintf(&what, "  spine    %-18s %s\n", c.Spine, c.Spine.Human())
 	for _, m := range c.Motions {
@@ -43,8 +28,6 @@ func PaymentKind(f *flowEntity.Flow, c askEntity.Classification) *Prompt {
 	}
 	p.Fact(Proof, "What testigo decided this repository is", what.String())
 
-	// Subject rather than Proof: the classification survives without its
-	// evidence, and an agent that wants to argue can go and get it.
 	var why strings.Builder
 	for _, t := range c.All() {
 		for _, w := range c.Why[t] {
@@ -81,7 +64,7 @@ it genuinely does not exist, or exists somewhere this scan did not reach.
 	return p.Answers(paymentKindShape(qs)).Where("testigo/flow.json")
 }
 
-func paymentKindShape(qs []askEntity.Question) string {
+func paymentKindShape(qs []domain.Question) string {
 	var b strings.Builder
 	b.WriteString("One JSON object, nothing else.\n\n```\n{\n  \"answers\": {\n")
 	for i, q := range qs {
@@ -90,10 +73,8 @@ func paymentKindShape(qs []askEntity.Question) string {
 			comma = ""
 		}
 		switch {
-		case i == 0 && q.TrueOrFalse:
-			fmt.Fprintf(&b, "    %q: { \"verdict\": false, \"answer\": \"one line of why\", \"proof\": \"file.go:41\" }%s\n", q.ID, comma)
 		case i == 0:
-			fmt.Fprintf(&b, "    %q: { \"answer\": \"two sentences\", \"proof\": \"file.go:41\" }%s\n", q.ID, comma)
+			fmt.Fprintf(&b, "    %q: %s%s\n", q.ID, answerExample(q), comma)
 		case i == 1, i == len(qs)-1:
 			fmt.Fprintf(&b, "    %q: { ... }%s\n", q.ID, comma)
 		case i == 2:
@@ -105,24 +86,45 @@ func paymentKindShape(qs []askEntity.Question) string {
 }
 ` + "```" + `
 
-Every question ID above must appear exactly once. If you do not know one, the
-answer is the word ` + "`unknown`" + ` and one line saying what would settle it — that
-is a real answer, it costs almost nothing, and it is far more useful than a
-guess that becomes a test somebody trusts.`)
+The three answer shapes, matching the ` + "`->`" + ` line under each question:
+
+    -> true/false                        { "verdict": true }
+    -> true/false (one line only if false)  { "verdict": false, "info": "what is true instead" }
+    -> one sentence                      { "info": "..." }
+
+A ` + "`true`" + ` verdict is the whole answer. Do not explain it.
+
+Add ` + "`proof`" + ` only when you are pointing at a specific line:
+
+    { "verdict": false, "info": "...", "proof": { "symbol": "Order.Status", "at": "order.go:41" } }
+
+Every question ID above must appear exactly once. If you genuinely cannot tell,
+omit ` + "`verdict`" + ` and say in ` + "`info`" + ` what would settle it. That is recorded as
+unanswered, which is far more useful than a guess that becomes a test somebody
+trusts.`)
 	return b.String()
 }
 
-// PaymentKindPreamble is the shared half.
+func answerExample(q domain.Question) string {
+	if q.TrueOrFalse {
+		return `{ "verdict": true }`
+	}
+	return `{ "info": "one sentence" }`
+}
+
 const PaymentKindPreamble = `
 ## paymentKind — questions specific to this kind of payment system
 
 1. The classification in the question is testigo's, made from the schema and the
    Go type names. Disagree with it if the code says otherwise, and say so with a
    file:line.
-2. Answer every question ID. ` + "`unknown`" + ` is a real answer.
-3. A true/false question needs a ` + "`verdict`" + ` boolean AND one line of why. The
-   line is what makes the boolean checkable.
-4. Answer about the BUSINESS RULE, not only about the implementation. Where the
+2. Answer every question ID.
+3. A true/false question needs only the ` + "`verdict`" + ` boolean. A bare ` + "`true`" + ` is a
+   complete answer — do not justify it.
+4. Add ` + "`info`" + `, one line, when the verdict is ` + "`false`" + ` on a question that re-checks
+   something testigo already found in the source. Overturning a fact is the one
+   place an explanation is worth paying for.
+5. Answer about the BUSINESS RULE, not only about the implementation. Where the
    two differ, that difference is the most valuable thing you can report.
-5. Two sentences is the budget for a free-text answer.
+6. One sentence is the budget for a free-text answer.
 `

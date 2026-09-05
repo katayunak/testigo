@@ -7,14 +7,6 @@ import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// Notes asks what one function means in business terms.
-//
-// Kept deliberately small. The temptation is to ask for an essay per function,
-// but notes exist to make LATER prompts readable, not to be read on their own.
-// Four short fields per function is enough to turn a call graph of symbol names
-// into something a person can follow, and short answers are cheaper to
-// regenerate when the function changes — which, on a repository under active
-// development, is constantly.
 func Notes(f *flowEntity.Flow, node *flowEntity.Node, step Step, path Path) *Prompt {
 	var b strings.Builder
 
@@ -49,20 +41,6 @@ func Notes(f *flowEntity.Flow, node *flowEntity.Node, step Step, path Path) *Pro
 		}
 	}
 
-	// The flow map lives in PREAMBLE.md, printed once for the whole pack.
-	//
-	// It used to be pasted into every notes prompt. On a 73-function service
-	// that map is 34 KB and it was 94% of every prompt — two prompts compared
-	// byte for byte were 99% identical, and the pack came to a million tokens
-	// to describe 73 functions. The map is the same map every time; only the
-	// step number changes.
-	//
-	// Worse than the size, the shape: the map grows with the function count AND
-	// there is one prompt per function, so pasting it made the pack quadratic.
-	// Eight times the functions cost seventy-three times the tokens.
-	// No Goal: it is the same sentence for every function in the repository,
-	// and there is one of these questions per function. It lives in PREAMBLE.md
-	// under "notes".
 	return New("testigo — what does this step do?").
 		Fact(Proof, "What the analyser proved about this function", b.String()).
 		Fact(Subject, "Where this sits in the flow", fmt.Sprintf(
@@ -73,8 +51,6 @@ func Notes(f *flowEntity.Flow, node *flowEntity.Node, step Step, path Path) *Pro
 		Where("testigo/asks/PREAMBLE.md")
 }
 
-// neighbours names the steps either side of this one, so the prompt can point
-// into the shared map instead of carrying a copy of it.
 func neighbours(step Step, path Path) string {
 	lo, hi := step.Order-1, step.Order+1
 	if lo < 1 {

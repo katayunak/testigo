@@ -7,10 +7,6 @@ import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// Save writes the flow atomically. A half-written sidecar after a crash would
-// look like a corrupt repo state on the next run, so we write to a temp file in
-// the same directory and rename, which is atomic on every filesystem we care
-// about.
 func Save(root string, f *flowEntity.Flow) error {
 	dir := Dir(root)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

@@ -1,43 +1,20 @@
-package askingAgent
+package agent
 
 import (
 	"fmt"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/askingAgent/askEntity"
+	"github.com/katayunak/testigo/internal/agent/domain"
 )
 
-// A Batch is every question of one kind, asked in one file and answered in one
-// file.
-//
-// This is the change that touches the bill. A real recharge service cost $4.95
-// for round one, and the pack was only 49k tokens of that — the other 9.7
-// MILLION were cache reads, because sixty-six questions answered one at a time
-// is sixty-six turns, and every turn re-reads the whole conversation so far:
-//
-//	cost ~= turns x accumulated context
-//
-// Compacting prompts attacks the wrong term. Sixty-six questions become five
-// files, so five turns, and the accumulated context stops growing sixty-six
-// times.
-//
-// Nothing about validation changes. Each answer is split back out and handed to
-// exactly the same validator it had before, so a batched reply is checked as
-// strictly as an individual one — and a single bad entry is reported against
-// its own question rather than failing the batch.
 type Batch struct {
-	Kind askEntity.Kind
-	Asks []askEntity.Ask
+	Kind domain.Kind
+	Asks []domain.Ask
 }
 
-// Batches groups the asks, preserving the order they were planned in.
-//
-// Order matters: the money model and the main entity come first because
-// everything else is read in their light, and an agent working top to bottom
-// should meet them first.
-func Batches(asks []askEntity.Ask) []Batch {
-	var order []askEntity.Kind
-	byKind := map[askEntity.Kind][]askEntity.Ask{}
+func Batches(asks []domain.Ask) []Batch {
+	var order []domain.Kind
+	byKind := map[domain.Kind][]domain.Ask{}
 	for _, a := range asks {
 		if _, seen := byKind[a.Kind]; !seen {
 			order = append(order, a.Kind)
@@ -52,12 +29,8 @@ func Batches(asks []askEntity.Ask) []Batch {
 	return out
 }
 
-// Single reports whether this batch is really just one question. A single
-// question keeps its own name and its own flat answer shape, because wrapping
-// one answer in a map of one is noise.
 func (b Batch) Single() bool { return len(b.Asks) == 1 }
 
-// ID names the file this batch is written to.
 func (b Batch) ID() string {
 	if b.Single() {
 		return b.Asks[0].ID()
@@ -67,12 +40,6 @@ func (b Batch) ID() string {
 
 func (b Batch) AnswerFile() string { return b.ID() + ".json" }
 
-// Prompt renders the whole batch as one file.
-//
-// The per-question text is unchanged — each one already carries only its own
-// facts, because the shared rules and the flow map moved into PREAMBLE.md. What
-// this adds is a header saying how to answer all of them at once, and one
-// output shape instead of N.
 func (b Batch) Prompt() string {
 	if b.Single() {
 		return b.Asks[0].Prompt
@@ -127,10 +94,6 @@ shape PREAMBLE.md gives for a %s answer.
 	return s.String()
 }
 
-// stripTitle removes a question's own top-level heading.
-//
-// Inside a batch each question is a section, and a file full of competing `#`
-// headings reads as a stack of separate documents rather than one list.
 func stripTitle(prompt string) string {
 	lines := strings.Split(prompt, "\n")
 	for i, l := range lines {

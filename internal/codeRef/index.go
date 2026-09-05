@@ -27,5 +27,4 @@ func (ix *Index) Get(id string) (CodeRef, bool) {
 
 func (ix *Index) Len() int { return len(ix.byID) }
 
-// All returns every codeRef in the index, keyed by ID
 func (ix *Index) All() map[string]CodeRef { return ix.byID }
