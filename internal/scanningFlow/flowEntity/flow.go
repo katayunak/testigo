@@ -1,6 +1,17 @@
 package flowEntity
 
-import "github.com/katayunak/testigo/internal/codeRef"
+import "fmt"
+
+type CodeRef struct {
+	Pkg    string `json:"pkg"`
+	Symbol string `json:"symbol"`
+	File   string `json:"file"`
+	Line   int    `json:"line"`
+}
+
+func (c CodeRef) ID() string { return c.Pkg + "#" + c.Symbol }
+
+func (c CodeRef) String() string { return fmt.Sprintf("%s (%s:%d)", c.ID(), c.File, c.Line) }
 
 type Flow struct {
 	SchemaVersion int              `json:"schema_version"`
@@ -21,12 +32,11 @@ type Flow struct {
 	GeneratedFiles    int `json:"generated_files,omitempty"`
 	GeneratedFindings int `json:"generated_findings,omitempty"`
 
-	Docs    []Doc   `json:"docs,omitempty"`
-	Orphans []*Node `json:"orphans,omitempty"`
+	Docs []Doc `json:"docs,omitempty"`
 }
 
-func CodeRefOf(pkg, symbol, file string, line int) codeRef.CodeRef {
-	return codeRef.CodeRef{Pkg: pkg, Symbol: symbol, File: file, Line: line}
+func CodeRefOf(pkg, symbol, file string, line int) CodeRef {
+	return CodeRef{Pkg: pkg, Symbol: symbol, File: file, Line: line}
 }
 
 func NewFlow(module string) *Flow {
@@ -39,15 +49,15 @@ type EntryPoint struct {
 	Label  string `json:"label,omitempty"`
 }
 
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 type Finding struct {
-	ID       string          `json:"id"`
-	Severity Severity        `json:"severity"`
-	Title    string          `json:"title"`
-	Detail   string          `json:"detail"`
-	Ref      codeRef.CodeRef `json:"ref"`
-	Line     int             `json:"line"`
+	ID       string   `json:"id"`
+	Severity Severity `json:"severity"`
+	Title    string   `json:"title"`
+	Detail   string   `json:"detail"`
+	Ref      CodeRef  `json:"ref"`
+	Line     int      `json:"line"`
 }
 
 type StateMachine struct {
@@ -60,10 +70,10 @@ type StateMachine struct {
 }
 
 type StateWrite struct {
-	In   codeRef.CodeRef `json:"in"`
-	To   string          `json:"to"`
-	Line int             `json:"line"`
-	InTx bool            `json:"in_tx,omitempty"`
+	In   CodeRef `json:"in"`
+	To   string  `json:"to"`
+	Line int     `json:"line"`
+	InTx bool    `json:"in_tx,omitempty"`
 }
 
 type Severity string

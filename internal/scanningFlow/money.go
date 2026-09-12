@@ -6,12 +6,9 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
-	"strings"
 
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
-
-	"github.com/katayunak/testigo/internal/codeRef"
 )
 
 func isFloat(t types.Type) bool {
@@ -74,10 +71,18 @@ func moneyFindings(pkgs []*packages.Package, root string) []flowEntity.Finding {
 func isMoneyExpr(p *packages.Package, e ast.Expr) bool {
 	switch x := e.(type) {
 	case *ast.Ident:
-		return patterns.MoneyField.MatchString(x.Name)
+		return patterns.MoneyField.MatchString(x.Name) && !patterns.IsCounterName(x.Name)
 
 	case *ast.SelectorExpr:
-		return patterns.MoneyField.MatchString(x.Sel.Name)
+		if !patterns.MoneyField.MatchString(x.Sel.Name) || patterns.IsCounterName(x.Sel.Name) {
+			return false
+		}
+		if tv, ok := p.TypesInfo.Types[x.X]; ok {
+			if owner := namedOf(tv.Type); owner != "" && patterns.IsContainerName(owner) {
+				return false
+			}
+		}
+		return true
 	}
 
 	if tv, ok := p.TypesInfo.Types[e]; ok {
@@ -89,12 +94,25 @@ func isMoneyExpr(p *packages.Package, e ast.Expr) bool {
 	return false
 }
 
+func namedOf(t types.Type) string {
+	if ptr, ok := t.(*types.Pointer); ok {
+		t = ptr.Elem()
+	}
+	if named, ok := t.(*types.Named); ok && named.Obj() != nil {
+		return named.Obj().Name()
+	}
+	return ""
+}
+
 func checkStruct(p *packages.Package, root, typeName string, st *ast.StructType) []flowEntity.Finding {
 	var out []flowEntity.Finding
+	if patterns.IsContainerName(typeName) {
+		return nil
+	}
 	hasCurrency := false
 	for _, fld := range st.Fields.List {
 		for _, nm := range fld.Names {
-			if strings.Contains(strings.ToLower(nm.Name), "currency") {
+			if patterns.IsCurrencyName(nm.Name) {
 				hasCurrency = true
 			}
 		}
@@ -105,12 +123,18 @@ func checkStruct(p *packages.Package, root, typeName string, st *ast.StructType)
 		if !ok {
 			continue
 		}
+		if isDuration(tv.Type) {
+			continue
+		}
 
 		for _, nm := range fld.Names {
 			if !patterns.MoneyField.MatchString(nm.Name) {
 				continue
 			}
-			a := codeRef.CodeRef{Pkg: p.PkgPath, Symbol: "type " + typeName, File: relPath(p.Fset, fld.Pos(), root), Line: p.Fset.Position(fld.Pos()).Line}
+			if patterns.IsCounterName(nm.Name) {
+				continue
+			}
+			a := flowEntity.CodeRef{Pkg: p.PkgPath, Symbol: "type " + typeName, File: relPath(p.Fset, fld.Pos(), root), Line: p.Fset.Position(fld.Pos()).Line}
 			if isFloat(tv.Type) {
 				out = append(out, flowEntity.Finding{
 					ID: "MONEY-FLOAT", Severity: flowEntity.SevCritical,
@@ -154,9 +178,9 @@ func checkSignature(p *packages.Package, root string, fd *ast.FuncDecl) []flowEn
 				}
 				out = append(out, flowEntity.Finding{
 					ID: "MONEY-FLOAT", Severity: flowEntity.SevCritical,
-					Title:  codeRef.Symbol(fd) + " takes money as a float in " + what + " " + nm.Name,
+					Title:  Symbol(fd) + " takes money as a float in " + what + " " + nm.Name,
 					Detail: "Every caller now has to round, and they will not all round the same way. Take minor units as an integer at the boundary and convert once, where the conversion can be tested.",
-					Ref:    codeRef.CodeRef{Pkg: p.PkgPath, Symbol: codeRef.Symbol(fd), File: relPath(p.Fset, fld.Pos(), root), Line: p.Fset.Position(fld.Pos()).Line},
+					Ref:    flowEntity.CodeRef{Pkg: p.PkgPath, Symbol: Symbol(fd), File: relPath(p.Fset, fld.Pos(), root), Line: p.Fset.Position(fld.Pos()).Line},
 					Line:   p.Fset.Position(fld.Pos()).Line,
 				})
 			}

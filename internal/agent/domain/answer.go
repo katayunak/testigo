@@ -9,14 +9,12 @@ import (
 
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 	"github.com/katayunak/testigo/internal/testPlan"
-	"github.com/katayunak/testigo/internal/testPlan/planEntity"
 )
 
 const AgentResponseSchema = 2
 
 type AgentResponse struct {
-	SchemaVersion int    `json:"schema_version"`
-	GeneratedAt   string `json:"generated_at,omitempty"`
+	SchemaVersion int `json:"schema_version"`
 
 	MoneyModel  *MoneyModelAnswer             `json:"money_model,omitempty"`
 	MainEntity  *MainEntityAnswer             `json:"main_entity,omitempty"`
@@ -27,12 +25,26 @@ type AgentResponse struct {
 
 	Classification *Classification            `json:"classification,omitempty"`
 	PaymentKind    map[string]*QuestionAnswer `json:"payment_kind,omitempty"`
+
+	TestRuns []TestRun `json:"test_runs,omitempty"`
 }
 
-type PaymentKindAnswer struct {
-	Answers map[string]*QuestionAnswer `json:"answers"`
-	Notes   string                     `json:"notes,omitempty"`
+type TestRun struct {
+	CaseID string `json:"case_id"`
+	File   string `json:"file,omitempty"`
+	Func   string `json:"func,omitempty"`
+
+	Status string `json:"status"`
+	Passed *bool  `json:"passed,omitempty"`
+
+	ExpectedToFail string `json:"expected_to_fail,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+	Output         string `json:"output,omitempty"`
 }
+
+func (t TestRun) Green() bool { return t.Passed != nil && *t.Passed }
+
+func (t TestRun) Red() bool { return t.Passed != nil && !*t.Passed }
 
 func FromScan(f *flowEntity.Flow) (*AgentResponse, []string) {
 	k := NewAgentResponse()
@@ -58,7 +70,6 @@ func FromScan(f *flowEntity.Flow) (*AgentResponse, []string) {
 	if idemDecided {
 		b.Idempotency.KeyField = idem.Name
 		b.Idempotency.Proof = proofOf(idem)
-		b.Idempotency.KeySource = "request"
 
 		if _, unique := f.Infra.CoversColumn("", idem.Name); unique {
 			b.Idempotency.Uniqueness = "db_constraint"
@@ -134,20 +145,16 @@ type Money struct {
 }
 
 type Idempotency struct {
-	KeySource  string `json:"key_source"`
 	KeyField   string `json:"key_field"`
-	StoredIn   string `json:"stored_in"`
 	Uniqueness string `json:"uniqueness"`
 	Proof      Proof  `json:"proof"`
 }
 
 type MoneyModelAnswer struct {
-	Money         Money       `json:"money"`
-	TransferFunc  Proof       `json:"transfer_func"`
-	BalanceFunc   Proof       `json:"balance_func"`
-	Idempotency   Idempotency `json:"idempotency"`
-	EntityIDField string      `json:"entity_id_field"`
-	Notes         string      `json:"notes"`
+	Money        Money       `json:"money"`
+	TransferFunc Proof       `json:"transfer_func"`
+	BalanceFunc  Proof       `json:"balance_func"`
+	Idempotency  Idempotency `json:"idempotency"`
 }
 
 func (a *MoneyModelAnswer) Validate() error {
@@ -183,8 +190,6 @@ type TransitionsAnswer struct {
 		To   string `json:"to"`
 		Why  string `json:"why"`
 	} `json:"unsure"`
-	NeverAssignedVerdict map[string]string `json:"never_assigned_verdict"`
-
 	FinalStates []string `json:"final_states"`
 
 	FinalStateExceptions []struct {
@@ -192,8 +197,6 @@ type TransitionsAnswer struct {
 		To   string `json:"to"`
 		Why  string `json:"why"`
 	} `json:"final_state_exceptions"`
-
-	Notes string `json:"notes"`
 }
 
 func (a *TransitionsAnswer) IsFinal(state string) bool {
@@ -295,19 +298,9 @@ type ExternalEffectAnswer struct {
 
 	OutcomeObservable json.RawMessage `json:"outcome_observable"`
 
-	AcceptsDedupKey  json.RawMessage `json:"accepts_dedup_key"`
-	DedupKeyArgument string          `json:"dedup_key_argument"`
-
-	Undo struct {
-		Exists bool  `json:"exists"`
-		Proof  Proof `json:"proof"`
-	} `json:"undo"`
+	AcceptsDedupKey json.RawMessage `json:"accepts_dedup_key"`
 
 	MovesMoney json.RawMessage `json:"moves_money"`
-
-	FailureModes []string `json:"failure_modes"`
-	Basis        string   `json:"basis"`
-	Notes        string   `json:"notes"`
 }
 
 func (a *ExternalEffectAnswer) Undoable() bool { return IsTrue(a.ReversibleByRollback) }
@@ -328,27 +321,6 @@ func IsFalse(raw json.RawMessage) bool {
 	return string(bytes.TrimSpace(raw)) == "false"
 }
 
-type NotesAnswer struct {
-	Step        string   `json:"step"`
-	Purpose     string   `json:"purpose"`
-	Effects     []string `json:"effects"`
-	Assumptions []string `json:"assumptions"`
-	Confidence  string   `json:"confidence"`
-}
-
-func (a *NotesAnswer) Validate() error {
-	var bad []string
-	if strings.TrimSpace(a.Step) == "" {
-		bad = append(bad, "step is empty")
-	}
-	switch a.Confidence {
-	case "high", "medium", "low", "":
-	default:
-		bad = append(bad, fmt.Sprintf("confidence %q is not one of high, medium, low", a.Confidence))
-	}
-	return join(bad)
-}
-
 type CaseAnswer struct {
 	CaseID        string `json:"-"`
 	Status        string `json:"status"`
@@ -360,15 +332,13 @@ type CaseAnswer struct {
 		Content string `json:"content"`
 	} `json:"file"`
 	FuncName          string   `json:"func_name"`
-	FakesAdded        []string `json:"fakes_added"`
 	ReachedAssertions []string `json:"reached_assertions"`
 	ExpectedToFail    string   `json:"expected_to_fail"`
-	OracleUsed        string   `json:"oracle_used"`
 }
 
 func (a *CaseAnswer) Written() bool { return a.Status == "written" }
 
-func (a *CaseAnswer) Validate(want planEntity.Size) error {
+func (a *CaseAnswer) Validate(want testPlan.Size) error {
 	var bad []string
 	switch a.Status {
 	case "blocked":
@@ -392,7 +362,7 @@ func (a *CaseAnswer) Validate(want planEntity.Size) error {
 	if len(a.ReachedAssertions) == 0 {
 		bad = append(bad, "no reached_assertions: a test that cannot prove the interesting situation occurred reports green having checked nothing")
 	}
-	if want != planEntity.SizeSmall && !strings.Contains(a.File.Content, "//go:build "+want.BuildTag()) {
+	if want != testPlan.SizeSmall && !strings.Contains(a.File.Content, "//go:build "+want.BuildTag()) {
 		bad = append(bad, fmt.Sprintf("a %s test must start with //go:build %s so a bare `go test ./...` stays fast", want, want.BuildTag()))
 	}
 	for _, p := range testPlan.CheckSize(a.File.Path, a.File.Content, want) {
@@ -409,10 +379,8 @@ func join(bad []string) error {
 }
 
 type EntityRef struct {
-	Struct  string `json:"struct"`
-	Package string `json:"package"`
-	Proof   Proof  `json:"proof"`
-	Why     string `json:"why"`
+	Struct string `json:"struct"`
+	Proof  Proof  `json:"proof"`
 }
 
 type KeyRef struct {
@@ -420,7 +388,6 @@ type KeyRef struct {
 	Proof            Proof           `json:"proof"`
 	SuppliedBy       string          `json:"supplied_by"`
 	ReadBeforeActing json.RawMessage `json:"read_before_acting"`
-	Confidence       string          `json:"confidence"`
 }
 
 type Identifier struct {
@@ -436,7 +403,6 @@ type MainEntityAnswer struct {
 	OtherIdentifiers []Identifier `json:"other_identifiers"`
 
 	NoKeyReason string `json:"no_key_reason"`
-	Notes       string `json:"notes"`
 }
 
 func (a *MainEntityAnswer) Validate() error {
@@ -471,8 +437,7 @@ func (a *MainEntityAnswer) Validate() error {
 			}
 			bad = append(bad, fmt.Sprintf(
 				"%q is named as the idempotency key and also listed under other_identifiers "+
-					"with could_be_key false — decide which, or explain in `notes` why the two "+
-					"spellings are different values", o.Field))
+					"with could_be_key false — decide which", o.Field))
 		}
 	}
 
@@ -508,7 +473,6 @@ type StateRolesAnswer struct {
 		To   string `json:"to"`
 		Why  string `json:"why"`
 	} `json:"exceptions"`
-	Notes string `json:"notes"`
 }
 
 func (a *StateRolesAnswer) ValidateAgainst(states []string) error {
@@ -560,7 +524,6 @@ func (a *StateRolesAnswer) ValidateAgainst(states []string) error {
 func (a *StateRolesAnswer) Transitions(neverAssigned []string) *TransitionsAnswer {
 	out := &TransitionsAnswer{
 		MayMoveTo: a.Roles.Derive(neverAssigned),
-		Notes:     a.Notes,
 	}
 	if init, ok := a.Roles.Initial(); ok {
 		out.InitialState = init

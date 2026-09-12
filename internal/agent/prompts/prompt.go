@@ -72,6 +72,11 @@ func NewGenerate(title string) *Prompt {
 	return &Prompt{Title: title}
 }
 
+func (p *Prompt) Standalone() *Prompt {
+	p.shared = false
+	return p
+}
+
 func (p *Prompt) Goal(g string) *Prompt {
 	p.Goals = append(p.Goals, g)
 	return p

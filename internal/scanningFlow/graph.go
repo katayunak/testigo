@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/codeRef"
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/callgraph/cha"
@@ -31,7 +30,8 @@ type graph struct {
 	idOf map[*ssa.Function]string
 
 	reach map[*ssa.Function]kindSet
-	refs  map[string]codeRef.CodeRef
+	sink  map[*ssa.Function]bool
+	refs  map[string]flowEntity.CodeRef
 
 	imports map[string]map[string]bool
 }
@@ -52,7 +52,7 @@ func buildGraph(pkgs []*packages.Package, local map[string]bool) (*graph, error)
 		prog: prog, callGraph: cg, local: local,
 		byID:    map[string]*ssa.Function{},
 		idOf:    map[*ssa.Function]string{},
-		refs:    map[string]codeRef.CodeRef{},
+		refs:    map[string]flowEntity.CodeRef{},
 		imports: importClosure(pkgs),
 	}
 
@@ -63,23 +63,23 @@ func buildGraph(pkgs []*packages.Package, local map[string]bool) (*graph, error)
 			g.refs[id] = a
 		}
 	}
-	g.reach = computeReach(cg, g.isLocal)
+	g.sink = computeSinks(cg, g.isLocal)
+	g.reach = computeReach(cg, g.isLocal, g.effectKind)
 
 	return g, nil
 }
 
-func (g *graph) identify(fn *ssa.Function) (string, codeRef.CodeRef, bool) {
+func (g *graph) identify(fn *ssa.Function) (string, flowEntity.CodeRef, bool) {
 	decl, ok := fn.Syntax().(*ast.FuncDecl)
 	if !ok || fn.Pkg == nil {
-		return "", codeRef.CodeRef{}, false
+		return "", flowEntity.CodeRef{}, false
 	}
 
 	path := fn.Pkg.Pkg.Path()
-	sym := codeRef.Symbol(decl)
+	sym := Symbol(decl)
 	pos := g.prog.Fset.Position(decl.Pos())
-	hash, _ := codeRef.StructuralHash(decl)
 
-	return path + "#" + sym, codeRef.CodeRef{Pkg: path, Symbol: sym, Line: pos.Line, BodyHash: hash}, true
+	return path + "#" + sym, flowEntity.CodeRef{Pkg: path, Symbol: sym, Line: pos.Line}, true
 }
 
 func owner(fn *ssa.Function) *ssa.Function {

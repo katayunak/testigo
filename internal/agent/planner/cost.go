@@ -59,12 +59,10 @@ const (
 )
 
 var measuredPerField = map[string]int{
-	"notes":          41,
 	"externalEffect": 21,
 	"stateRoles":     131,
 	"mainEntity":     128,
 	"moneyModel":     77,
-	"paymentKind":    35,
 }
 
 func OutputTokens(kind string, m Method, fields int) int {

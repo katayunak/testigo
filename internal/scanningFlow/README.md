@@ -2,7 +2,7 @@
 
 The `Flow` is Testigo's main data model for the result of the scanning phase.
 
-It is also what gets persisted to `.testigo/flow.json`.
+It is also what gets persisted to `testigo/flow.json`.
 
 ```text
 Flow
@@ -10,8 +10,7 @@ Flow
 ├── Nodes      → functions in the flow
 ├── Seams      → external boundaries
 ├── Machines   → detected state machines
-├── Findings   → deterministic problems
-└── Orphans    → notes from functions that disappeared
+└── Findings   → deterministic problems
 ```
 
 ## Seams
@@ -44,18 +43,33 @@ test seam; reporting every cursor operation would add noise without adding usefu
 
 Direct calls are not enough. A function may not perform I/O itself but may call another function that does.
 
-`computeReach` propagates I/O information backwards through the call graph until reaching a fixed point. This lets
-Testigo answer:
+`computeReach` propagates I/O kinds backwards through the call graph to a fixed point, through **local application
+code**, so every local function learns which kinds of external I/O it can eventually cause. It uses a worklist, so only
+functions whose information changed are reconsidered.
 
-> "If this function executes, what kinds of external I/O can eventually happen?"
+### Is the boundary real? Sink reachability
 
-The propagation uses a worklist rather than repeatedly scanning the entire graph, so only functions whose information
-changed need to be reconsidered.
+A package prefix only nominates a *candidate*. A `db`, `http`, `queue` or `cache` candidate is kept only if
+`computeSinks` shows it can reach a real round trip: a `net` connection, `crypto/tls`, the `database/sql` exec, query
+and transaction calls, the `net/http` client, or `os/exec`.
 
-Reachability is propagated transitively through **local application code**. Dependencies contribute only their direct
-I/O classification. This boundary is important because the call graph uses CHA and therefore already over-approximates
-interface dispatch. Propagating every dependency's transitive reachability would turn that conservative approximation
-into large amounts of useless noise.
+CHA over-approximates, so the walk refuses three kinds of edge:
+
+| Not followed | Why |
+|---|---|
+| invokes on plumbing interfaces — `error`, `io.Reader`/`io.Writer` and friends, `context.Context`, `fmt.Stringer`, the marshalers — and on anonymous interfaces | they resolve to every implementation in the program, including socket reads |
+| calls through function values with a generic signature, such as `func(rune) rune` | CHA links them to every function of that shape |
+| edges from library code into your application | a library's own I/O cannot depend on the callbacks you register |
+
+A callback that names a library type is followed — go-pg runs every query inside
+`func(context.Context, *pool.Conn) error`, and that is how it reaches its connection.
+
+Sends that hand work to a background goroutine (`Publish`, `Send`, `Request`, `Enqueue`…) are kept by name, because
+their socket write is not on any static path. `clock` and `random` seams exist for determinism, not I/O, and are never
+filtered.
+
+On the recharge service this took effect seam targets from 35 to 15, and every real seam survived. It is a filter, not
+a proof.
 
 ### Injectable seams
 
@@ -99,12 +113,13 @@ The tables live in one file per concern so they are easy to find and edit:
 | `patterns/io.go` | package prefixes to boundary kinds; the net/http client calls; cursor noise |
 | `patterns/state.go` | lifecycle type names, strong and weak; final-state hints |
 | `patterns/money.go` | amount fields, money types, currency fields, idempotency keys |
+| `patterns/patterns.go` | splitting identifiers into words, so `CurrentPage` is not a currency and `TotalPages` is not money |
 
 `patterns/state.go` splits names into two lists on purpose. `PaymentStatus` is a
 lifecycle. `ErrorCode` is an enum but not a lifecycle, and asking an agent which
 transitions of an error code are legal is nonsense that costs money. Strong names
 become state machines automatically; weak ones are reported for a person to
-promote through `testigo.rules.json`.
+promote through `testigo/rules.json`.
 
 Migrations, compose files and broker config are read the same way, by pattern,
 in `infra.go`. Shallow on purpose — a real SQL parser would be more correct and
@@ -124,7 +139,7 @@ because it is less likely to hide a possible path.
 ### Discovering the flow
 
 `scan()` builds the SSA program, creates the CHA call graph, and walks it from the entry points **declared in
-`testigo.json`**. Nothing in this package looks for entry points. There is no ranking, no name matching, no
+`testigo/config.json`**. Nothing in this package looks for entry points. There is no ranking, no name matching, no
 `patterns/entryPoint.go` — that table existed once and was deleted. An empty entry list is an error, not an empty flow.
 
 `graph.discover` computes a **set**, not a sequence. Every reachable local function is visited exactly once and emits
@@ -136,23 +151,6 @@ The ordering that *does* survive lives on the edges. Each recorded call carries 
 inside the caller's body, and `Node.Calls` is stored sorted by it, so a rendered step list reads in the order the
 statements run. Declaration order — where `func A` happens to sit in the file — is never used: Go resolves package-level
 names regardless of position, so it carries no information.
-
-### Indexing all nodes
-
-Testigo also indexes every declared function in the module, not only functions reachable from the configured entry
-points.
-This matters for incremental analysis.
-Suppose a function had agent notes during the previous scan but is temporarily disconnected from the payment flow after
-a refactor.
-If only reachable functions were indexed, Testigo could incorrectly treat that function as deleted.
-
-The complete index lets the resolver distinguish between:
-
-* Function still exists
-  but is no longer reachable
-* Function no longer exists
-
-That distinction is important for preserving notes correctly.
 
 ### Finding the Owner of a Function
 
@@ -198,7 +196,7 @@ The analysis uses GO's AST and type information from `go/packages` / `go/types`.
 
 `Scan()` builds a **structured snapshot of the repository** that later phases can reason about.
 It extracts compiler and AST information, builds the call graph, discovers payment-flow nodes and seams, and produces a
-`Flow` plus an `Index`.
+`Flow`.
 
 ### Deterministic Findings
 
@@ -208,7 +206,7 @@ running the application.
 | Finding           | Severity | What it detects                                                                      | Why it matters                                                                                                                                                |
 |-------------------|----------|--------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `SEAM-CONCRETE`   | High     | I/O is called directly on a concrete type instead of through an injectable interface | Tests cannot easily replace the real dependency to simulate timeouts, failures, duplicates, or other external-system failures.                                |
-| `TX-NO-ROLLBACK`  | High     | A function opens a database transaction but has no rollback path                     | An early return can leave the transaction open. Pairing `Begin` with an immediate `defer tx.Rollback()` protects every error path.                            |
+| `TX-NO-ROLLBACK`  | High     | A function opens a database transaction but has no rollback path                     | An early return can leave the transaction open. Pairing `Begin` with an immediate `defer tx.Rollback()` protects every error path. go-pg's `tx.Close()` also rolls back and is not yet recognised, so the finding is false there.                            |
 | `TX-NET-CALL`     | Critical | A network call happens while a database transaction is open                          | A slow or unavailable provider can keep database locks open, causing contention, timeouts, and potentially a database outage under load.                      |
 | `STATE-NEVER-SET` | Medium   | A declared terminal state is never assigned anywhere in the scanned module           | The state may be dead code, written externally, or represent a missing transition. Any read path handling that state may therefore be untested or incomplete. |
 | `LOAD-ERROR`      | Info     | A loaded package contains type-checking or loading errors                            | Analysis for that package may be incomplete, so findings and flow information from it should not be treated as complete.                                      |

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/katayunak/testigo/internal/codeRef"
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 	"golang.org/x/tools/go/packages"
 )
@@ -20,9 +19,7 @@ type Options struct {
 }
 
 type Result struct {
-	Flow  *flowEntity.Flow
-	Index *codeRef.Index
-	Local map[string]bool
+	Flow *flowEntity.Flow
 }
 
 const loadMode = packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
@@ -69,28 +66,6 @@ func Scan(opts Options) (*Result, error) {
 	flow.GeneratedAt = time.Now().Local().Format(time.RFC3339)
 	flow.Entries = opts.Entries
 
-	ix := codeRef.NewIndex()
-	decls := map[string]*declRef{}
-
-	for _, p := range pkgs {
-
-		for _, file := range p.Syntax {
-
-			for _, declaration := range file.Decls {
-
-				functionDeclaration, ok := declaration.(*ast.FuncDecl)
-				if !ok || functionDeclaration.Body == nil {
-					continue
-				}
-
-				newCodeRef := codeRef.NewCodeRef(p.PkgPath, opts.Root, p.Fset, functionDeclaration)
-				_, astNodesCounts := codeRef.StructuralHash(functionDeclaration)
-				ix.Add(newCodeRef, astNodesCounts)
-				decls[newCodeRef.ID()] = &declRef{codeRef: newCodeRef, decl: functionDeclaration, pkg: p}
-			}
-		}
-	}
-
 	g, err := buildGraph(pkgs, local)
 	if err != nil {
 		return nil, err
@@ -135,13 +110,7 @@ func Scan(opts Options) (*Result, error) {
 	}
 
 	sortFindings(flow.Findings)
-	return &Result{Flow: flow, Index: ix, Local: local}, nil
-}
-
-type declRef struct {
-	codeRef codeRef.CodeRef
-	decl    *ast.FuncDecl
-	pkg     *packages.Package
+	return &Result{Flow: flow}, nil
 }
 
 func linkStateWritesToNodes(f *flowEntity.Flow) {
@@ -225,7 +194,7 @@ func stateFindings(ms []flowEntity.StateMachine) []flowEntity.Finding {
 				ID: "STATE-NEVER-SET", Severity: flowEntity.SevMedium,
 				Title:  m.Type + "." + st + " is declared but nothing in this module produces it",
 				Detail: "No assignment, struct literal, return statement or call argument anywhere in the scanned packages produces this state. Either it is dead, or something outside this code — a migration, a manual fix, another service — puts payments into it. If the second, every read path has to handle a state no write path here produces, and no test currently covers that.",
-				Ref:    codeRef.CodeRef{Pkg: pkgOf(m.Type), Symbol: "const " + st},
+				Ref:    flowEntity.CodeRef{Pkg: pkgOf(m.Type), Symbol: "const " + st},
 			})
 		}
 	}

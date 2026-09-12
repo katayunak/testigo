@@ -48,7 +48,7 @@ func FindDocs(root string) []flowEntity.Doc {
 		}
 		out = append(out, flowEntity.Doc{
 			Path: rel, Score: score, Topics: topics,
-			Bytes: int(info.Size()), Title: firstHeading(string(body)),
+			Title: firstHeading(string(body)),
 		})
 		return nil
 	})

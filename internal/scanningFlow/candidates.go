@@ -337,10 +337,13 @@ func moneyCandidates(pkgs []*packages.Package, f *flowEntity.Flow, root string, 
 					}
 					return true
 				}
+				if patterns.IsContainerName(spec.Name.Name) {
+					return true
+				}
 				hasCurrency := false
 				for _, fld := range st.Fields.List {
 					for _, nm := range fld.Names {
-						if patterns.CurrencyField.MatchString(nm.Name) {
+						if patterns.IsCurrencyName(nm.Name) {
 							hasCurrency = true
 						}
 					}
@@ -350,8 +353,14 @@ func moneyCandidates(pkgs []*packages.Package, f *flowEntity.Flow, root string, 
 						if !patterns.MoneyField.MatchString(nm.Name) {
 							continue
 						}
+						if patterns.IsCounterName(nm.Name) {
+							continue
+						}
 						tv, ok := p.TypesInfo.Types[fld.Type]
 						if !ok {
+							continue
+						}
+						if isDuration(tv.Type) {
 							continue
 						}
 						pos := p.Fset.Position(nm.Pos())
@@ -388,6 +397,16 @@ func moneyCandidates(pkgs []*packages.Package, f *flowEntity.Flow, root string, 
 	}
 	out.Sort()
 	return out
+}
+
+func isDuration(t types.Type) bool {
+	if named, ok := t.(*types.Named); ok {
+		obj := named.Obj()
+		if obj != nil && obj.Name() == "Duration" && obj.Pkg() != nil && obj.Pkg().Path() == "time" {
+			return true
+		}
+	}
+	return false
 }
 
 func canHoldAKey(p *packages.Package, fld *ast.Field) bool {

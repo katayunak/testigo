@@ -212,36 +212,6 @@ var TechniqueQuestions = map[string][]Question{
 	},
 }
 
-func TechniqueQuestionsFor(techniques []string) []Question {
-	var out []Question
-	seen := map[string]bool{}
-	for _, t := range techniques {
-		for _, q := range TechniqueQuestions[t] {
-			if seen[q.ID] {
-				continue
-			}
-			seen[q.ID] = true
-			out = append(out, q)
-		}
-	}
-	return out
-}
-
-func ScenarioQuestionsFor(scenarios []string) []Question {
-	var out []Question
-	seen := map[string]bool{}
-	for _, s := range scenarios {
-		for _, q := range ScenarioQuestions[s] {
-			if seen[q.ID] {
-				continue
-			}
-			seen[q.ID] = true
-			out = append(out, q)
-		}
-	}
-	return out
-}
-
 type Need struct {
 	Question Question
 	Because  []string
@@ -285,4 +255,29 @@ func Needed(c Classification, scenarios, techniques []string, answered map[strin
 		out = append(out, Need{Question: q, Because: because[q.ID]})
 	}
 	return out
+}
+
+var questionIndex map[string]Question
+
+func QuestionByID(id string) (Question, bool) {
+	if questionIndex == nil {
+		questionIndex = map[string]Question{}
+		for _, qs := range PaymentTypeQuestions {
+			for _, q := range qs {
+				questionIndex[q.ID] = q
+			}
+		}
+		for _, qs := range ScenarioQuestions {
+			for _, q := range qs {
+				questionIndex[q.ID] = q
+			}
+		}
+		for _, qs := range TechniqueQuestions {
+			for _, q := range qs {
+				questionIndex[q.ID] = q
+			}
+		}
+	}
+	q, ok := questionIndex[id]
+	return q, ok
 }

@@ -151,11 +151,3 @@ func trim(s string, n int) string {
 	}
 	return s[:n-3] + "..."
 }
-
-func clip(in []string, n int) []string {
-	if len(in) <= n {
-		return in
-	}
-	out := append([]string{}, in[:n]...)
-	return append(out, fmt.Sprintf("and %d more", len(in)-n))
-}

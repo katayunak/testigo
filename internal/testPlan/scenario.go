@@ -1,4 +1,4 @@
-package planEntity
+package testPlan
 
 import (
 	"fmt"
@@ -40,8 +40,6 @@ type Scenario struct {
 	Requires Requires
 
 	Severity flowEntity.Severity
-
-	Source string
 }
 
 type Requires struct {
@@ -68,19 +66,14 @@ type Facts struct {
 	Uniqueness     string
 	Known          bool
 
-	Domain           string
-	MoneyMovement    string
-	ExternalSignal   string
-	RetryPolicy      bool
-	ReversalPossible bool
-	Skipped          map[string]string
+	Skipped map[string]string
 }
 
 func (s Scenario) Applies(f *flowEntity.Flow, b Facts) (bool, string) {
 	r := s.Requires
 
 	if why, off := b.Skipped[s.ID]; off {
-		return false, "turned off in testigo.rules.json: " + why
+		return false, "turned off in testigo/rules.json: " + why
 	}
 
 	if b.Known {

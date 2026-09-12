@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/codeRef"
+	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
 type Round int
@@ -34,13 +34,9 @@ const (
 
 	KindStateRoles Kind = "stateRoles"
 
-	KindPaymentKind Kind = "paymentKind"
-
 	KindQuestions Kind = "questions"
 
-	KindNotes Kind = "notes"
-
-	KindTransitions Kind = "transitions"
+	KindReport Kind = "report"
 
 	KindExternalEffect Kind = "externalEffect"
 
@@ -48,14 +44,13 @@ const (
 )
 
 type Ask struct {
-	Kind  Kind  `json:"kind"`
-	Round Round `json:"round"`
+	Kind Kind `json:"kind"`
 
 	Title string `json:"title"`
 
 	Subject string `json:"subject,omitempty"`
 
-	ForHash string `json:"for_hash,omitempty"`
+	Questions []string `json:"questions,omitempty"`
 
 	Prompt string `json:"-"`
 }
@@ -91,7 +86,7 @@ func Slug(s string) string {
 	return out
 }
 
-func (a Ask) Ref(refs map[string]codeRef.CodeRef) (codeRef.CodeRef, bool) {
+func (a Ask) Ref(refs map[string]flowEntity.CodeRef) (flowEntity.CodeRef, bool) {
 	ref, ok := refs[a.Subject]
 	return ref, ok
 }

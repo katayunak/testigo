@@ -26,9 +26,6 @@ func Flowchart(f *flowEntity.Flow) string {
 	for _, id := range ids {
 		n := f.Nodes[id]
 		label := n.Ref.Symbol
-		if n.Notes != nil && n.Notes.Step != "" {
-			label = n.Notes.Step
-		}
 		var tags []string
 		if n.Facts.HandlesMoney {
 			tags = append(tags, "money")

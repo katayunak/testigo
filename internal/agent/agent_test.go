@@ -4,13 +4,9 @@ import (
 	"encoding/json"
 	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/agent/prompts"
-	"github.com/katayunak/testigo/internal/testPlan/planEntity"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/katayunak/testigo/internal/codeRef"
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 	"github.com/katayunak/testigo/internal/testPlan"
 )
@@ -21,14 +17,14 @@ func fixtureFlow() *flowEntity.Flow {
 		{Pkg: "example.com/paysvc/api", Symbol: "(*Server).CreatePayment", Label: "API create"},
 	}
 	entry := &flowEntity.Node{
-		Ref: codeRef.CodeRef{Pkg: "example.com/paysvc/api", Symbol: "(*Server).CreatePayment",
-			File: "api/server.go", Line: 21, BodyHash: "h-entry"},
+		Ref: flowEntity.CodeRef{Pkg: "example.com/paysvc/api", Symbol: "(*Server).CreatePayment",
+			File: "api/server.go", Line: 21},
 		Position: flowEntity.NodePositionEntry,
 		Calls:    []string{"example.com/paysvc/api#(*Server).process"},
 	}
 	process := &flowEntity.Node{
-		Ref: codeRef.CodeRef{Pkg: "example.com/paysvc/api", Symbol: "(*Server).process",
-			File: "api/server.go", Line: 35, BodyHash: "h-process"},
+		Ref: flowEntity.CodeRef{Pkg: "example.com/paysvc/api", Symbol: "(*Server).process",
+			File: "api/server.go", Line: 35},
 		Position: flowEntity.NodePositionInternal,
 		Facts:    flowEntity.Facts{OpensTx: true, TouchesNet: true, WritesStatus: []string{"StatusPending"}},
 	}
@@ -47,29 +43,6 @@ func fixtureFlow() *flowEntity.Flow {
 		Writes: []flowEntity.StateWrite{{In: process.Ref, To: "StatusPending", Line: 44, InTx: true}},
 	}}
 	return f
-}
-
-func TestPlanSkipsNodesWithFreshNotes(t *testing.T) {
-	f := fixtureFlow()
-	id := "example.com/paysvc/api#(*Server).process"
-	f.Nodes[id].Notes = &flowEntity.Notes{Step: "reserve funds", ForHash: "h-process"}
-
-	for _, a := range Plan(f, domain.NewAgentResponse(), domain.RoundUnderstand) {
-		if a.Kind == domain.KindNotes && a.Subject == id {
-			t.Fatal("re-asked for notes on a function whose body has not changed")
-		}
-	}
-
-	f.Nodes[id].Ref.BodyHash = "h-process-EDITED"
-	found := false
-	for _, a := range Plan(f, domain.NewAgentResponse(), domain.RoundUnderstand) {
-		if a.Kind == domain.KindNotes && a.Subject == id {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("did not re-ask about a function whose body changed")
-	}
 }
 
 func TestPlanIsDeterministic(t *testing.T) {
@@ -227,7 +200,7 @@ func TestGeneratedCaseRejectsSleep(t *testing.T) {
 	c.File.Path = "api/idempotency_testigo_test.go"
 	c.File.Content = "package api\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestX(t *testing.T) { time.Sleep(time.Second) }\n"
 
-	err := c.Validate(planEntity.SizeSmall)
+	err := c.Validate(testPlan.SizeSmall)
 	if err == nil || !strings.Contains(err.Error(), "time.Sleep") {
 		t.Fatalf("want a sleep rejection, got %v", err)
 	}
@@ -240,18 +213,18 @@ func TestSizeIsEnforcedNotDescribed(t *testing.T) {
 		"sql.Open": "package api\n\nimport (\n\t\"database/sql\"\n\t\"testing\"\n)\n\nfunc TestX(t *testing.T) { _, _ = sql.Open(\"pg\", \"\") }\n",
 	}
 	for banned, src := range cases {
-		problems := testPlan.CheckSize("x_test.go", src, planEntity.SizeSmall)
+		problems := testPlan.CheckSize("x_test.go", src, testPlan.SizeSmall)
 		if len(problems) == 0 {
 			t.Errorf("a small test calling %s was accepted", banned)
 		}
 	}
 
 	clean := "package api\n\nimport \"testing\"\n\nfunc TestX(t *testing.T) { _ = 1 }\n"
-	if problems := testPlan.CheckSize("x_test.go", clean, planEntity.SizeSmall); len(problems) != 0 {
+	if problems := testPlan.CheckSize("x_test.go", clean, testPlan.SizeSmall); len(problems) != 0 {
 		t.Errorf("a clean small test was rejected: %v", problems)
 	}
 
-	if problems := testPlan.CheckSize("x_test.go", cases["sql.Open"], planEntity.SizeMedium); len(problems) != 0 {
+	if problems := testPlan.CheckSize("x_test.go", cases["sql.Open"], testPlan.SizeMedium); len(problems) != 0 {
 		t.Errorf("a medium test was held to the small predicate: %v", problems)
 	}
 }
@@ -260,7 +233,7 @@ func TestWrittenCaseMustProveItDidSomething(t *testing.T) {
 	c := &domain.CaseAnswer{Status: "written"}
 	c.File.Path = "api/x_testigo_test.go"
 	c.File.Content = "package api\n\nimport \"testing\"\n\nfunc TestX(t *testing.T) {}\n"
-	err := c.Validate(planEntity.SizeSmall)
+	err := c.Validate(testPlan.SizeSmall)
 	if err == nil || !strings.Contains(err.Error(), "reached_assertions") {
 		t.Fatalf("want a reached-assertions rejection, got %v", err)
 	}
@@ -268,7 +241,7 @@ func TestWrittenCaseMustProveItDidSomething(t *testing.T) {
 
 func TestBlockedCaseMustSayWhy(t *testing.T) {
 	c := &domain.CaseAnswer{Status: "blocked"}
-	if err := c.Validate(planEntity.SizeSmall); err == nil || !strings.Contains(err.Error(), "no reason") {
+	if err := c.Validate(testPlan.SizeSmall); err == nil || !strings.Contains(err.Error(), "no reason") {
 		t.Fatalf("want a missing-reason rejection, got %v", err)
 	}
 }
@@ -310,33 +283,6 @@ func TestRoundTwoIsBlockedUntilRoundOneIsAnswered(t *testing.T) {
 	}
 }
 
-func TestNotesAnswerRejectedWhenTheBodyMovedUnderIt(t *testing.T) {
-	dir := t.TempDir()
-	f := fixtureFlow()
-	id := "example.com/paysvc/api#(*Server).process"
-
-	if err := os.MkdirAll(filepath.Join(dir, answersDir), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	ask := domain.Ask{Kind: domain.KindNotes, Subject: id, ForHash: "h-process"}
-	body := `{"step":"reserve funds","purpose":"holds the money","confidence":"high"}`
-	if err := os.WriteFile(filepath.Join(dir, answersDir, ask.AnswerFile()), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	f.Nodes[id].Ref.BodyHash = "h-process-EDITED"
-	got, err := Collect(dir, f, domain.NewAgentResponse(), []domain.Ask{ask})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Invalid[ask.ID()] == nil {
-		t.Fatal("accepted a note describing a body that had changed underneath it")
-	}
-	if f.Nodes[id].Notes != nil {
-		t.Fatal("stale note was applied anyway")
-	}
-}
-
 func TestWriteTestRefusesDangerousPaths(t *testing.T) {
 	dir := t.TempDir()
 	for _, path := range []string{
@@ -367,8 +313,8 @@ func TestPromptsCarryTheirLoadBearingRules(t *testing.T) {
 			"A null answer is useful",
 			"OPEN QUESTIONS",
 		}},
-		{"transitions", prompts.Transitions(f, f.States[0], paths).Render(), []string{
-			"complete set", "unsure", "Is failure terminal?",
+		{"stateRoles", prompts.StateRoles(f, f.States[0]).Render(), []string{
+			"COMPLETE", "exactly once", "is free and correct", "over-approximating on purpose",
 		}},
 		{"externalEffect", prompts.ExternalEffect(f, "psp.Authorize", f.Seams[:1], paths).Render(), []string{
 			"UNKNOWN outcome, not a failed one",
@@ -409,8 +355,8 @@ func TestPreambleCarriesTheHoistedRules(t *testing.T) {
 
 func TestCasePromptCarriesItsOwnFactsAndNoMore(t *testing.T) {
 	f := fixtureFlow()
-	var concurrent, money planEntity.TestCase
-	for _, c := range testPlan.Select(f, planEntity.Facts{}) {
+	var concurrent, money testPlan.TestCase
+	for _, c := range testPlan.Select(f, testPlan.Facts{}) {
 		switch c.Scenario.ID {
 		case "IDEM-CONCURRENT":
 			concurrent = c
@@ -422,7 +368,7 @@ func TestCasePromptCarriesItsOwnFactsAndNoMore(t *testing.T) {
 		t.Fatal("IDEM-CONCURRENT was not selected for the fixture")
 	}
 
-	p := prompts.TestCase(concurrent, f).Render()
+	p := prompts.TestCase(concurrent, f, nil).Render()
 	for _, want := range []string{
 		"(example.com/paysvc/psp.Gateway).Authorize",
 		"fake via example.com/paysvc/psp.Gateway",
@@ -436,7 +382,7 @@ func TestCasePromptCarriesItsOwnFactsAndNoMore(t *testing.T) {
 	}
 
 	if money.Scenario.ID != "" {
-		mp := prompts.TestCase(money, f).Render()
+		mp := prompts.TestCase(money, f, nil).Render()
 		if strings.Contains(mp, "(*database/sql.DB).BeginTx") {
 			t.Error("a currency-conversion prompt is carrying the database call graph it has no use for")
 		}

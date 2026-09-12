@@ -137,7 +137,7 @@ func TestClassificationCutsTheQuestionSet(t *testing.T) {
 		[]string{"Phone", "Price", "BasePrice", "Discount"},
 		[]string{"GetStatus", "goForRetryableOrder"})
 
-	asked := Classify(f).Questions()
+	asked := Needed(Classify(f), nil, nil, nil)
 	if len(asked) == 0 {
 		t.Fatal("a classified repository was asked nothing")
 	}

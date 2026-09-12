@@ -290,16 +290,3 @@ func (e evidence) anyState(names ...string) bool {
 }
 
 func (e evidence) distinctCurrencies() bool { return len(e.currencies) > 1 }
-
-func Fields(f *flowEntity.Flow) []string {
-	e := gather(f)
-	out := make([]string, 0, len(e.fields)+len(e.columns))
-	for k := range e.fields {
-		out = append(out, k)
-	}
-	for k := range e.columns {
-		out = append(out, "col:"+k)
-	}
-	sort.Strings(out)
-	return out
-}

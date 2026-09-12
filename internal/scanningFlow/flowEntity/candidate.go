@@ -103,5 +103,4 @@ type Doc struct {
 	Title  string   `json:"title,omitempty"`
 	Score  int      `json:"score"`
 	Topics []string `json:"topics,omitempty"`
-	Bytes  int      `json:"bytes"`
 }

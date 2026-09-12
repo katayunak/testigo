@@ -5,16 +5,8 @@ import (
 	"strings"
 )
 
-type Mode string
-
-const (
-	ModeRecheck  Mode = "recheck"
-	ModeDiscover Mode = "discover"
-)
-
 type Question struct {
-	ID   string `json:"id"`
-	Mode Mode   `json:"mode,omitempty"`
+	ID string `json:"id"`
 
 	Text        string `json:"text"`
 	Problem     string `json:"problem,omitempty"`
@@ -25,21 +17,9 @@ type Question struct {
 	RelatedPaths []string `json:"related_paths,omitempty"`
 }
 
-func Recheck(id, text, problem string, refs ...Proof) *Question {
-	return &Question{
-		ID:          id,
-		Mode:        ModeRecheck,
-		Text:        text,
-		Problem:     problem,
-		TrueOrFalse: true,
-		References:  refs,
-	}
-}
-
 func Discover(id, text, problem string) *Question {
 	return &Question{
 		ID:      id,
-		Mode:    ModeDiscover,
 		Text:    text,
 		Problem: problem,
 	}
@@ -65,7 +45,7 @@ func (q *Question) Citing(refs ...Proof) *Question {
 	return q
 }
 
-func (q Question) Rechecking() bool { return q.Mode == ModeRecheck }
+func (q Question) Rechecking() bool { return len(q.References) > 0 }
 
 func (q Question) AnswerShape() string {
 	switch {
@@ -111,7 +91,6 @@ func (q *Question) Generate() string {
 type QuestionAnswer struct {
 	Verdict *bool  `json:"verdict,omitempty"`
 	Info    string `json:"info,omitempty"`
-	Proof   *Proof `json:"proof,omitempty"`
 }
 
 func (a *QuestionAnswer) True() bool  { return a.Verdict != nil && *a.Verdict }

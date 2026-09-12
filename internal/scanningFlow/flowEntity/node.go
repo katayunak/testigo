@@ -1,13 +1,10 @@
 package flowEntity
 
-import "github.com/katayunak/testigo/internal/codeRef"
-
 type Node struct {
-	Ref      codeRef.CodeRef `json:"ref"`
-	Position NodePosition    `json:"position"`
-	Calls    []string        `json:"calls,omitempty"`
-	Facts    Facts           `json:"facts"`
-	Notes    *Notes          `json:"notes,omitempty"`
+	Ref      CodeRef      `json:"ref"`
+	Position NodePosition `json:"position"`
+	Calls    []string     `json:"calls,omitempty"`
+	Facts    Facts        `json:"facts"`
 }
 
 type NodePosition string
@@ -30,15 +27,4 @@ type Facts struct {
 	MoneyTypes      []string `json:"money_types,omitempty"`
 	WritesStatus    []string `json:"writes_status,omitempty"`
 	SpawnsGoroutine bool     `json:"spawns_goroutine,omitempty"`
-	HasDeferredTx   bool     `json:"has_deferred_tx,omitempty"`
-}
-
-type Notes struct {
-	Step        string   `json:"step"`
-	Purpose     string   `json:"purpose,omitempty"`
-	Effects     []string `json:"effects,omitempty"`
-	Assumptions []string `json:"assumptions,omitempty"`
-	ForHash     string   `json:"for_hash"`
-	Model       string   `json:"model,omitempty"`
-	Timestamp   string   `json:"timestamp,omitempty"`
 }

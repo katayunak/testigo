@@ -2,15 +2,14 @@ package testPlan
 
 import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
-	"github.com/katayunak/testigo/internal/testPlan/planEntity"
 )
 
-var Catalog = []planEntity.Scenario{
+var Catalog = []Scenario{
 
 	{
 		ID:     "IDEM-REPLAY",
 		Name:   "A retry with the same key replays the first result",
-		Family: planEntity.FamilyIdempotency,
+		Family: FamilyIdempotency,
 		CaseScenario: `Send a payment request carrying an idempotency key. Let it complete. Send
 the byte-identical request again with the same key.
 
@@ -34,17 +33,16 @@ it.`,
 			"only testing the success path; the replayed-failure rule is the half that is usually broken",
 			"counting database rows instead of provider calls, which misses a duplicate money movement with a single row",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueFaultInjection, planEntity.TechniqueUnit},
-		Oracle:     planEntity.OracleSpecification,
-		Requires:   planEntity.Requires{IdempotencyKey: true, InjectableSeam: true},
+		Techniques: []Technique{TechniqueFaultInjection, TechniqueUnit},
+		Oracle:     OracleSpecification,
+		Requires:   Requires{IdempotencyKey: true, InjectableSeam: true},
 		Severity:   flowEntity.SevCritical,
-		Source:     "Stripe idempotent requests; brandur.org/idempotency-keys",
 	},
 
 	{
 		ID:     "IDEM-PAYLOAD-MISMATCH",
 		Name:   "The same key with different parameters is refused",
-		Family: planEntity.FamilyIdempotency,
+		Family: FamilyIdempotency,
 		CaseScenario: `Send a request with key K and amount 100. Send a second request with the same
 key K but amount 200.
 
@@ -64,17 +62,16 @@ money twice under one key, which defeats the entire mechanism.`,
 			"skipping this because the code has no payload comparison — write it anyway and let it go red, that IS the finding",
 			"asserting a specific HTTP status when the repository does not use HTTP; assert the refusal, not the transport",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueFaultInjection, planEntity.TechniqueUnit},
-		Oracle:     planEntity.OracleSpecification,
-		Requires:   planEntity.Requires{IdempotencyKey: true, InjectableSeam: true},
+		Techniques: []Technique{TechniqueFaultInjection, TechniqueUnit},
+		Oracle:     OracleSpecification,
+		Requires:   Requires{IdempotencyKey: true, InjectableSeam: true},
 		Severity:   flowEntity.SevHigh,
-		Source:     "Stripe error-low-level; GoCardless returns 409 invalid_state with conflicting_resource_id",
 	},
 
 	{
 		ID:     "IDEM-CONCURRENT",
 		Name:   "Two simultaneous requests with one key produce one money movement",
-		Family: planEntity.FamilyIdempotency,
+		Family: FamilyIdempotency,
 		CaseScenario: `Release N goroutines from a barrier so they all issue the same request with the
 same idempotency key at the same instant.
 
@@ -99,17 +96,16 @@ opens it.`,
 			"passing green without checking that any two goroutines actually raced; that result proves nothing",
 			"writing it against an in-memory map when the real enforcement is a database constraint, since a map cannot exhibit the same race",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueConcurrency, planEntity.TechniqueNarrowIntegration},
-		Oracle:     planEntity.OracleSpecification,
-		Requires:   planEntity.Requires{IdempotencyKey: true, InjectableSeam: true},
+		Techniques: []Technique{TechniqueConcurrency, TechniqueNarrowIntegration},
+		Oracle:     OracleSpecification,
+		Requires:   Requires{IdempotencyKey: true, InjectableSeam: true},
 		Severity:   flowEntity.SevCritical,
-		Source:     "Airbnb Orpheus; brandur.org/idempotency-keys lease with 409",
 	},
 
 	{
 		ID:     "IDEM-CRASH-AT-STEP",
 		Name:   "A crash at any step, then a retry, ends where a clean run ends",
-		Family: planEntity.FamilyIdempotency,
+		Family: FamilyIdempotency,
 		CaseScenario: `For every step in the flow that leaves the process, run the request with that
 step configured to fail, then retry with the same key against healthy
 dependencies.
@@ -132,17 +128,16 @@ exhaustive over the real failure surface rather than a sample of it.`,
 			"treating a timeout the same as an error — they need separate cases, because a timeout has an unknown outcome",
 			"asserting only that no error was returned, which is satisfied by a flow that silently did nothing",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueFaultInjection},
-		Oracle:     planEntity.OracleSpecification,
-		Requires:   planEntity.Requires{IdempotencyKey: true, InjectableSeam: true},
+		Techniques: []Technique{TechniqueFaultInjection},
+		Oracle:     OracleSpecification,
+		Requires:   Requires{IdempotencyKey: true, InjectableSeam: true},
 		Severity:   flowEntity.SevCritical,
-		Source:     "brandur.org/idempotency-keys recovery points; Airbnb Orpheus",
 	},
 
 	{
 		ID:     "TIMEOUT-UNKNOWN-OUTCOME",
 		Name:   "A provider timeout is not treated as a failure",
-		Family: planEntity.FamilyFailure,
+		Family: FamilyFailure,
 		CaseScenario: `Configure the payment provider fake to accept the call, record it as SUCCEEDED
 on its side, and then time out without answering. Let the code handle it. Then
 retry the request the way a client would.
@@ -165,17 +160,16 @@ timeout onto failure and retries is moving the money twice for one purchase.`,
 			"asserting an error was returned; the code returning an error is fine, moving the money twice is not",
 			"using a real sleep to produce the timeout, instead of a fake that returns a deadline error",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueFaultInjection},
-		Oracle:     planEntity.OracleSpecification,
-		Requires:   planEntity.Requires{InjectableSeam: true, SeamKinds: []flowEntity.SeamKind{flowEntity.SeamHTTP, flowEntity.SeamQueue}},
+		Techniques: []Technique{TechniqueFaultInjection},
+		Oracle:     OracleSpecification,
+		Requires:   Requires{InjectableSeam: true, SeamKinds: []flowEntity.SeamKind{flowEntity.SeamHTTP, flowEntity.SeamQueue}},
 		Severity:   flowEntity.SevCritical,
-		Source:     "Airbnb Orpheus retryable classification; Stripe timeout guidance",
 	},
 
 	{
 		ID:     "ORPHANED-AUTHORIZATION",
 		Name:   "The provider is never committed without a local record",
-		Family: planEntity.FamilyFailure,
+		Family: FamilyFailure,
 		CaseScenario: `Let the provider call succeed, then make the very next durable write fail — the
 COMMIT, or the ledger insert.
 
@@ -196,17 +190,16 @@ reconciler can find.`,
 			"asserting the transaction rolled back and stopping there — the rollback is exactly the problem, since it erases the only trace of the provider call",
 			"treating this as the same test as IDEM-CRASH-AT-STEP; that one is about converging, this one is about not losing proof",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueFaultInjection},
-		Oracle:     planEntity.OracleInvariant,
-		Requires:   planEntity.Requires{InjectableSeam: true, OpensTx: true},
+		Techniques: []Technique{TechniqueFaultInjection},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{InjectableSeam: true, OpensTx: true},
 		Severity:   flowEntity.SevCritical,
-		Source:     "Shopify anomalies as first-class rows; Uber reconciliation events",
 	},
 
 	{
 		ID:     "UNCLASSIFIED-ERROR-NOT-RETRIED",
 		Name:   "An unrecognised error is not retried",
-		Family: planEntity.FamilyFailure,
+		Family: FamilyFailure,
 		CaseScenario: `Return an error from the provider that the code has never seen — an unknown
 status, an unmapped vendor code, a wrapped error with no type.
 
@@ -225,17 +218,16 @@ manual investigation; the unsafe default costs a customer's money.`,
 		AntiGoals: []string{
 			"only testing unknown errors; without a retryable case alongside it, a code path that never retries anything passes",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueTable, planEntity.TechniqueFaultInjection},
-		Oracle:     planEntity.OracleSpecification,
-		Requires:   planEntity.Requires{InjectableSeam: true},
+		Techniques: []Technique{TechniqueTable, TechniqueFaultInjection},
+		Oracle:     OracleSpecification,
+		Requires:   Requires{InjectableSeam: true},
 		Severity:   flowEntity.SevHigh,
-		Source:     "Airbnb Orpheus: retryable vs non-retryable, defaulting to non-retryable",
 	},
 
 	{
 		ID:     "CONSERVATION-UNDER-CONCURRENCY",
 		Name:   "Money is conserved while transfers run in parallel",
-		Family: planEntity.FamilyConsistency,
+		Family: FamilyConsistency,
 		CaseScenario: `Seed a set of accounts with a known total. Run many concurrent transfers
 between random pairs. While they run, read ALL balances repeatedly.
 
@@ -260,17 +252,16 @@ This is Jepsen's bank workload, which is the canonical implementation.`,
 			"running it against an in-memory map when the real system uses a database, since the map cannot exhibit the isolation behaviour that causes the bug",
 			"asserting a specific final balance per account; the invariant is the total, not the distribution",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueNarrowIntegration, planEntity.TechniqueProperty, planEntity.TechniqueConcurrency},
-		Oracle:     planEntity.OracleInvariant,
-		Requires:   planEntity.Requires{BalanceFunc: true, MoneyFlows: true, RealDatabase: true},
+		Techniques: []Technique{TechniqueNarrowIntegration, TechniqueProperty, TechniqueConcurrency},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{BalanceFunc: true, MoneyFlows: true, RealDatabase: true},
 		Severity:   flowEntity.SevCritical,
-		Source:     "Jepsen bank workload; Uber zero-sum money orders; Nubank generative ledger testing",
 	},
 
 	{
 		ID:     "LOST-UPDATE",
 		Name:   "Two concurrent debits on one account both take effect",
-		Family: planEntity.FamilyConsistency,
+		Family: FamilyConsistency,
 		CaseScenario: `Start an account at 100. Run two concurrent operations that each read the
 balance, subtract 60, and write it back.
 
@@ -295,17 +286,16 @@ almost always pass.`,
 			"using two goroutines; the window is too narrow to hit consistently at that count",
 			"asserting an exact final balance, which depends on which transaction wins a legitimate race",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueNarrowIntegration},
-		Oracle:     planEntity.OracleInvariant,
-		Requires:   planEntity.Requires{BalanceFunc: true, MoneyFlows: true, RealDatabase: true, SeamKinds: []flowEntity.SeamKind{flowEntity.SeamDB}},
+		Techniques: []Technique{TechniqueNarrowIntegration},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{BalanceFunc: true, MoneyFlows: true, RealDatabase: true, SeamKinds: []flowEntity.SeamKind{flowEntity.SeamDB}},
 		Severity:   flowEntity.SevCritical,
-		Source:     "PostgreSQL concurrency control docs; Jepsen",
 	},
 
 	{
 		ID:     "DOUBLE-ENTRY-SUMS-TO-ZERO",
 		Name:   "Every set of ledger entries sums to zero",
-		Family: planEntity.FamilyConsistency,
+		Family: FamilyConsistency,
 		CaseScenario: `Generate random sets of ledger entries and try to record them. Any set whose
 amounts do not sum to zero must be REJECTED at the point of construction, before
 anything is written.
@@ -324,17 +314,16 @@ build an unbalanced movement.`,
 			"only testing hand-picked balanced examples; the generated unbalanced ones are the point",
 			"checking the total after writing, which tests the query rather than the guard",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueProperty, planEntity.TechniqueTable},
-		Oracle:     planEntity.OracleInvariant,
-		Requires:   planEntity.Requires{TransferFunc: true, MoneyFlows: true},
+		Techniques: []Technique{TechniqueProperty, TechniqueTable},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{TransferFunc: true, MoneyFlows: true},
 		Severity:   flowEntity.SevCritical,
-		Source:     "Uber money orders; Square Books; Formance ledger integrity",
 	},
 
 	{
 		ID:     "LEDGER-OUTSIDE-CALLER-TRANSACTION",
 		Name:   "A ledger write is rolled back with the transaction that caused it",
-		Family: planEntity.FamilyBoundary,
+		Family: FamilyBoundary,
 		CaseScenario: `Open the flow's transaction, let the ledger write happen, then force the
 transaction to roll back.
 
@@ -353,17 +342,16 @@ opened.`,
 		AntiGoals: []string{
 			"faking the ledger, which hides the entire bug — this scenario is about which handle the real implementation uses",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueNarrowIntegration},
-		Oracle:     planEntity.OracleInvariant,
-		Requires:   planEntity.Requires{TransferFunc: true, OpensTx: true, RealDatabase: true},
+		Techniques: []Technique{TechniqueNarrowIntegration},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{TransferFunc: true, OpensTx: true, RealDatabase: true},
 		Severity:   flowEntity.SevCritical,
-		Source:     "brandur.org/job-drain on transactional staging; standard outbox reasoning",
 	},
 
 	{
 		ID:     "NETWORK-CALL-INSIDE-TRANSACTION",
 		Name:   "No network call happens while a transaction is open",
-		Family: planEntity.FamilyBoundary,
+		Family: FamilyBoundary,
 		CaseScenario: `Wrap the database handle and the HTTP client in fakes that know about phases.
 Run the flow. If a network call happens between BEGIN and COMMIT, fail the test
 immediately.
@@ -384,17 +372,16 @@ the version that keeps being true as the code changes.`,
 			"asserting on timing or duration, which is flaky and measures the wrong thing",
 			"skipping it because phase 1 already reported it statically — a static finding is fixed once, a test keeps it fixed",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueFaultInjection, planEntity.TechniqueUnit},
-		Oracle:     planEntity.OracleSpecification,
-		Requires:   planEntity.Requires{OpensTx: true, InjectableSeam: true, SeamKinds: []flowEntity.SeamKind{flowEntity.SeamHTTP, flowEntity.SeamQueue}},
+		Techniques: []Technique{TechniqueFaultInjection, TechniqueUnit},
+		Oracle:     OracleSpecification,
+		Requires:   Requires{OpensTx: true, InjectableSeam: true, SeamKinds: []flowEntity.SeamKind{flowEntity.SeamHTTP, flowEntity.SeamQueue}},
 		Severity:   flowEntity.SevHigh,
-		Source:     "Airbnb Orpheus phase rules; brandur atomic phases",
 	},
 
 	{
 		ID:     "ILLEGAL-TRANSITION-REFUSED",
 		Name:   "Transitions that should be impossible are refused",
-		Family: planEntity.FamilyState,
+		Family: FamilyState,
 		CaseScenario: `For every ordered pair of states the round-one answers marked illegal: drive a
 payment into the source state, attempt to move it to the target state, and
 assert the attempt is refused and the stored state is unchanged.
@@ -413,17 +400,16 @@ unsure are excluded — a guess must not become a failing test.`,
 			"only testing illegal pairs; without legal ones, code that rejects everything passes",
 			"asserting an error message string rather than the refusal and the unchanged state",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueStateMachine, planEntity.TechniqueTable},
-		Oracle:     planEntity.OracleSpecification,
-		Requires:   planEntity.Requires{StateMachine: true},
+		Techniques: []Technique{TechniqueStateMachine, TechniqueTable},
+		Oracle:     OracleSpecification,
+		Requires:   Requires{StateMachine: true},
 		Severity:   flowEntity.SevHigh,
-		Source:     "Stripe PaymentIntent lifecycle; Braintree transaction statuses",
 	},
 
 	{
 		ID:     "FINAL-STATE-IS-FINAL",
 		Name:   "A payment in a final state cannot move again",
-		Family: planEntity.FamilyState,
+		Family: FamilyState,
 		CaseScenario: `For every state round one marked FINAL: drive a payment into it, then attempt
 every other transition the machine declares. Each attempt must be refused and
 the stored state must be unchanged.
@@ -447,17 +433,16 @@ forbids a chargeback and someone deletes it the first time a real one arrives.`,
 			"testing only that final states refuse, with no exception case, which passes on code that freezes everything forever",
 			"inferring the final list from an empty may_move_to entry, since that can also mean the agent could not work it out",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueStateMachine, planEntity.TechniqueTable},
-		Oracle:     planEntity.OracleSpecification,
-		Requires:   planEntity.Requires{StateMachine: true},
+		Techniques: []Technique{TechniqueStateMachine, TechniqueTable},
+		Oracle:     OracleSpecification,
+		Requires:   Requires{StateMachine: true},
 		Severity:   flowEntity.SevCritical,
-		Source:     "Stripe PaymentIntent lifecycle; Adyen CHARGEBACK and REFUNDED_REVERSED webhook codes",
 	},
 
 	{
 		ID:     "FAILURE-IS-NOT-TERMINAL",
 		Name:   "A failed payment can be retried",
-		Family: planEntity.FamilyState,
+		Family: FamilyState,
 		CaseScenario: `Drive a payment to failure through a declined card. Then attempt the payment
 again with a valid method.
 
@@ -475,17 +460,16 @@ a real customer's card is declined once and they can never pay.`,
 		AntiGoals: []string{
 			"asserting the code's current behaviour — if it treats failure as terminal, this test SHOULD go red",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueStateMachine, planEntity.TechniqueFaultInjection},
-		Oracle:     planEntity.OracleSpecification,
-		Requires:   planEntity.Requires{StateMachine: true, InjectableSeam: true},
+		Techniques: []Technique{TechniqueStateMachine, TechniqueFaultInjection},
+		Oracle:     OracleSpecification,
+		Requires:   Requires{StateMachine: true, InjectableSeam: true},
 		Severity:   flowEntity.SevHigh,
-		Source:     "Stripe PaymentIntent lifecycle: status returns to requires_payment_method",
 	},
 
 	{
 		ID:     "WEBHOOK-ORDER-INDEPENDENT",
 		Name:   "Provider events applied in any order reach the same state",
-		Family: planEntity.FamilyOrdering,
+		Family: FamilyOrdering,
 		CaseScenario: `Take the set of provider events for one payment — authorized, captured,
 refunded, or whatever this system handles. Apply them in every permutation.
 Then apply some of them twice.
@@ -511,17 +495,16 @@ If this system has such a case, this scenario does not apply to it.`,
 			"asserting order-independence where the domain is genuinely order-dependent; check first, and if it is, write an ordering-sensitive test instead",
 			"testing only the happy order plus one reversal, rather than the permutations",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueMetamorphic, planEntity.TechniqueProperty},
-		Oracle:     planEntity.OracleMetamorphic,
-		Requires:   planEntity.Requires{MultipleEntries: true, StateMachine: true},
+		Techniques: []Technique{TechniqueMetamorphic, TechniqueProperty},
+		Oracle:     OracleMetamorphic,
+		Requires:   Requires{MultipleEntries: true, StateMachine: true},
 		Severity:   flowEntity.SevHigh,
-		Source:     "Monzo Stand-in advice syncing, order-tolerant; Nubank ordering counterexample",
 	},
 
 	{
 		ID:     "AT-LEAST-ONCE-DELIVERY-IS-SAFE",
 		Name:   "Delivering every message twice changes nothing",
-		Family: planEntity.FamilyOrdering,
+		Family: FamilyOrdering,
 		CaseScenario: `Run the flow, capture every message it publishes, and deliver each one to its
 consumer a second time.
 
@@ -538,17 +521,16 @@ only whether they are harmless when they do.`,
 		AntiGoals: []string{
 			"asserting the consumer detected the duplicate; it may legitimately reprocess, as long as the effect is the same",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueMetamorphic, planEntity.TechniqueFaultInjection},
-		Oracle:     planEntity.OracleInvariant,
-		Requires:   planEntity.Requires{SeamKinds: []flowEntity.SeamKind{flowEntity.SeamQueue}, InjectableSeam: true},
+		Techniques: []Technique{TechniqueMetamorphic, TechniqueFaultInjection},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{SeamKinds: []flowEntity.SeamKind{flowEntity.SeamQueue}, InjectableSeam: true},
 		Severity:   flowEntity.SevHigh,
-		Source:     "brandur.org/job-drain; Wise tw-tkms outbox",
 	},
 
 	{
 		ID:     "MONEY-ROUND-TRIP-EXACT",
 		Name:   "An amount survives parse, format and storage exactly",
-		Family: planEntity.FamilyMoney,
+		Family: FamilyMoney,
 		CaseScenario: `Fuzz an amount through every conversion the codebase performs — parse, format,
 serialise, store, read back — and assert the value that comes out equals the
 value that went in, exactly.
@@ -566,17 +548,16 @@ report someone argues with and one they fix.`,
 			"comparing with an epsilon tolerance, which is how the bug is normally hidden rather than found",
 			"testing only round numbers, which survive float arithmetic and prove nothing",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueFuzz, planEntity.TechniqueProperty},
-		Oracle:     planEntity.OracleInvariant,
-		Requires:   planEntity.Requires{MoneyFlows: true},
+		Techniques: []Technique{TechniqueFuzz, TechniqueProperty},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{MoneyFlows: true},
 		Severity:   flowEntity.SevCritical,
-		Source:     "Stripe currencies: all amounts in minor units",
 	},
 
 	{
 		ID:     "MINOR-UNIT-CONVERSION",
 		Name:   "Currency exponents are right, including the ones that break the rule",
-		Family: planEntity.FamilyMoney,
+		Family: FamilyMoney,
 		CaseScenario: `Table test over currencies with different exponents, and specifically over the
 ones that are exceptions:
 
@@ -599,17 +580,16 @@ for a generic ISO 4217 table and it is wrong for exactly these.`,
 			"generating the expected values by calling the code under test",
 			"testing only USD and EUR, which share the common case and hide every exception",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueTable},
-		Oracle:     planEntity.OracleSpecification,
-		Requires:   planEntity.Requires{MoneyFlows: true},
+		Techniques: []Technique{TechniqueTable},
+		Oracle:     OracleSpecification,
+		Requires:   Requires{MoneyFlows: true},
 		Severity:   flowEntity.SevHigh,
-		Source:     "Stripe currencies; Adyen currency codes, where four currencies deviate from ISO 4217",
 	},
 
 	{
 		ID:     "SPLIT-SUMS-TO-TOTAL",
 		Name:   "Splitting an amount loses no cents",
-		Family: planEntity.FamilyMoney,
+		Family: FamilyMoney,
 		CaseScenario: `Generate an amount and a number of parts. Split it. Sum the parts.
 
 The sum must equal the original exactly, and the parts must differ by at most
@@ -629,17 +609,16 @@ single transaction.`,
 			"testing only amounts that divide evenly, which is the case that always works",
 			"allowing a tolerance on the sum",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueProperty, planEntity.TechniqueTable},
-		Oracle:     planEntity.OracleInvariant,
-		Requires:   planEntity.Requires{MoneyFlows: true},
+		Techniques: []Technique{TechniqueProperty, TechniqueTable},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{MoneyFlows: true},
 		Severity:   flowEntity.SevHigh,
-		Source:     "Stripe UGX rounding with the difference credited to the customer balance",
 	},
 
 	{
 		ID:     "CURRENCY-MIXING-REFUSED",
 		Name:   "Amounts in different currencies cannot be combined",
-		Family: planEntity.FamilyMoney,
+		Family: FamilyMoney,
 		CaseScenario: `Attempt to add, compare and net amounts whose currencies differ.
 
 Every one must be refused. An amount without a currency is not money, it is a
@@ -653,17 +632,16 @@ the type system is not doing that work.`,
 		AntiGoals: []string{
 			"skipping this because the type has no currency field — that absence IS the finding, and the test should say so",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueTable, planEntity.TechniqueProperty},
-		Oracle:     planEntity.OracleInvariant,
-		Requires:   planEntity.Requires{MoneyFlows: true},
+		Techniques: []Technique{TechniqueTable, TechniqueProperty},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{MoneyFlows: true},
 		Severity:   flowEntity.SevHigh,
-		Source:     "Adyen and Stripe both require currency alongside every amount",
 	},
 
 	{
 		ID:     "RECONCILER-IS-IDEMPOTENT",
 		Name:   "Running the reconciler twice changes nothing the second time",
-		Family: planEntity.FamilyConsistency,
+		Family: FamilyConsistency,
 		CaseScenario: `Seed deliberately divergent state. Run the reconciliation job. Assert it
 converged. Then run it AGAIN and assert nothing changed.
 
@@ -680,17 +658,16 @@ second pass adds it again because it is looking at stale criteria.`,
 			"asserting only that the first run converged, which is the half that usually works",
 			"letting the reconciler mutate ledger entries directly rather than appending compensating ones",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueNarrowIntegration, planEntity.TechniqueFaultInjection},
-		Oracle:     planEntity.OracleInvariant,
-		Requires:   planEntity.Requires{MultipleEntries: true},
+		Techniques: []Technique{TechniqueNarrowIntegration, TechniqueFaultInjection},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{MultipleEntries: true},
 		Severity:   flowEntity.SevHigh,
-		Source:     "Monzo coherence services; Shopify anomaly remediation; Starling catch-up processing",
 	},
 
 	{
 		ID:     "ASYNC-RESPONSE-BEFORE-DURABILITY",
 		Name:   "Success is not reported before the write is durable",
-		Family: planEntity.FamilyBoundary,
+		Family: FamilyBoundary,
 		CaseScenario: `Make the durable write fail, and check what the caller was told.
 
 If the handler starts a goroutine and returns 200 before that goroutine
@@ -708,19 +685,9 @@ crash leaves something for the catch-up job to find.`,
 			"asserting on response timing rather than on the ordering of the effects",
 			"using a sleep to wait for the goroutine; synchronise on a channel the fake closes",
 		},
-		Techniques: []planEntity.Technique{planEntity.TechniqueFaultInjection, planEntity.TechniqueConcurrency},
-		Oracle:     planEntity.OracleInvariant,
-		Requires:   planEntity.Requires{Goroutine: true, InjectableSeam: true},
+		Techniques: []Technique{TechniqueFaultInjection, TechniqueConcurrency},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{Goroutine: true, InjectableSeam: true},
 		Severity:   flowEntity.SevCritical,
-		Source:     "Starling: persist work items before processing; Uber writeback ordering",
 	},
-}
-
-func ByID(id string) (planEntity.Scenario, bool) {
-	for _, s := range Catalog {
-		if s.ID == id {
-			return s, true
-		}
-	}
-	return planEntity.Scenario{}, false
 }

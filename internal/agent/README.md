@@ -1,111 +1,82 @@
-# askingAgent — phase 2
+# agent — phase 2
 
-Phase 1 proved everything a compiler can prove. This package asks about the rest.
+Phase 1 proved everything a compiler can prove. This package asks an agent about the
+rest, turns the answers back into checked data, and generates tests from both.
 
 ## The rule every prompt follows
 
 **Ask a bounded question with a verifiable answer.**
 
-"Read this code and tell me what it does" is unbounded. The answer cannot be
-checked, so a wrong answer looks exactly like a right one and the model has no
-reason not to invent.
+"Read this code and tell me what it does" is unbounded: a wrong answer looks exactly
+like a right one. "Here are six declared states and the lines that write them; what
+part does each play?" is bounded. The answer space is finite, completeness is
+mechanical, and every claim names a file and line that either exists or does not.
 
-"Here are six declared states and four write sites the compiler found; which
-transitions between them should be impossible?" is bounded. The answer space is
-a finite matrix, completeness is mechanical — every declared state must appear —
-and every claim has to name a file and line that either exists or does not.
+## Only scenario requirements drive what is asked
 
-Phase 1 exists to make these questions bounded. Everything it proved is pasted
-into each prompt as fact, so the agent is never asked to re-derive what a
-compiler already knows, and can never contradict it.
+A payment kind selects scenarios. Each scenario runs as a technique. Scenarios and
+techniques declare the questions they cannot be written without. Nothing else is
+asked.
+
+`planner/` prices every candidate ask — output counts five times input — and drops
+any ask no runnable scenario needs, or whose fields nothing downstream reads.
+`testigo ask --explain` prints the decision; `--budget N` caps it.
 
 ## Two rounds
 
 | Round | Asks for | Writes code |
 |---|---|---|
-| 1 `understand` | binding, transitions, external effects, notes | no |
-| 2 `generate` | tests | yes |
+| 1 `understand` | `moneyModel`, `mainEntity`, `questions`, `stateRoles`, `externalEffect` | no |
+| 2 `generate` | one test per runnable scenario | yes |
 
-Round 2 is **gated** on round 1, not best-effort. If the agent decides the wrong
-call is the money-moving one, a test written in the same response will faithfully
-encode that mistake and pass forever. Splitting the rounds gives a person one
-place to look and one thing to fix, before anything is generated from it.
+Round 2 is gated on round 1. If the agent names the wrong money-moving call, a test
+written in the same breath would encode that mistake and pass forever.
+
+Round-one answers flow into round two, scoped per case: a state test receives the
+states it must refuse, a fault-injection test receives the verdicts for the seams it
+fakes, an idempotency test receives the key facts, and every case receives its own
+scenario's and technique's question answers — nothing belonging to another scenario.
 
 ## Transport: files
 
-`testigo ask` writes `.testigo/asks/*.md`. Your agent reads them and writes
-`.testigo/answers/*.json`. `testigo collect` validates and applies.
+`testigo ask` writes `testigo/asks/`: one markdown file per kind, `PREAMBLE.md` with
+everything the asks of a round would otherwise repeat, `INSTRUCTIONS.md`, and a
+manifest. The agent writes one JSON file per ask file into `testigo/answers/`, keyed by
+ask ID. `testigo collect` validates and applies.
 
-No API key, no network, no vendor. The prompts are markdown a person can read
-and correct before spending anything, and the answers are JSON a person can
-hand-write when the agent gets one wrong. Every other transport can be added
-later behind the same two directories.
+The manifest records the question IDs each `questions` ask actually asked, so an answer
+stays valid even when later answers change which scenarios are runnable.
+
+No API key, no network, no vendor. The prompts are markdown a person can read before
+spending anything, and the answers are JSON a person can correct by hand.
 
 ## What gets validated
 
-Nothing here can tell whether an answer is *correct*. It can tell whether the
-answer is about this repository at all, which catches most of what goes wrong:
+Nothing here can tell whether an answer is *correct*. It can tell whether it is about
+this repository at all:
 
-- states must be states that exist in the code
-- every declared state must be covered — a forgotten one is an error
-- a named symbol without a `file:line` is rejected
-- the placeholder names from the prompt's example are rejected
-- a note is rejected if the function's body hash moved while it was being written
-- a generated test containing `time.Sleep` is rejected
+- every state named must exist, and every declared state needs a role
+- a claim without a `file:line` is rejected
+- the placeholder from the prompt's own example coming back is rejected
+- an answer to a question that was not asked is rejected; an unanswered one is reported by ID
+- a true/false question with no verdict is rejected instead of being read as false
+- a generated test that sleeps, opens a socket, or cannot prove it reached its situation is rejected
 - a test marked blocked with no reason is rejected
 
 ## Safe defaults
 
-`retry_safe` and `foreign_mutation` accept `true`, `false`, or `"unknown"`.
-Anything that is not literally `true` is treated as **not retry safe**, and
-anything not literally `false` is treated as **mutating foreign state**.
+External-effect verdicts accept `true`, `false` or `"unknown"`. Only a literal `true`
+counts as reversible, observable or deduplicated; anything else is read the unsafe way.
 
-Assuming a charge is retry safe when it is not is how a customer gets billed
-twice. The reverse only costs an unnecessary idempotency key. The defaults point
-that way on purpose, and there is a test that keeps them pointing that way.
-
-## Which seams get asked about
-
-A foreign mutation is a change a database `ROLLBACK` cannot undo. That excludes
-most database traffic: a `SELECT` changes nothing, an `INSERT` inside a
-transaction the code controls is undone by rolling back.
-
-What survives the filter:
-
-- anything leaving the machine — HTTP, gRPC, broker, cache
-- `COMMIT`, the exact line after which rollback stops working
-- every call through an interface the repository defines itself, because
-  `Ledger.Post` might write a row or might call a provider, and that is the
-  question worth paying for
-
-On the fixture this is the difference between 9 questions and 4.
-
-## Why idempotency first
-
-Its correctness condition is published and precise, so there is a real oracle
-rather than a guess. Its failure points are enumerable — one per step that
-leaves the process, which round 1 already listed. And unlike concurrency it
-needs no flakiness budget, so red means a bug rather than bad luck.
-
-The contract tested against, from the published behaviour of Stripe, Airbnb's
-Orpheus, and GoCardless:
-
-1. The first request's result is stored and replayed — including failures
-2. Same key, different parameters is an error, not a replay
-3. Concurrent same key: exactly one proceeds
-4. Crash between any two steps, then retry, ends in the same terminal state
-   with exactly one foreign mutation
-5. Nothing recorded if execution never began
-6. An unclassified error defaults to non-retryable
+Assuming a charge is safe to repeat when it is not is how a customer gets billed twice.
+The reverse costs one extra test. `TestUnknownExternalEffectIsTreatedAsIrreversible`
+keeps the defaults pointing that way.
 
 ## Every generated test must prove it did something
 
-A concurrency test where the goroutines never collided passes. A crash test
-where the injected failure never fired passes. Both are green and both checked
-nothing.
-
-So the prompt requires each test to assert the interesting situation was
-*reached*:
+A concurrency test whose goroutines never collided passes. A fault-injection test whose
+fault never fired passes. Both are green and both checked nothing. So each test asserts
+that its situation was reached:
 
 ```go
 if fake.CallCount() == 0 {
@@ -117,11 +88,11 @@ if fake.CallCount() == 0 {
 
 | file | holds |
 |---|---|
-| `ask.go` | `Ask`, `Kind`, `Round` |
-| `answer.go` | answer types, validation, safe defaults, `Knowledge` |
-| `plan.go` | which questions are worth asking right now |
-| `pack.go` | writing and reading `.testigo/asks/` |
+| `plan.go` | which asks are worth making in each round |
+| `batch.go` | grouping the asks of one kind into one file |
+| `pack.go` | writing and reading `testigo/asks/` |
 | `collect.go` | reading, validating and applying answers |
-| `verify.go` | writing the test file and asking the toolchain if it is real |
-| `flowSteps.go` | ordering the flow into the fact block prompts are built from |
-| `prompt*.go` | one prompt each |
+| `verify.go` | writing a generated test and asking the toolchain whether it is real |
+| `domain/` | questions, asks, answers, payment kinds, and the kind → scenario → question maps |
+| `planner/` | demand, the consumer registry, the cost model, `--explain` |
+| `prompts/` | one file per prompt, the preamble, and the report prompt |

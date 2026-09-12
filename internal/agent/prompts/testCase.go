@@ -1,11 +1,14 @@
 package prompts
 
 import (
+	"encoding/json"
 	"fmt"
-	"github.com/katayunak/testigo/internal/testPlan/planEntity"
+	"sort"
 	"strings"
 
+	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/testigo/internal/testPlan"
 )
 
 const Preamble = `# testigo — how to write these tests
@@ -101,10 +104,8 @@ One JSON object per case file, written to ` + "`answers/<case-id>.json`" + `. No
   "file": { "path": "api/idempotency_testigo_test.go", "package": "api",
             "content": "package api\n\nimport (\n\t\"testing\"\n)\n..." },
   "func_name": "TestIdemConcurrent",
-  "fakes_added": ["fakeGateway"],
   "reached_assertions": ["fails if the provider fake was never called"],
-  "expected_to_fail": "why this should go red on the current code, or empty",
-  "oracle_used": "specification"
+  "expected_to_fail": "why this should go red on the current code, or empty"
 }
 ` + "```" + `
 
@@ -114,7 +115,7 @@ run and names a real gap is the most valuable thing this produces. Weakening an
 assertion so the suite comes back green is the least.
 `
 
-func TestCase(c planEntity.TestCase, f *flowEntity.Flow) *Prompt {
+func TestCase(c testPlan.TestCase, f *flowEntity.Flow, k *domain.AgentResponse) *Prompt {
 	var b strings.Builder
 	props := c.Technique.Props()
 
@@ -152,10 +153,14 @@ func TestCase(c planEntity.TestCase, f *flowEntity.Flow) *Prompt {
 		Fact(Proof, "This case", b.String()).
 		Where("testigo/asks/PREAMBLE.md")
 
-	return p.Fact(Proof, "FACTS — proved by the compiler, do not re-derive", caseFacts(c, f))
+	p = p.Fact(Proof, "FACTS — proved by the compiler, do not re-derive", caseFacts(c, f))
+	if answered := answeredFacts(c, k); answered != "" {
+		p = p.Fact(Supporting, "ANSWERED IN ROUND ONE — about this case only, do not re-ask", answered)
+	}
+	return p
 }
 
-func caseFacts(c planEntity.TestCase, f *flowEntity.Flow) string {
+func caseFacts(c testPlan.TestCase, f *flowEntity.Flow) string {
 	var b strings.Builder
 
 	if len(c.Seams) > 0 {
@@ -196,4 +201,127 @@ func caseFacts(c planEntity.TestCase, f *flowEntity.Flow) string {
 	}
 
 	return b.String()
+}
+
+func answeredFacts(c testPlan.TestCase, k *domain.AgentResponse) string {
+	if k == nil {
+		return ""
+	}
+	var b strings.Builder
+
+	if c.States != nil {
+		if t := k.Transitions[c.States.Type]; t != nil {
+			if t.InitialState != "" {
+				fmt.Fprintf(&b, "Initial state: %s\n", t.InitialState)
+			}
+			var finals []string
+			for _, s := range c.States.States {
+				if t.IsFinal(s) {
+					finals = append(finals, s)
+				}
+			}
+			if len(finals) > 0 {
+				fmt.Fprintf(&b, "Final, nothing may leave them: %s\n", strings.Join(finals, ", "))
+			}
+			for _, e := range t.FinalStateExceptions {
+				fmt.Fprintf(&b, "Allowed exception: %s -> %s (%s)\n", e.From, e.To, e.Why)
+			}
+			var illegal [][2]string
+			for _, pair := range t.Illegal(c.States.States) {
+				if pair[0] != pair[1] {
+					illegal = append(illegal, pair)
+				}
+			}
+			if len(illegal) > 0 {
+				shown := illegal
+				if len(shown) > 12 {
+					shown = shown[:12]
+				}
+				b.WriteString("Must be refused:\n")
+				for _, pair := range shown {
+					fmt.Fprintf(&b, "  %s -> %s\n", pair[0], pair[1])
+				}
+				if len(illegal) > len(shown) {
+					fmt.Fprintf(&b, "  ...and %d more pair(s)\n", len(illegal)-len(shown))
+				}
+			}
+		}
+		if r := k.StateRoles[c.States.Type]; r != nil {
+			for _, role := range r.Roles {
+				if role.Retryable && role.RetryEntersAt != "" {
+					fmt.Fprintf(&b, "Retry: %s re-enters at %s (%s)\n", role.State, role.RetryEntersAt, role.Proof)
+				}
+			}
+		}
+	}
+
+	for _, s := range c.Seams {
+		e := k.ExternalEffects[s.Target]
+		if e == nil {
+			continue
+		}
+		fmt.Fprintf(&b, "%s: escapes a rollback=%s, undoable=%s, outcome checkable after a timeout=%s, deduplicated=%s, moves money=%s\n",
+			s.Target, caseYesNo(e.EscapesRollback()), caseYesNo(e.Undoable()), caseYesNo(e.Observable()),
+			caseYesNo(e.Deduplicated()), caseYesNo(domain.IsTrue(e.MovesMoney)))
+	}
+
+	r := c.Scenario.Requires
+	idempotency := c.Scenario.Family == testPlan.FamilyIdempotency || r.IdempotencyKey
+	if idempotency && k.MoneyModel != nil && k.MoneyModel.Idempotency.KeyField != "" {
+		id := k.MoneyModel.Idempotency
+		fmt.Fprintf(&b, "Idempotency key: %s, uniqueness %s, at %s\n", id.KeyField, caseOrUnknown(id.Uniqueness), id.Proof.At)
+	}
+	if idempotency && k.MainEntity != nil && k.MainEntity.IdempotencyKey.Field != "" {
+		key := k.MainEntity.IdempotencyKey
+		fmt.Fprintf(&b, "Key supplied by %s, read back before acting=%s\n", caseOrUnknown(key.SuppliedBy), caseTristate(key.ReadBeforeActing))
+	}
+	if (c.Scenario.Family == testPlan.FamilyMoney || r.MoneyFlows) && k.MoneyModel != nil && k.MoneyModel.Money.Type != "" {
+		m := k.MoneyModel.Money
+		fmt.Fprintf(&b, "Money: %s.%s, %s, currency %s, at %s\n", m.Type, m.AmountField, caseOrUnknown(m.Representation), caseOrUnknown(m.Currency), m.Proof.At)
+	}
+
+	var ids []string
+	for id := range k.PaymentKind {
+		if strings.HasPrefix(id, c.Scenario.ID+".") || strings.HasPrefix(id, "technique."+string(c.Technique)+".") {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		a := k.PaymentKind[id]
+		switch {
+		case a == nil:
+		case a.Verdict != nil && *a.Verdict:
+			fmt.Fprintf(&b, "T  %s\n", id)
+		case a.Verdict != nil:
+			fmt.Fprintf(&b, "F  %s — %s\n", id, a.Info)
+		default:
+			fmt.Fprintf(&b, ".  %s — %s\n", id, a.Info)
+		}
+	}
+	return b.String()
+}
+
+func caseYesNo(v bool) string {
+	if v {
+		return "yes"
+	}
+	return "no"
+}
+
+func caseOrUnknown(s string) string {
+	if s == "" {
+		return "unknown"
+	}
+	return s
+}
+
+func caseTristate(raw json.RawMessage) string {
+	switch {
+	case domain.IsTrue(raw):
+		return "yes"
+	case domain.IsFalse(raw):
+		return "no"
+	}
+	return "unknown"
 }

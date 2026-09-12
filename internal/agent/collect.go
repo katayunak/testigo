@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/agent/planner"
-	"github.com/katayunak/testigo/internal/testPlan/planEntity"
 	"os"
 	"path/filepath"
 	"sort"
@@ -148,25 +147,35 @@ func apply(ask domain.Ask, raw []byte, f *flowEntity.Flow, k *domain.AgentRespon
 			return fmt.Errorf("not valid JSON: %w", err)
 		}
 		class := domain.Classify(f)
-		d := planner.Demanded(f, FactsFrom(k, nil))
-		needs := domain.Needed(class, d.Scenarios, d.Techniques, nil)
 		if k.PaymentKind == nil {
 			k.PaymentKind = map[string]*domain.QuestionAnswer{}
 		}
 
-		byID := map[string]domain.Question{}
-		for _, n := range needs {
-			byID[n.Question.ID] = n.Question
+		asked := ask.Questions
+		if len(asked) == 0 {
+			d := planner.Demanded(f, FactsFrom(k, nil))
+			for _, n := range domain.Needed(class, d.Scenarios, d.Techniques, nil) {
+				asked = append(asked, n.Question.ID)
+			}
 		}
+		wanted := map[string]bool{}
+		for _, id := range asked {
+			wanted[id] = true
+		}
+
 		kept := 0
 		for id, ans := range answers {
-			q, known := byID[id]
-			if !known {
+			if !wanted[id] {
 				out.Invalid[id] = fmt.Errorf("not one of the questions asked; check the key against %s.md", ask.ID())
 				continue
 			}
 			if ans == nil {
 				out.Invalid[id] = fmt.Errorf("null answer")
+				continue
+			}
+			q, known := domain.QuestionByID(id)
+			if !known {
+				out.Invalid[id] = fmt.Errorf("no question with this id exists in any registry")
 				continue
 			}
 			if err := ans.Validate(q); err != nil {
@@ -176,55 +185,13 @@ func apply(ask domain.Ask, raw []byte, f *flowEntity.Flow, k *domain.AgentRespon
 			k.PaymentKind[id] = ans
 			kept++
 		}
-		for _, n := range needs {
-			if _, ok := answers[n.Question.ID]; !ok {
-				out.Missing = append(out.Missing, n.Question.ID)
+		for _, id := range asked {
+			if _, ok := answers[id]; !ok {
+				out.Missing = append(out.Missing, id)
 			}
 		}
 		if kept == 0 {
 			return fmt.Errorf("none of the %d answers in this file was usable", len(answers))
-		}
-		k.Classification = &class
-
-	case domain.KindPaymentKind:
-		var a domain.PaymentKindAnswer
-		if err := json.Unmarshal(raw, &a); err != nil {
-			return fmt.Errorf("not valid JSON: %w", err)
-		}
-		class := domain.Classify(f)
-		if k.PaymentKind == nil {
-			k.PaymentKind = map[string]*domain.QuestionAnswer{}
-		}
-
-		kept := 0
-		byID := map[string]domain.Question{}
-		for _, q := range class.Questions() {
-			byID[q.ID] = q
-		}
-		for id, ans := range a.Answers {
-			q, known := byID[id]
-			if !known {
-				out.Invalid[id] = fmt.Errorf("not one of the questions asked; check the key against %s.md", ask.ID())
-				continue
-			}
-			if ans == nil {
-				out.Invalid[id] = fmt.Errorf("null answer")
-				continue
-			}
-			if err := ans.Validate(q); err != nil {
-				out.Invalid[id] = err
-				continue
-			}
-			k.PaymentKind[id] = ans
-			kept++
-		}
-		for _, q := range class.Questions() {
-			if _, ok := a.Answers[q.ID]; !ok {
-				out.Missing = append(out.Missing, q.ID)
-			}
-		}
-		if kept == 0 {
-			return fmt.Errorf("none of the %d answers in this file was usable", len(a.Answers))
 		}
 		k.Classification = &class
 
@@ -244,20 +211,6 @@ func apply(ask domain.Ask, raw []byte, f *flowEntity.Flow, k *domain.AgentRespon
 		k.Transitions[ask.Subject] = a.Transitions(m.NeverAssigned)
 		k.StateRoles[ask.Subject] = &a
 
-	case domain.KindTransitions:
-		var a domain.TransitionsAnswer
-		if err := json.Unmarshal(raw, &a); err != nil {
-			return fmt.Errorf("not valid JSON: %w", err)
-		}
-		m, ok := machines[ask.Subject]
-		if !ok {
-			return fmt.Errorf("answer is about %q, which is not a state machine in this flow", ask.Subject)
-		}
-		if err := a.ValidateAgainst(m.States); err != nil {
-			return err
-		}
-		k.Transitions[ask.Subject] = &a
-
 	case domain.KindExternalEffect:
 		var a domain.ExternalEffectAnswer
 		if err := json.Unmarshal(raw, &a); err != nil {
@@ -266,37 +219,13 @@ func apply(ask domain.Ask, raw []byte, f *flowEntity.Flow, k *domain.AgentRespon
 		a.Target = ask.Subject
 		k.ExternalEffects[ask.Subject] = &a
 
-	case domain.KindNotes:
-		var a domain.NotesAnswer
-		if err := json.Unmarshal(raw, &a); err != nil {
-			return fmt.Errorf("not valid JSON: %w", err)
-		}
-		if err := a.Validate(); err != nil {
-			return err
-		}
-		node, ok := f.Nodes[ask.Subject]
-		if !ok {
-			return fmt.Errorf("answer is about %q, which is no longer in the flow", ask.Subject)
-		}
-
-		if ask.ForHash != "" && ask.ForHash != node.Ref.BodyHash {
-			return fmt.Errorf("%s changed while this question was being answered; re-ask it", node.Ref.Symbol)
-		}
-		node.Notes = &flowEntity.Notes{
-			Step:        a.Step,
-			Purpose:     a.Purpose,
-			Effects:     a.Effects,
-			Assumptions: a.Assumptions,
-			ForHash:     node.Ref.BodyHash,
-		}
-
 	case domain.KindTestCase:
 		var a domain.CaseAnswer
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return fmt.Errorf("not valid JSON: %w", err)
 		}
 		a.CaseID = ask.Subject
-		size := planEntity.SizeSmall
+		size := testPlan.SizeSmall
 		for _, c := range testPlan.Select(f, factsOf(k)) {
 			if c.Scenario.ID == ask.Subject {
 				size = c.Size

@@ -1,4 +1,4 @@
-package codeRef
+package scanningFlow
 
 import "go/ast"
 

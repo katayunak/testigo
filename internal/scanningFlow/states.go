@@ -11,8 +11,6 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/packages"
-
-	"github.com/katayunak/testigo/internal/codeRef"
 )
 
 func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[string]bool) []flowEntity.StateMachine {
@@ -225,7 +223,7 @@ func constName(p *packages.Package, e ast.Expr, fallback string) string {
 type funcTable []funcSpan
 
 type funcSpan struct {
-	a          codeRef.CodeRef
+	a          flowEntity.CodeRef
 	start, end token.Pos
 }
 
@@ -237,14 +235,12 @@ func funcIndex(p *packages.Package, root string) funcTable {
 			if !ok || fd.Body == nil {
 				continue
 			}
-			h, _ := codeRef.StructuralHash(fd)
 			ft = append(ft, funcSpan{
-				a: codeRef.CodeRef{
-					Pkg:      p.PkgPath,
-					Symbol:   codeRef.Symbol(fd),
-					File:     relPath(p.Fset, fd.Pos(), root),
-					Line:     p.Fset.Position(fd.Pos()).Line,
-					BodyHash: h,
+				a: flowEntity.CodeRef{
+					Pkg:    p.PkgPath,
+					Symbol: Symbol(fd),
+					File:   relPath(p.Fset, fd.Pos(), root),
+					Line:   p.Fset.Position(fd.Pos()).Line,
 				},
 				start: fd.Pos(), end: fd.End(),
 			})
@@ -254,12 +250,12 @@ func funcIndex(p *packages.Package, root string) funcTable {
 	return ft
 }
 
-func (ft funcTable) at(pos token.Pos) codeRef.CodeRef {
+func (ft funcTable) at(pos token.Pos) flowEntity.CodeRef {
 	i := sort.Search(len(ft), func(i int) bool { return ft[i].end >= pos })
 	if i < len(ft) && ft[i].start <= pos && pos < ft[i].end {
 		return ft[i].a
 	}
-	return codeRef.CodeRef{}
+	return flowEntity.CodeRef{}
 }
 
 func relPath(fset *token.FileSet, pos token.Pos, root string) string {
@@ -302,7 +298,7 @@ func addWrite(
 	})
 }
 
-func siteOf(p *packages.Package, fns funcTable, root string, pos token.Pos) codeRef.CodeRef {
+func siteOf(p *packages.Package, fns funcTable, root string, pos token.Pos) flowEntity.CodeRef {
 	in := fns.at(pos)
 	if in.File == "" {
 		in.File = relPath(p.Fset, pos, root)

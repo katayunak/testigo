@@ -5,10 +5,9 @@ import (
 	"strings"
 
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
-	"github.com/katayunak/testigo/internal/testPlan/planEntity"
 )
 
-func Select(f *flowEntity.Flow, b planEntity.Facts) []planEntity.TestCase {
+func Select(f *flowEntity.Flow, b Facts) []TestCase {
 	seamsByKind := map[flowEntity.SeamKind][]flowEntity.Seam{}
 	var injectable []flowEntity.Seam
 	for _, s := range f.Seams {
@@ -20,11 +19,10 @@ func Select(f *flowEntity.Flow, b planEntity.Facts) []planEntity.TestCase {
 
 	reachable := reachableFrom(f)
 
-	var cases []planEntity.TestCase
+	var cases []TestCase
 	for _, sc := range Catalog {
-		c := planEntity.TestCase{
+		c := TestCase{
 			Scenario: sc,
-			Role:     planEntity.RoleSpecification,
 			FuncName: funcName(sc),
 		}
 
@@ -44,9 +42,8 @@ func Select(f *flowEntity.Flow, b planEntity.Facts) []planEntity.TestCase {
 		props := technique.Props()
 		c.Size = props.DefaultSize
 		if sc.Requires.RealDatabase {
-			c.Size = planEntity.SizeMedium
+			c.Size = SizeMedium
 		}
-		c.Scope = scopeFor(technique)
 
 		var candidates []flowEntity.Seam
 		if len(sc.Requires.SeamKinds) > 0 {
@@ -91,19 +88,7 @@ func severityRank(s flowEntity.Severity) int {
 	return 3
 }
 
-func scopeFor(t planEntity.Technique) planEntity.Scope {
-	switch t {
-	case planEntity.TechniqueEndToEnd:
-		return planEntity.ScopeSystem
-	case planEntity.TechniqueNarrowIntegration, planEntity.TechniqueConcurrency:
-		return planEntity.ScopeService
-	case planEntity.TechniqueFuzz, planEntity.TechniqueTable:
-		return planEntity.ScopeFunction
-	}
-	return planEntity.ScopeUnit
-}
-
-func funcName(s planEntity.Scenario) string {
+func funcName(s Scenario) string {
 	parts := strings.Split(strings.ToLower(s.ID), "-")
 	var b strings.Builder
 	b.WriteString("Test")
@@ -116,7 +101,7 @@ func funcName(s planEntity.Scenario) string {
 	return b.String()
 }
 
-func target(f *flowEntity.Flow, s planEntity.Scenario, size planEntity.Size) (pkg, file string) {
+func target(f *flowEntity.Flow, s Scenario, size Size) (pkg, file string) {
 	dir := "."
 	pkgPath := ""
 	if len(f.Entries) > 0 {
@@ -128,7 +113,7 @@ func target(f *flowEntity.Flow, s planEntity.Scenario, size planEntity.Size) (pk
 		}
 	}
 	suffix := "_testigo_test.go"
-	if size != planEntity.SizeSmall {
+	if size != SizeSmall {
 		suffix = "_testigo_integration_test.go"
 	}
 	return pkgPath, dir + "/" + strings.ToLower(string(s.Family)) + suffix

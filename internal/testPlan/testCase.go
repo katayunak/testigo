@@ -1,4 +1,4 @@
-package planEntity
+package testPlan
 
 import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
@@ -8,8 +8,6 @@ type TestCase struct {
 	Scenario  Scenario
 	Technique Technique
 	Size      Size
-	Scope     Scope
-	Role      Role
 
 	FuncName string
 

@@ -5,7 +5,6 @@ import (
 
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 	"github.com/katayunak/testigo/internal/testPlan"
-	"github.com/katayunak/testigo/internal/testPlan/planEntity"
 )
 
 type Demand struct {
@@ -31,7 +30,7 @@ func (d Demand) NeedsState(machine string) ([]string, bool) {
 	return by, ok
 }
 
-func Demanded(f *flowEntity.Flow, facts planEntity.Facts) Demand {
+func Demanded(f *flowEntity.Flow, facts testPlan.Facts) Demand {
 	d := Demand{
 		States: map[string][]string{},
 		Seams:  map[string][]string{},
