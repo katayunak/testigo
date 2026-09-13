@@ -690,4 +690,155 @@ crash leaves something for the catch-up job to find.`,
 		Requires:   Requires{Goroutine: true, InjectableSeam: true},
 		Severity:   flowEntity.SevCritical,
 	},
+
+	{
+		ID:     "BALANCE-NEVER-NEGATIVE",
+		Name:   "A balance cannot be driven below zero",
+		Family: FamilyMoney,
+		CaseScenario: `Take a wallet holding a known balance. Issue enough concurrent debits that
+their total exceeds it, and let them race.
+
+Exactly as many must succeed as the balance can cover. The rest must be
+refused, and the final balance must never be negative at any point a reader
+could observe it.
+
+This is the defining invariant of a wallet. A system that checks the balance
+and then writes it in a separate statement lets two debits both pass the check
+before either writes, and the customer spends money that was not there.`,
+		LookingFor: "a read-then-write balance check that two concurrent debits can both pass",
+		Acceptance: []string{
+			"the number of successful debits never exceeds what the starting balance covers",
+			"the final balance is zero or positive",
+			"every refused debit leaves no transaction row behind",
+			"the check and the write happen under one lock or one atomic statement",
+		},
+		AntiGoals: []string{
+			"asserting only the final balance; a balance that dipped negative and recovered still allowed an overdraft",
+			"checking the balance in Go before the transaction and calling that the guard",
+			"running the debits sequentially, which cannot expose the race at all",
+			"treating a post-hoc `if balance < 0 { rollback }` as prevention when the row was already written",
+		},
+		Techniques: []Technique{TechniqueConcurrency, TechniqueNarrowIntegration},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{MoneyFlows: true, BalanceFunc: true, OpensTx: true, RealDatabase: true},
+		Severity:   flowEntity.SevCritical,
+	},
+
+	{
+		ID:     "TRANSFER-IS-ATOMIC",
+		Name:   "Both legs of a transfer happen, or neither does",
+		Family: FamilyConsistency,
+		CaseScenario: `Transfer between two wallets, and make the second leg fail — the credit
+errors, or the process dies between the debit and the credit.
+
+The debit must not survive. Total money across both wallets must be identical
+before and after.
+
+A wallet transfer is two writes pretending to be one. If they are not in the
+same transaction, or the transaction is committed between them, money is
+destroyed and no error is reported to anyone.`,
+		LookingFor: "a debit that commits without its matching credit",
+		Acceptance: []string{
+			"the sum of both balances is unchanged after the failure",
+			"neither a debit row nor a credit row remains",
+			"the caller receives an error rather than a success",
+		},
+		AntiGoals: []string{
+			"faking the repository so both writes succeed, which tests nothing about atomicity",
+			"asserting only that an error was returned, without checking the balances",
+			"injecting the failure before the debit, where there is nothing to roll back",
+		},
+		Techniques: []Technique{TechniqueFaultInjection, TechniqueNarrowIntegration},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{TransferFunc: true, OpensTx: true, InjectableSeam: true},
+		Severity:   flowEntity.SevCritical,
+	},
+
+	{
+		ID:     "SELF-TRANSFER-REFUSED",
+		Name:   "A wallet cannot transfer to itself",
+		Family: FamilyMoney,
+		CaseScenario: `Call the transfer path with the same wallet as both source and destination.
+
+It must be refused before any write. If it is allowed, the balance must be
+exactly unchanged and exactly one pair of offsetting rows must exist.
+
+Two things go wrong when this is unguarded. If the code loads the source and
+destination rows separately, it writes the same row twice and the second write
+overwrites the first, inventing or destroying money. If it locks both rows in
+order, it deadlocks against itself.`,
+		LookingFor: "a same-wallet transfer that changes the balance or deadlocks",
+		Acceptance: []string{
+			"the request is refused, or the balance is provably unchanged",
+			"no deadlock or timeout occurs",
+			"the fee, if any, is not charged twice",
+		},
+		AntiGoals: []string{
+			"asserting whatever the code does today rather than that money is conserved",
+			"only testing two distinct wallets, which never reaches this path",
+		},
+		Techniques: []Technique{TechniqueTable, TechniqueUnit},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{TransferFunc: true},
+		Severity:   flowEntity.SevHigh,
+	},
+
+	{
+		ID:     "BALANCE-LIMIT-ENFORCED",
+		Name:   "A ceiling on the balance holds under concurrent credits",
+		Family: FamilyBoundary,
+		CaseScenario: `Where a maximum balance or a per-transaction limit exists, top the wallet up
+to just under the ceiling, then issue concurrent deposits that would each fit
+alone but together exceed it.
+
+The ceiling must hold. Only deposits that genuinely fit may succeed.
+
+A limit checked with a read and enforced with a later write is not a limit. It
+is a suggestion that holds right up until two requests arrive together, which
+is exactly when a regulatory balance cap matters.`,
+		LookingFor: "a limit check that concurrent deposits can both pass before either writes",
+		Acceptance: []string{
+			"the final balance never exceeds the configured ceiling",
+			"rejected deposits are rejected with the limit error, not a generic failure",
+			"a deposit that exactly reaches the ceiling is allowed",
+		},
+		AntiGoals: []string{
+			"testing one deposit at a time, which can never exceed the limit",
+			"hard-coding the limit instead of reading the configured value, so the test passes when the config changes",
+		},
+		Techniques: []Technique{TechniqueConcurrency, TechniqueNarrowIntegration},
+		Oracle:     OracleSpecification,
+		Requires:   Requires{MoneyFlows: true, BalanceFunc: true, RealDatabase: true},
+		Severity:   flowEntity.SevHigh,
+	},
+
+	{
+		ID:     "WALLET-STATUS-GATES-MOVEMENT",
+		Name:   "A disabled or deleted wallet refuses money",
+		Family: FamilyState,
+		CaseScenario: `For every non-active wallet status the code declares — disabled, deleted,
+pending, blocked — attempt a credit and a debit.
+
+Each must be refused, and the balance must be unchanged. Enumerate the states
+from the source rather than picking the two obvious ones.
+
+Systems usually guard the debit path and forget the credit path, so money can
+be paid INTO a closed wallet and stranded there. A deleted wallet that still
+accepts a deposit is money the customer cannot reach and the business cannot
+account for.`,
+		LookingFor: "a status that blocks withdrawals but still accepts deposits",
+		Acceptance: []string{
+			"every declared non-active status refuses both directions",
+			"the balance is unchanged after each refused attempt",
+			"the refusal names the status rather than returning a generic error",
+		},
+		AntiGoals: []string{
+			"testing only the active and deleted states and skipping the ones in between",
+			"asserting only the debit direction, which is the one that is usually already guarded",
+		},
+		Techniques: []Technique{TechniqueTable, TechniqueStateMachine},
+		Oracle:     OracleSpecification,
+		Requires:   Requires{StateMachine: true, MoneyFlows: true},
+		Severity:   flowEntity.SevHigh,
+	},
 }

@@ -2,3 +2,9 @@
 .testigo/
 .idea
 _to_delete
+
+testdata/*/testigo/flow.json
+testdata/*/testigo/asks/
+testdata/*/testigo/answers/
+testdata/*/testigo/agentResponse.json
+testdata/*/testigo/REPORT.md

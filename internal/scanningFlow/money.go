@@ -38,6 +38,25 @@ func moneyFindings(pkgs []*packages.Package, root string) []flowEntity.Finding {
 				case *ast.FuncDecl:
 					out = append(out, checkSignature(p, root, t)...)
 
+				case *ast.CallExpr:
+					if len(t.Args) != 1 {
+						return true
+					}
+					ft, okFn := p.TypesInfo.Types[t.Fun]
+					if !okFn || !ft.IsType() || !isFloat(ft.Type) {
+						return true
+					}
+					at, okArg := p.TypesInfo.Types[t.Args[0]]
+					if !okArg || !isInteger(at.Type) || !isMoneyExpr(p, t.Args[0]) {
+						return true
+					}
+					out = append(out, flowEntity.Finding{
+						ID: "MONEY-FLOAT", Severity: flowEntity.SevCritical,
+						Title:  "money converted to a float mid-expression",
+						Detail: "An exact integer amount is widened to a float here and will be narrowed back. Binary floating point cannot hold every decimal value, and beyond 2^53 it cannot hold every integer either, so the round trip can return a different number than it was given. The field type being correct does not help: the value is laundered through a float inside this expression. Do the arithmetic on the integer type, and negate or compare without leaving it.",
+						Ref:    fns.at(t.Pos()), Line: p.Fset.Position(t.Pos()).Line,
+					})
+
 				case *ast.BinaryExpr:
 					if t.Op != token.QUO {
 						return true
