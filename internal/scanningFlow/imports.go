@@ -51,3 +51,26 @@ func (g *graph) canCall(from, to string) bool {
 	}
 	return deps[to]
 }
+
+func directImportsOf(pkgs []*packages.Package) map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	var walk func(p *packages.Package)
+	walk = func(p *packages.Package) {
+		if p == nil {
+			return
+		}
+		if _, seen := out[p.PkgPath]; seen {
+			return
+		}
+		direct := map[string]bool{}
+		out[p.PkgPath] = direct
+		for path, imported := range p.Imports {
+			direct[path] = true
+			walk(imported)
+		}
+	}
+	for _, p := range pkgs {
+		walk(p)
+	}
+	return out
+}

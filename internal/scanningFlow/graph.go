@@ -34,6 +34,9 @@ type graph struct {
 	refs  map[string]flowEntity.CodeRef
 
 	imports map[string]map[string]bool
+
+	directImports map[string]map[string]bool
+	importKinds   map[string]kindSet
 }
 
 func buildGraph(pkgs []*packages.Package, local map[string]bool) (*graph, error) {
@@ -54,6 +57,9 @@ func buildGraph(pkgs []*packages.Package, local map[string]bool) (*graph, error)
 		idOf:    map[*ssa.Function]string{},
 		refs:    map[string]flowEntity.CodeRef{},
 		imports: importClosure(pkgs),
+
+		directImports: directImportsOf(pkgs),
+		importKinds:   map[string]kindSet{},
 	}
 
 	for fn := range ssautil.AllFunctions(prog) {

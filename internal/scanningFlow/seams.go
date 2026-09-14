@@ -233,7 +233,7 @@ func (g *graph) classify(c *ssa.CallCommon, callees []*ssa.Function) (target str
 		for _, callee := range callees {
 			if g.isLocal(callee) {
 				anyLocal = true
-				kinds |= g.effectKind(callee) | g.reach[callee]
+				kinds |= g.effectKind(callee) | g.possibleKind(callee)
 			} else {
 				kinds |= g.effectKind(callee)
 			}
@@ -262,6 +262,75 @@ func (g *graph) classify(c *ssa.CallCommon, callees []*ssa.Function) (target str
 		return "", 0, false, ""
 	}
 	return callee.String(), kinds, false, ""
+}
+
+func (g *graph) nearestKind(fn *ssa.Function) kindSet {
+	if k, ok := g.importKinds[g.keyOf(fn)]; ok {
+		return k
+	}
+	var out kindSet
+	seen := map[*ssa.Function]bool{fn: true}
+	queue := []*ssa.Function{fn}
+
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		node := g.callGraph.Nodes[cur]
+		if node == nil {
+			continue
+		}
+		for _, e := range node.Out {
+			callee := e.Callee.Func
+			if callee == nil || seen[callee] {
+				continue
+			}
+			seen[callee] = true
+			if g.isLocal(callee) {
+				queue = append(queue, callee)
+				continue
+			}
+			out |= g.effectKind(callee)
+		}
+	}
+	g.importKinds[g.keyOf(fn)] = out
+	return out
+}
+
+func (g *graph) keyOf(fn *ssa.Function) string { return fn.String() }
+
+func (g *graph) importKind(fn *ssa.Function) kindSet {
+	path := pkgPathOf(fn)
+	if path == "" {
+		return 0
+	}
+	if k, ok := g.importKinds["pkg:"+path]; ok {
+		return k
+	}
+	var k kindSet
+	for dep := range g.directImports[path] {
+		if g.local[dep] {
+			continue
+		}
+		if dep == "net/http" {
+			k |= ksHTTP
+		}
+		for _, e := range patterns.IOPrefixes {
+			if strings.HasPrefix(dep, e.Prefix) {
+				k |= fromSeamKind(e.Kind)
+			}
+		}
+	}
+	g.importKinds["pkg:"+path] = k
+	return k
+}
+
+func (g *graph) possibleKind(fn *ssa.Function) kindSet {
+	reached := g.nearestKind(fn)
+	allowed := g.importKind(fn)
+	if allowed == 0 {
+		return reached
+	}
+	return reached & allowed
 }
 
 const ksEffects = ksDB | ksHTTP | ksQueue | ksCache
