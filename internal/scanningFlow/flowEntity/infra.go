@@ -12,7 +12,17 @@ type Infra struct {
 	MigrationDirs []string `json:"migration_dirs,omitempty"`
 
 	MigrationFiles int `json:"migration_files,omitempty"`
+
+	MigrationTool string `json:"migration_tool,omitempty"`
+
+	MigrationsTotal int `json:"migrations_total,omitempty"`
+
+	MigrationsWithDown int `json:"migrations_with_down,omitempty"`
+
+	SchemaSources []string `json:"schema_sources,omitempty"`
 }
+
+func (i Infra) SchemaKnown() bool { return len(i.Tables) > 0 || len(i.Constraints) > 0 }
 
 type Table struct {
 	Name    string   `json:"name"`

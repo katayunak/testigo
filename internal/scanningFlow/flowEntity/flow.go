@@ -24,6 +24,8 @@ type Flow struct {
 	Findings      []Finding        `json:"findings"`
 	Infra         Infra            `json:"infra,omitempty"`
 
+	TableWrites []TableWrites `json:"table_writes,omitempty"`
+
 	IdempotencyKeys Candidates `json:"idempotency_keys,omitempty"`
 	MoneyTypes      Candidates `json:"money_types,omitempty"`
 

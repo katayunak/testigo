@@ -50,6 +50,9 @@ func moneyFindings(pkgs []*packages.Package, root string) []flowEntity.Finding {
 					if !okArg || !isInteger(at.Type) || !isMoneyExpr(p, t.Args[0]) {
 						return true
 					}
+					if _, named := at.Type.(*types.Named); !named {
+						return true
+					}
 					out = append(out, flowEntity.Finding{
 						ID: "MONEY-FLOAT", Severity: flowEntity.SevCritical,
 						Title:  "money converted to a float mid-expression",

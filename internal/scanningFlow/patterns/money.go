@@ -40,6 +40,6 @@ var IdempotencyField = anyOf(
 	"uniquekey", "unique_key",
 	"orderid", "order_id", "invoiceid", "invoice_id",
 	"trackingnumber", "tracking_number", "trackingno", "trackingcode",
-	"rrn", "retrievalreference", "stan", "terminalid", "terminal_id",
+	"rrn", "retrievalreference", "stan",
 	"transferid", "transfer_id", "paymentid", "payment_id",
 )

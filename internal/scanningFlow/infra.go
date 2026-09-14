@@ -4,14 +4,17 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"golang.org/x/tools/go/packages"
 )
 
-func Infra(root string) flowEntity.Infra {
+func Infra(pkgs []*packages.Package, root string) flowEntity.Infra {
 	var out flowEntity.Infra
 	seenDir := map[string]bool{}
+	sawSQLFile := false
 
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -44,6 +47,7 @@ func Infra(root string) flowEntity.Infra {
 			out.ForeignKeys = append(out.ForeignKeys, fks...)
 			out.Checks = append(out.Checks, checks...)
 			out.MigrationFiles++
+			sawSQLFile = true
 
 			if dir := filepath.Dir(rel); !seenDir[dir] {
 				seenDir[dir] = true
@@ -54,6 +58,61 @@ func Infra(root string) flowEntity.Infra {
 
 		return nil
 	})
+
+	if sawSQLFile {
+		out.SchemaSources = append(out.SchemaSources, "sql files")
+	}
+
+	chunks, tool, withDown, total := sqlFromGo(pkgs, root)
+	out.MigrationTool = tool
+	out.MigrationsTotal = total
+	out.MigrationsWithDown = withDown
+
+	sawGoSQL := false
+	for _, c := range chunks {
+		if c.Down || isReversalOnly(c.SQL) {
+			continue
+		}
+		sawGoSQL = true
+		out.Constraints = append(out.Constraints, parseConstraints(c.SQL, c.File)...)
+		tables, fks, checks := parseSchema(c.SQL, c.File)
+		out.Tables = append(out.Tables, tables...)
+		out.ForeignKeys = append(out.ForeignKeys, fks...)
+		out.Checks = append(out.Checks, checks...)
+
+		if dir := filepath.Dir(c.File); !seenDir[dir] {
+			seenDir[dir] = true
+			out.MigrationDirs = append(out.MigrationDirs, dir)
+		}
+	}
+	if sawGoSQL {
+		out.MigrationFiles += len(chunks)
+		out.SchemaSources = append(out.SchemaSources, "sql inside go files")
+	}
+
+	tagTables, tagCons := schemaFromTags(pkgs, root)
+	have := map[string]bool{}
+	for _, t := range out.Tables {
+		have[t.Name] = true
+	}
+	added := false
+	for _, t := range tagTables {
+		if have[t.Name] {
+			continue
+		}
+		have[t.Name] = true
+		out.Tables = append(out.Tables, t)
+		added = true
+	}
+	for _, c := range tagCons {
+		out.Constraints = append(out.Constraints, c)
+		added = true
+	}
+	if added {
+		out.SchemaSources = append(out.SchemaSources, "orm struct tags")
+	}
+
+	sort.Strings(out.MigrationDirs)
 	return out
 }
 

@@ -247,7 +247,7 @@ argument and the measurements.
 | Term | Meaning |
 |---|---|
 | **Seam** | a call that leaves the process; injectable if it goes through an interface your repo defines |
-| **Scenario** | one of 28 catalogued ways a payment system breaks, in 7 families; declares what it `Requires` — see [CATALOG.md](CATALOG.md) |
+| **Scenario** | one of 31 catalogued ways a payment system breaks, in 7 families; declares what it `Requires` — see [CATALOG.md](CATALOG.md) |
 | **Technique** | how a scenario is expressed: fault injection, concurrency, property, table, fuzz, metamorphic, state machine, narrow integration… |
 | **Question** | one thing testigo cannot prove, with the problem it guards against and where the answer lives |
 | **Payment kind** | spine (double-entry, wallet, stateless), motions (top-up, payout, escrow…) and overlays (refund, reconciliation, FX) |
@@ -308,7 +308,7 @@ directory is stale, run the scan with `GOFLAGS=-mod=mod`.
 
 ## Studies
 
-Every scenario testigo knows is listed in **[CATALOG.md](CATALOG.md)** — 28 of them,
+Every scenario testigo knows is listed in **[CATALOG.md](CATALOG.md)** — 31 of them,
 with what each needs, what passing means, and the specific wrong versions of each test.
 
 The research this is built on lives in [`studies/`](studies/).

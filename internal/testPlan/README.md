@@ -68,7 +68,7 @@ anything touching money.
 
 Every scenario is listed in [CATALOG.md](../../CATALOG.md).
 
-**28 scenarios** in `catalog.go` across 7 families — money (6), consistency (5),
+**31 scenarios** in `catalog.go` across 7 families — consistency (7), money (6), idempotency (5), boundary (4), state (4), failure (3), ordering (2) — each written by
 boundary (4), idempotency (4), state (4), failure (3), ordering (2) — each written by
 hand from the published practice of companies that move money at scale, and each
 traceable to a source in
@@ -106,7 +106,7 @@ of "be careful".
 | file | holds |
 |---|---|
 | `scenario.go` | the `Scenario` struct, `Requires`, `Facts`, and `Applies` |
-| `catalog.go` | the 28 scenarios |
+| `catalog.go` | the 31 scenarios |
 | `testCase.go` | a scenario bound to a repository |
 | `testType.go` | Technique, Size, OracleProvenance, and each technique's stated limits |
 | `select.go` | which scenarios apply here, and why the others do not |

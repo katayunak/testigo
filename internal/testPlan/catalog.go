@@ -841,4 +841,98 @@ account for.`,
 		Requires:   Requires{StateMachine: true, MoneyFlows: true},
 		Severity:   flowEntity.SevHigh,
 	},
+
+	{
+		ID:     "READ-MODIFY-WRITE-NEEDS-A-LOCK",
+		Name:   "A row read then written back must be locked in between",
+		Family: FamilyConsistency,
+		CaseScenario: `This repository reads a row, changes the value in Go, then writes the whole
+row back. Run two of those at once against the same row.
+
+Both must not succeed with the second silently discarding the first one's
+change. Either one waits for the other, or one fails and retries.
+
+The window between the read and the write is the bug. Two requests can both
+read the same starting value, both compute from it, and the second write wins.
+Nothing errors. The first change is simply gone, and no log records that it
+happened.`,
+		LookingFor: "two writers that both read the same value and the later write erasing the earlier one",
+		Acceptance: []string{
+			"after both finish, the row reflects both changes, or exactly one of them was refused",
+			"the test shows which line read the value and which line wrote it back",
+			"a row lock, a version column, or an atomic statement is what makes it pass — not timing",
+		},
+		AntiGoals: []string{
+			"running the two writers one after the other, which cannot reproduce it",
+			"adding a sleep to force the order, which tests the sleep rather than the code",
+			"asserting no error was returned; the whole point is that this loses data quietly",
+		},
+		Techniques: []Technique{TechniqueConcurrency, TechniqueNarrowIntegration},
+		Oracle:     OracleInvariant,
+		Requires: Requires{RealDatabase: true, OpensTx: true,
+			WritePatterns: []flowEntity.WritePattern{flowEntity.WriteUpdateInPlace}},
+		Severity: flowEntity.SevCritical,
+	},
+
+	{
+		ID:     "APPEND-ONLY-HISTORY-IS-IMMUTABLE",
+		Name:   "Rows that are only ever added are never quietly changed",
+		Family: FamilyConsistency,
+		CaseScenario: `This table is only written by inserts. Nothing in the repository updates or
+deletes a row once it exists.
+
+Prove that stays true. Try to correct a value the way a caller would, and
+show the correction arrives as a NEW row, with the old one still readable.
+
+An append-only table is the audit trail. Its whole value is that yesterday's
+answer is still there today. The moment one code path updates a row in place,
+the history silently stops being a history, and no test notices because every
+read still returns something sensible.`,
+		LookingFor: "a path that edits or removes a row in a table the rest of the code treats as history",
+		Acceptance: []string{
+			"after a correction, both the original row and the correcting row are readable",
+			"the row count only ever grows",
+			"reading the state at an earlier point in time still gives the earlier answer",
+		},
+		AntiGoals: []string{
+			"only asserting the latest value, which passes whether or not history was kept",
+			"asserting the row count grew, without checking the original row is unchanged",
+		},
+		Techniques: []Technique{TechniqueNarrowIntegration, TechniqueProperty},
+		Oracle:     OracleInvariant,
+		Requires: Requires{RealDatabase: true,
+			WritePatterns: []flowEntity.WritePattern{flowEntity.WriteInsertOnly}},
+		Severity: flowEntity.SevHigh,
+	},
+
+	{
+		ID:     "UPSERT-HIDES-A-SECOND-EFFECT",
+		Name:   "An insert that turns into an update must not run the work twice",
+		Family: FamilyIdempotency,
+		CaseScenario: `This table is written with an insert that falls back to an update when the
+row already exists. Send the same request twice.
+
+The row must end up correct, and whatever the request DOES besides writing
+that row — charging a card, sending a message, moving a balance — must happen
+exactly once.
+
+An upsert makes the database call safe to repeat. It does not make the rest of
+the function safe to repeat. The row looks right afterwards, so the test
+passes, while the second call already sent the second charge.`,
+		LookingFor: "a repeated request whose row write is absorbed by the conflict clause while its side effect runs again",
+		Acceptance: []string{
+			"the external call is made exactly once across both requests",
+			"the row holds the first request's result, not a blend of both",
+			"the second caller is told it was a repeat rather than being given a fresh success",
+		},
+		AntiGoals: []string{
+			"asserting only the row is correct — that is exactly what the upsert guarantees and it proves nothing",
+			"counting rows instead of counting the side effect",
+		},
+		Techniques: []Technique{TechniqueFaultInjection, TechniqueNarrowIntegration},
+		Oracle:     OracleSpecification,
+		Requires: Requires{RealDatabase: true, InjectableSeam: true,
+			WritePatterns: []flowEntity.WritePattern{flowEntity.WriteUpsert}},
+		Severity: flowEntity.SevCritical,
+	},
 }

@@ -77,7 +77,8 @@ func Scan(opts Options) (*Result, error) {
 
 	gen := generatedFiles(pkgs, opts.Root)
 
-	flow.Infra = Infra(opts.Root)
+	flow.Infra = Infra(pkgs, opts.Root)
+	flow.TableWrites = writePatterns(pkgs, opts.Root, flow.Infra)
 	flow.Docs = FindDocs(opts.Root)
 
 	flow.States = extractStateMachines(pkgs, opts.Root, local, gen)
@@ -94,6 +95,7 @@ func Scan(opts Options) (*Result, error) {
 	flow.Findings = append(flow.Findings, moneyFindings(pkgs, opts.Root)...)
 	flow.Findings = append(flow.Findings, structuralFindings(flow)...)
 	flow.Findings = append(flow.Findings, infraFindings(pkgs, flow, opts.Root)...)
+	flow.Findings = append(flow.Findings, schemaFindings(flow)...)
 
 	flow.Findings, flow.GeneratedFindings = withoutGenerated(
 		flow.Findings, gen,
@@ -232,6 +234,9 @@ func infraFindings(pkgs []*packages.Package, f *flowEntity.Flow, root string) []
 						if !scored || !cand.Credible() {
 							continue
 						}
+						if !f.Infra.HasTable(tableNameOf(spec.Name.Name, st)) {
+							continue
+						}
 						col := columnOf(fld, nm.Name)
 						if _, covered := f.Infra.CoversColumn("", col); covered {
 							continue
@@ -253,17 +258,37 @@ func infraFindings(pkgs []*packages.Package, f *flowEntity.Flow, root string) []
 	return out
 }
 
+var ormOptionWord = map[string]bool{
+	"pk": true, "nopk": true, "unique": true, "notnull": true, "use_zero": true,
+	"array": true, "hstore": true, "composite": true, "msgpack": true, "json": true,
+	"discard_unknown_columns": true, "primarykey": true, "primary_key": true,
+	"autoincrement": true, "index": true, "uniqueindex": true, "embedded": true,
+	"not null": true, "-": true,
+}
+
 func columnOf(fld *ast.Field, fieldName string) string {
 	if fld.Tag != nil {
 		tag := strings.Trim(fld.Tag.Value, "`")
-		for _, key := range []string{"db", "sql", "pg", "gorm", "json"} {
-			if v := reflect.StructTag(tag).Get(key); v != "" {
-				name := strings.Split(v, ",")[0]
-				name = strings.TrimPrefix(name, "column:")
-				if name != "" && name != "-" {
-					return name
-				}
+
+		for _, part := range strings.Split(reflect.StructTag(tag).Get("gorm"), ";") {
+			if v := strings.TrimPrefix(strings.TrimSpace(part), "column:"); v != strings.TrimSpace(part) && v != "" {
+				return v
 			}
+		}
+
+		for _, key := range []string{"db", "sql", "pg", "json"} {
+			v := reflect.StructTag(tag).Get(key)
+			if v == "" {
+				continue
+			}
+			name := strings.TrimSpace(strings.Split(v, ",")[0])
+			if name == "" || name == "-" || strings.Contains(name, ":") {
+				continue
+			}
+			if ormOptionWord[strings.ToLower(name)] {
+				continue
+			}
+			return name
 		}
 	}
 	return snakeCase(fieldName)
@@ -307,4 +332,34 @@ func sortFindings(fs []flowEntity.Finding) {
 		}
 		return fs[i].Line < fs[j].Line
 	})
+}
+
+func touchesDatabase(f *flowEntity.Flow) bool {
+	for _, s := range f.Seams {
+		if s.Kind == flowEntity.SeamDB {
+			return true
+		}
+	}
+	return false
+}
+
+func schemaFindings(f *flowEntity.Flow) []flowEntity.Finding {
+	var out []flowEntity.Finding
+
+	if !f.Infra.SchemaKnown() && touchesDatabase(f) {
+		out = append(out, flowEntity.Finding{
+			ID: "SCHEMA-NOT-FOUND", Severity: flowEntity.SevCritical,
+			Title:  "this flow talks to a database, but no schema was found",
+			Detail: "testigo looked for .sql files, SQL passed to Exec inside Go files, and ORM struct tags, and found none of them. Without the schema it cannot tell whether a unique index backs an idempotency key, whether a CHECK guards a balance, or which columns exist at all. Every uniqueness claim is therefore withheld rather than guessed. Point testigo at the schema in " + f.Module + ", or export one with pg_dump and commit it.",
+		})
+	}
+
+	if missing := f.Infra.MigrationsTotal - f.Infra.MigrationsWithDown; missing > 0 {
+		out = append(out, flowEntity.Finding{
+			ID: "MIGRATION-NO-DOWN", Severity: flowEntity.SevMedium,
+			Title:  itoa(missing) + " of " + itoa(f.Infra.MigrationsTotal) + " migrations cannot be rolled back",
+			Detail: "These migrations register no down function, so the schema only moves forward. An integration test that builds the database from the migrations cannot tear it back down between cases, which forces every such test into a fresh container and makes them slow enough that people stop running them. It also means a bad migration has no rehearsed way back in production.",
+		})
+	}
+	return out
 }

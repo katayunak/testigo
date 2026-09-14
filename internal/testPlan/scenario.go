@@ -56,6 +56,8 @@ type Requires struct {
 	BalanceFunc    bool
 	TransferFunc   bool
 	IdempotencyKey bool
+
+	WritePatterns []flowEntity.WritePattern
 }
 
 type Facts struct {
@@ -116,6 +118,18 @@ func (s Scenario) Applies(f *flowEntity.Flow, b Facts) (bool, string) {
 	}) {
 		return false, "this flow has no " + kindList(r.SeamKinds) + " boundary"
 	}
+	if len(r.WritePatterns) > 0 {
+		found := false
+		for _, p := range r.WritePatterns {
+			if f.HasWritePattern(p) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false, "no table in this repository is written the way this scenario needs (" + patternList(r.WritePatterns) + ")"
+		}
+	}
 	if r.InjectableSeam && !anySeam(f, func(sm flowEntity.Seam) bool { return sm.Injectable }) {
 
 		return false, "every boundary in this flow is a concrete type, so no fault can be injected — extract an interface first"
@@ -165,4 +179,13 @@ func (s Scenario) BestTechnique(f *flowEntity.Flow) (Technique, string) {
 
 func (s Scenario) String() string {
 	return fmt.Sprintf("%s (%s)", s.ID, s.Family)
+}
+
+func patternList(ps []flowEntity.WritePattern) string {
+	out := make([]string, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, string(p))
+	}
+	sort.Strings(out)
+	return strings.Join(out, " or ")
 }
