@@ -2,6 +2,7 @@ package scanningFlow
 
 import (
 	"go/types"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -537,6 +538,17 @@ func guessFromName(iface, method string) kindSet {
 
 var txOpen = map[string]bool{"Begin": true, "BeginTx": true, "Beginx": true, "Transaction": true}
 
+var reTxCloseReceiver = regexp.MustCompile(`\.([A-Za-z_][A-Za-z0-9_]*)\)\.Close$`)
+
+func closesATransaction(target string) bool {
+	m := reTxCloseReceiver.FindStringSubmatch(target)
+	if m == nil {
+		return false
+	}
+	receiver := m[1]
+	return receiver == "Tx" || strings.HasSuffix(receiver, "Tx") || strings.HasSuffix(receiver, "Transaction")
+}
+
 func applyTxFacts(f *flowEntity.Facts, target string) {
 	name := target
 	if i := strings.LastIndex(name, "."); i >= 0 {
@@ -549,6 +561,8 @@ func applyTxFacts(f *flowEntity.Facts, target string) {
 	case name == "Commit":
 		f.CommitsTx = true
 	case name == "Rollback":
+		f.RollsBackTx = true
+	case name == "Close" && closesATransaction(target):
 		f.RollsBackTx = true
 	}
 }

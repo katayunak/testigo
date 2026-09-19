@@ -298,7 +298,6 @@ directory is stale, run the scan with `GOFLAGS=-mod=mod`.
 
 ## Limits, stated plainly
 
-- `TX-NO-ROLLBACK` does not yet recognise `tx.Close()`, which rolls back in go-pg, so it is a false positive there.
 - The seam filter over-approximates. A VTA call graph would be more precise than CHA.
 - Round two has not yet been run end to end on a production repository.
 - True/false verdicts are collected per question, but nothing yet rolls them up into per-area conclusions.

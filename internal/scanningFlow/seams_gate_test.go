@@ -5,6 +5,8 @@ import (
 	"go/types"
 	"strings"
 	"testing"
+
+	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
 func namedType(pkgPath, name string, under types.Type) *types.Named {
@@ -57,6 +59,36 @@ func TestAnAsynchronousSendIsKeptWithoutAStaticPath(t *testing.T) {
 	for _, name := range []string{"New", "WithDetails", "FromIncomingContext", "Get", "Pending", "Where", "SpanFromContext"} {
 		if asyncEffect(name) {
 			t.Errorf("%s is not a send; treating it as one would bring the false seams back", name)
+		}
+	}
+}
+
+func TestTxCloseWithoutCommitIsARollback(t *testing.T) {
+	rollingBack := []string{
+		"(*github.com/go-pg/pg/v10.Tx).Close",
+		"(*database/sql.Tx).Close",
+		"(*github.com/jmoiron/sqlx.Tx).Close",
+	}
+	for _, target := range rollingBack {
+		var f flowEntity.Facts
+		applyTxFacts(&f, target)
+		if !f.RollsBackTx {
+			t.Errorf("%s: go-pg and database/sql both roll back an uncommitted transaction on Close; missing it made every defer tx.Close() a false TX-NO-ROLLBACK", target)
+		}
+	}
+}
+
+func TestOnlyATransactionsCloseCountsAsRollback(t *testing.T) {
+	notRollbacks := []string{
+		"(*database/sql.DB).Close",
+		"(*github.com/redis/go-redis/v9.Client).Close",
+		"(*os.File).Close",
+	}
+	for _, target := range notRollbacks {
+		var f flowEntity.Facts
+		applyTxFacts(&f, target)
+		if f.RollsBackTx {
+			t.Errorf("%s: closing a connection pool or a file is not a rollback; treating every Close as one would hide a real TX-NO-ROLLBACK", target)
 		}
 	}
 }
