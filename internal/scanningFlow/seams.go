@@ -536,7 +536,9 @@ func guessFromName(iface, method string) kindSet {
 	return 0
 }
 
-var txOpen = map[string]bool{"Begin": true, "BeginTx": true, "Beginx": true, "Transaction": true}
+var txOpen = map[string]bool{"Begin": true, "BeginTx": true, "Beginx": true}
+
+var txRunWrapper = map[string]bool{"RunInTransaction": true, "RunInTransactionWithOptions": true, "Transaction": true}
 
 var reTxCloseReceiver = regexp.MustCompile(`\.([A-Za-z_][A-Za-z0-9_]*)\)\.Close$`)
 
@@ -556,6 +558,10 @@ func applyTxFacts(f *flowEntity.Facts, target string) {
 	}
 	name = strings.TrimSuffix(name, ")")
 	switch {
+	case txRunWrapper[name]:
+		f.OpensTx = true
+		f.CommitsTx = true
+		f.RollsBackTx = true
 	case txOpen[name]:
 		f.OpensTx = true
 	case name == "Commit":

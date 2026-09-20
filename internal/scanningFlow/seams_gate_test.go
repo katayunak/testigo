@@ -92,3 +92,17 @@ func TestOnlyATransactionsCloseCountsAsRollback(t *testing.T) {
 		}
 	}
 }
+
+func TestRunInTransactionOpensCommitsAndRollsBack(t *testing.T) {
+	wrappers := []string{
+		"(*github.com/go-pg/pg/v10.baseDB).RunInTransaction",
+		"(*gorm.io/gorm.DB).Transaction",
+	}
+	for _, target := range wrappers {
+		var f flowEntity.Facts
+		applyTxFacts(&f, target)
+		if !f.OpensTx || !f.CommitsTx || !f.RollsBackTx {
+			t.Errorf("%s: this is a run-in-a-callback wrapper — it begins, then commits on a nil return or rolls back otherwise, all inside the library. Missing it made TRANSFER-IS-ATOMIC, BALANCE-NEVER-NEGATIVE and READ-MODIFY-WRITE-NEEDS-A-LOCK report 'nothing in this flow opens a transaction' for a repository that opens one on every transfer: %+v", target, f)
+		}
+	}
+}
