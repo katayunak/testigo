@@ -68,6 +68,8 @@ type Facts struct {
 	Uniqueness     string
 	Known          bool
 
+	StateMachines map[string]flowEntity.StateRoles
+
 	Skipped map[string]string
 }
 

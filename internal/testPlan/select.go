@@ -58,9 +58,8 @@ func Select(f *flowEntity.Flow, b Facts) []TestCase {
 			c.Entry = &e
 		}
 		c.Seams = scopeSeams(candidates, reachable)
-		if sc.Requires.StateMachine && len(f.States) > 0 {
-			m := f.States[0]
-			c.States = &m
+		if sc.Requires.StateMachine {
+			c.States = bestStateMachine(f, b.StateMachines)
 		}
 
 		c.TargetPkg, c.TargetFile = target(f, sc, c.Size)
@@ -117,6 +116,36 @@ func target(f *flowEntity.Flow, s Scenario, size Size) (pkg, file string) {
 		suffix = "_testigo_integration_test.go"
 	}
 	return pkgPath, dir + "/" + strings.ToLower(string(s.Family)) + suffix
+}
+
+func bestStateMachine(f *flowEntity.Flow, roles map[string]flowEntity.StateRoles) *flowEntity.StateMachine {
+	var best *flowEntity.StateMachine
+	bestScore := -1
+	for i := range f.States {
+		m := &f.States[i]
+		if len(m.States) < 2 {
+			continue
+		}
+		if score := lifecycleScore(roles[m.Type]); score > bestScore {
+			bestScore = score
+			best = m
+		}
+	}
+	return best
+}
+
+func lifecycleScore(rs flowEntity.StateRoles) int {
+	if len(rs) == 0 {
+		return 0
+	}
+	score := 1
+	if _, ok := rs.Initial(); ok {
+		score++
+	}
+	if len(rs.Finals()) > 0 {
+		score++
+	}
+	return score
 }
 
 func reachableFrom(f *flowEntity.Flow) map[string]bool {

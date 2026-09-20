@@ -222,6 +222,14 @@ func FactsFrom(k *domain.AgentResponse, rules *config.Rules) testPlan.Facts {
 	}
 	b.IdempotencyKey = fromAgent.IdempotencyKey
 	b.Uniqueness = fromAgent.Uniqueness
+	if len(k.StateRoles) > 0 {
+		b.StateMachines = map[string]flowEntity.StateRoles{}
+		for typ, sr := range k.StateRoles {
+			if sr != nil {
+				b.StateMachines[typ] = sr.Roles
+			}
+		}
+	}
 	return b
 }
 
