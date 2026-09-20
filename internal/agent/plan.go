@@ -6,6 +6,7 @@ import (
 	"github.com/katayunak/testigo/internal/agent/planner"
 	"github.com/katayunak/testigo/internal/agent/prompts"
 	"github.com/katayunak/testigo/internal/config"
+	"sort"
 	"strings"
 
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
@@ -228,17 +229,22 @@ func BlockedReason(f *flowEntity.Flow, k *domain.AgentResponse) string {
 	if k == nil || k.MoneyModel == nil {
 		return "the money model has not been named yet — answer moneyModel.json first"
 	}
+	d := planner.Demanded(f, factsOf(k))
 	var missing []string
 	for _, m := range f.States {
+		if len(d.States[m.Type]) == 0 {
+			continue
+		}
 		if k.Transitions[m.Type] == nil {
 			missing = append(missing, "transitions for "+shortType(m.Type))
 		}
 	}
-	for _, target := range prompts.SeamTargets(f) {
+	for target := range d.Seams {
 		if k.ExternalEffects[target] == nil {
 			missing = append(missing, "retry safety of "+target)
 		}
 	}
+	sort.Strings(missing)
 	if len(missing) == 0 {
 		return ""
 	}

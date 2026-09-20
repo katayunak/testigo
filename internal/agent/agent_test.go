@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"github.com/katayunak/testigo/internal/agent/domain"
+	"github.com/katayunak/testigo/internal/agent/planner"
 	"github.com/katayunak/testigo/internal/agent/prompts"
 	"strings"
 	"testing"
@@ -280,6 +281,37 @@ func TestRoundTwoIsBlockedUntilRoundOneIsAnswered(t *testing.T) {
 	}
 	if r := BlockedReason(f, k); r != "" {
 		t.Fatalf("should be unblocked now, got %q", r)
+	}
+}
+
+func TestRoundTwoIsUnblockedByOnlyTheSeamsAnyRunnableScenarioNeeds(t *testing.T) {
+	f := fixtureFlow()
+	k := domain.NewAgentResponse()
+	k.MoneyModel = &domain.MoneyModelAnswer{}
+	for _, m := range f.States {
+		k.Transitions[m.Type] = &domain.TransitionsAnswer{}
+	}
+
+	f.Seams = append(f.Seams, flowEntity.Seam{
+		In:         flowEntity.CodeRef{Pkg: "example.com/paysvc/unreached", Symbol: "(*Ghost).Call"},
+		Kind:       flowEntity.SeamHTTP,
+		Target:     "example.com/paysvc/unreached#(*Ghost).Call",
+		Injectable: true,
+	})
+
+	d := planner.Demanded(f, factsOf(k))
+	if len(d.Seams) == 0 {
+		t.Fatal("fixture setup: expected at least one runnable scenario to demand a seam")
+	}
+	if all := prompts.SeamTargets(f); len(all) <= len(d.Seams) {
+		t.Fatal("fixture setup: expected the flow to have seams no runnable scenario needs, or this test proves nothing")
+	}
+
+	for target := range d.Seams {
+		k.ExternalEffects[target] = &domain.ExternalEffectAnswer{}
+	}
+	if r := BlockedReason(f, k); r != "" {
+		t.Fatalf("round 2 must not stay blocked on a seam nothing runnable touches — the planner never asks about those, so this gate could never be satisfied: %q", r)
 	}
 }
 
