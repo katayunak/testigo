@@ -106,10 +106,14 @@ func directKind(fn *ssa.Function) kindSet {
 			k |= fromSeamKind(e.Kind)
 		}
 	}
-	if k&ksDB != 0 && patterns.CursorNoise[name] {
+	if k&ksDB != 0 && isCursorNoise(name, fn.String()) {
 		return 0
 	}
 	return k
+}
+
+func isCursorNoise(name, fullName string) bool {
+	return patterns.CursorNoise[name] && !closesATransaction(fullName)
 }
 
 func computeReach(cg *callgraph.Graph, isLocal func(*ssa.Function) bool, kind func(*ssa.Function) kindSet) map[*ssa.Function]kindSet {

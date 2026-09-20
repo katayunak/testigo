@@ -106,3 +106,15 @@ func TestRunInTransactionOpensCommitsAndRollsBack(t *testing.T) {
 		}
 	}
 }
+
+func TestTxCloseSurvivesCursorNoiseFiltering(t *testing.T) {
+	if isCursorNoise("Close", "(*github.com/go-pg/pg/v10.Tx).Close") {
+		t.Fatal("Close is in the cursor-noise list so directKind zeroes it before applyTxFacts ever runs — that silently disabled the tx.Close rollback fix for every real call site, and only a hand-fed unit test on applyTxFacts stayed green while the actual pipeline kept reporting TX-NO-ROLLBACK on a repository's own defer func() { _ = tx.Close() }()")
+	}
+	if !isCursorNoise("Close", "(*database/sql.DB).Close") {
+		t.Fatal("closing a connection pool is still ordinary cursor-shaped noise and must stay suppressed")
+	}
+	if !isCursorNoise("Next", "(*database/sql.Rows).Next") {
+		t.Fatal("Rows.Next is exactly what CursorNoise exists to filter and must stay suppressed")
+	}
+}
