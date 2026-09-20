@@ -299,9 +299,37 @@ directory is stale, run the scan with `GOFLAGS=-mod=mod`.
 ## Limits, stated plainly
 
 - The seam filter over-approximates. A VTA call graph would be more precise than CHA.
-- Round two has not yet been run end to end on a production repository.
 - True/false verdicts are collected per question, but nothing yet rolls them up into per-area conclusions.
 - Recheck questions — where the agent re-confirms a fact phase 1 proved, with the proof attached — are built and tested, but nothing currently produces one.
+
+---
+
+## Running medium and integration tests
+
+A case marked `medium` is allowed to open a real database — a small test is not.
+`docker-compose.yml` at the repo root brings up disposable Postgres, Redis, and
+Kafka for exactly that:
+
+```bash
+docker compose up -d
+docker compose ps
+```
+
+Every container has a healthcheck; wait for `healthy` before running anything
+against them. Nothing is persisted — no named volumes are declared, so
+`docker compose down` leaves no data behind and the next `up` starts clean.
+
+Connection details a generated `medium` test should use:
+
+| Service | Address | Credentials |
+|---|---|---|
+| Postgres | `localhost:5432` | `testigo` / `testigo`, database `testigo` |
+| Redis | `localhost:6379` | none |
+| Kafka | `localhost:9092` | none |
+
+These are also the values named in the round-two prompt (`internal/agent/prompts/testCase.go`)
+so a generated test and this compose file agree without anyone having to remember
+to keep them in sync by hand.
 
 ---
 

@@ -62,6 +62,11 @@ and sent back.
 
 A case marked ` + "`medium`" + ` may use a real database and localhost. Emit it with
 ` + "`//go:build integration`" + ` as the first line so a bare ` + "`go test ./...`" + ` stays fast.
+Connect to what testigo's own ` + "`docker-compose.yml`" + ` brings up, nothing else:
+Postgres at ` + "`localhost:5432`" + ` (user/password/database all ` + "`testigo`" + `), Redis at
+` + "`localhost:6379`" + `, Kafka at ` + "`localhost:9092`" + `. Skip the test with ` + "`t.Skip`" + ` when the
+connection fails, so a machine without that compose running gets a skip, not a
+hang or a false failure.
 
 Never use ` + "`time.Sleep`" + ` in either. For goroutines, release from a barrier:
 
