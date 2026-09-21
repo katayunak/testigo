@@ -1,6 +1,6 @@
 # The scenario catalogue
 
-Every way testigo knows a payment system can break. **32 scenarios in 7 families.**
+Every way testigo knows a payment system can break. **33 scenarios in 7 families.**
 
 Each one is a Go value in `internal/testPlan/catalog.go`, not a prompt. It says what
 it needs (`Requires`), how it is written (`Techniques`), what tells the test it passed
@@ -31,6 +31,7 @@ Some scenarios are picked by **how a table is written** — see
 | [`RECONCILER-IS-IDEMPOTENT`](#reconciler-is-idempotent) | consistency | high | invariant | two or more entry points |
 | [`TRANSFER-IS-ATOMIC`](#transfer-is-atomic) | consistency | critical | invariant | an injectable seam, an open transaction, a transfer function |
 | [`DEADLOCK-IS-RECOVERED`](#deadlock-is-recovered) | consistency | high | invariant | an open transaction, a real database, a transfer function |
+| [`TENANT-ROWS-DONT-LEAK`](#tenant-rows-dont-leak) | consistency | critical | invariant | a shared-tenant discriminator column, a real database |
 | [`READ-MODIFY-WRITE-NEEDS-A-LOCK`](#read-modify-write-needs-a-lock) | consistency | critical | invariant | a table written `update_in_place`, an open transaction, a real database |
 | [`APPEND-ONLY-HISTORY-IS-IMMUTABLE`](#append-only-history-is-immutable) | consistency | high | invariant | a table written `insert_only`, a real database |
 | [`TIMEOUT-UNKNOWN-OUTCOME`](#timeout-unknown-outcome) | failure | critical | specification | a http or queue boundary, an injectable seam |
@@ -414,6 +415,49 @@ of a transfer is applied and the other lost.
 | oracle | `invariant` |
 | techniques | `concurrency`, `narrowIntegration` |
 | needs | an open transaction, a real database, a transfer function |
+
+### TENANT-ROWS-DONT-LEAK
+
+**One tenant's rows never answer for another's**
+
+The schema already scopes uniqueness by a discriminator column shared across
+several tables — the same shape as formancehq/ledger's buckets, where
+`create unique index ... on logs (ledger, idempotency_key)` lets two
+different ledgers each have their own row keyed `idempotency_key = abc`,
+because the ledger column is part of what makes a row unique, not the whole
+of it.
+
+Seed two tenants with a row carrying the SAME business key value in each —
+that only works at all because the schema allows it, which is what proves
+this is really a multi-tenant table and not a coincidence. Then call this
+tenant's own read path — the function every caller actually goes through,
+not a hand-written query — asking for the other tenant's business key.
+
+It must come back empty or not-found. The schema being right is not evidence
+the code is: the bug this looks for is a query that filters on the business
+key alone, written before the discriminator column existed or copied from
+one that never had it.
+
+*Looking for:* a query on a shared table that filters by business key alone, with no discriminator column in its WHERE clause
+
+**Passes when**
+
+- a query scoped to tenant B never returns a row that belongs to tenant A, even though both share the same business key value
+- the read is made through the application's own repository/query function, not a query built just for this test
+- the negative case is checked too: tenant A's own query for its own business key still succeeds
+
+**Wrong versions of this test**
+
+- using two tenants with different business keys, where a missing discriminator column would still happen to return the right row
+- querying the database directly instead of through the code path every real caller uses, which proves the schema is fine but not that the code uses it
+- assuming a NOT NULL or foreign key on the discriminator column is enough; neither one stops a WHERE clause that simply omits it
+
+| | |
+|---|---|
+| severity | critical |
+| oracle | `invariant` |
+| techniques | `narrowIntegration` |
+| needs | a shared-tenant discriminator column, a real database |
 
 ### READ-MODIFY-WRITE-NEEDS-A-LOCK
 

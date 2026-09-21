@@ -794,6 +794,45 @@ applied and the other lost.`,
 	},
 
 	{
+		ID:     "TENANT-ROWS-DONT-LEAK",
+		Name:   "One tenant's rows never answer for another's",
+		Family: FamilyConsistency,
+		CaseScenario: `The schema already scopes uniqueness by a discriminator column shared across
+several tables — the same shape as formancehq/ledger's buckets, where
+"create unique index ... on logs (ledger, idempotency_key)" lets two
+different ledgers each have their own row keyed "idempotency_key = abc",
+because the ledger column is part of what makes a row unique, not the whole
+of it.
+
+Seed two tenants with a row carrying the SAME business key value in each —
+that only works at all because the schema allows it, which is what proves
+this is really a multi-tenant table and not a coincidence. Then call this
+tenant's own read path — the function every caller actually goes through,
+not a hand-written query — asking for the other tenant's business key.
+
+It must come back empty or not-found. It must never return the other
+tenant's row. The schema being right is not evidence the code is: the
+discriminator column already exists and evidently scopes uniqueness: the bug
+this looks for is a query that was written before that column existed, or
+copied from one that never had it, filtering on the business key alone.`,
+		LookingFor: "a query on a shared table that filters by business key alone, with no discriminator column in its WHERE clause",
+		Acceptance: []string{
+			"a query scoped to tenant B never returns a row that belongs to tenant A, even though both share the same business key value",
+			"the read is made through the application's own repository/query function, not a query built just for this test",
+			"the negative case is checked too: tenant A's own query for its own business key still succeeds",
+		},
+		AntiGoals: []string{
+			"using two tenants with different business keys, where a missing discriminator column would still happen to return the right row",
+			"querying the database directly instead of through the code path every real caller uses, which proves the schema is fine but not that the code uses it",
+			"assuming a NOT NULL or foreign key on the discriminator column is enough; neither one stops a WHERE clause that simply omits it",
+		},
+		Techniques: []Technique{TechniqueNarrowIntegration},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{MultiTenant: true, RealDatabase: true},
+		Severity:   flowEntity.SevCritical,
+	},
+
+	{
 		ID:     "SELF-TRANSFER-REFUSED",
 		Name:   "A wallet cannot transfer to itself",
 		Family: FamilyMoney,

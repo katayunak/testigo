@@ -34,6 +34,27 @@ database's deadlock error) rather than prescribing one.
 
 See `DEADLOCK-IS-RECOVERED` in [CATALOG.md](../CATALOG.md).
 
+### `TENANT-ROWS-DONT-LEAK`
+
+A "bucket" in ledger is one Postgres schema, and one bucket can hold several
+ledgers at once — every table carries a plain `ledger` column, and every
+uniqueness rule is scoped by it: `create unique index ... on logs (ledger,
+idempotency_key)`, `create unique index transactions_ledger on transactions
+(ledger, id)`, and the same shape on `accounts`, `accounts_metadata`, and
+`transactions_metadata`. Two different ledgers can each have their own row
+keyed the same business-key value, because the schema was built to allow it.
+
+That structural shape — a column that leads a *composite* uniqueness
+constraint on two or more different tables — is now something the scanner
+looks for directly (`flowEntity.Infra.TenantScheme()`), reading it straight
+from the same schema facts the write-pattern classifier already collects. It
+deliberately does not guess from the column's name: an ordinary owner
+reference (a `user_id` on that user's own rows) is not the same shape and
+should not be offered this scenario, which is exactly what kept it from
+firing on either wallet or payment — neither one is actually multi-tenant.
+
+See `TENANT-ROWS-DONT-LEAK` in [CATALOG.md](../CATALOG.md).
+
 ---
 
 ## What we're naming as a gap, not implementing yet
@@ -65,15 +86,6 @@ middle is detectable, and that concurrent inserts never both claim the same
 a per-ledger advisory lock before computing it). We don't yet have a reliable,
 low-false-positive way to detect "this struct is a hash chain" from source
 alone.
-
-**Shared tables under multiple tenants need every query to say so.** Ledger's
-"bucket" — one Postgres schema, optionally shared by several ledgers — relies
-on a plain `ledger` column present on every table and every index. A
-`TENANT-ROWS-DONT-LEAK` scenario (seed two tenants, confirm one's query never
-returns the other's row) is a general, valuable idea for any multi-org,
-multi-account-holder fintech system, but it needs the scanner to first
-recognize "this is a shared-table, discriminator-column tenancy scheme" —
-which isn't something today's scanner looks for at all.
 
 ---
 

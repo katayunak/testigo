@@ -20,6 +20,8 @@ type TestCase struct {
 
 	States *flowEntity.StateMachine
 
+	Tenancy *flowEntity.TenantScheme
+
 	Blocked string
 }
 

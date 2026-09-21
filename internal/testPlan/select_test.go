@@ -91,6 +91,53 @@ func TestDeadlockIsRecoveredBlockedWithoutAnOpenTransaction(t *testing.T) {
 	t.Fatal("DEADLOCK-IS-RECOVERED was not offered at all")
 }
 
+func TestTenantRowsDontLeakNeedsASharedDiscriminatorColumn(t *testing.T) {
+	f := &flowEntity.Flow{
+		Infra: flowEntity.Infra{Constraints: []flowEntity.Constraint{
+			{Table: "logs", Columns: []string{"ledger", "idempotency_key"}, Kind: "unique_index"},
+			{Table: "transactions", Columns: []string{"ledger", "id"}, Kind: "unique_index"},
+		}},
+	}
+
+	var got *TestCase
+	for _, c := range Select(f, Facts{}) {
+		if c.Scenario.ID == "TENANT-ROWS-DONT-LEAK" {
+			cc := c
+			got = &cc
+		}
+	}
+	if got == nil {
+		t.Fatal("TENANT-ROWS-DONT-LEAK was not offered at all")
+	}
+	if !got.Runnable() {
+		t.Fatalf("should be runnable once a column leads uniqueness on two tables, got blocked: %q", got.Blocked)
+	}
+	if got.Tenancy == nil || got.Tenancy.Column != "ledger" {
+		t.Fatalf("expected the case to carry the discriminator column, got %+v", got.Tenancy)
+	}
+}
+
+func TestTenantRowsDontLeakBlockedWithoutASharedDiscriminatorColumn(t *testing.T) {
+	f := &flowEntity.Flow{
+		Infra: flowEntity.Infra{Constraints: []flowEntity.Constraint{
+			{Table: "users", Columns: []string{"email"}, Kind: "unique_index"},
+		}},
+	}
+
+	for _, c := range Select(f, Facts{}) {
+		if c.Scenario.ID == "TENANT-ROWS-DONT-LEAK" {
+			if c.Runnable() {
+				t.Fatal("should be blocked when no column leads uniqueness on two or more tables")
+			}
+			if c.Tenancy != nil {
+				t.Fatal("a blocked case should not carry a tenancy scheme")
+			}
+			return
+		}
+	}
+	t.Fatal("TENANT-ROWS-DONT-LEAK was not offered at all")
+}
+
 func TestSelectFallsBackToFirstMachineBeforeRolesAreAnswered(t *testing.T) {
 	f := &flowEntity.Flow{
 		States: []flowEntity.StateMachine{
