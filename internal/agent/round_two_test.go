@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -77,5 +78,30 @@ func TestWithoutRoundOneTheCaseHasNoAnswersBlock(t *testing.T) {
 	f := fixtureFlow()
 	if strings.Contains(prompts.TestCase(caseByID(t, f, "IDEM-CONCURRENT"), f, nil).Render(), "ANSWERED IN ROUND ONE") {
 		t.Error("an empty answers block is noise the agent pays to read")
+	}
+}
+
+func TestACaseCapsWriteSitesAndPointsAtFlowJSON(t *testing.T) {
+	f := fixtureFlow()
+	c := caseByID(t, f, "FINAL-STATE-IS-FINAL")
+
+	writes := make([]flowEntity.StateWrite, 20)
+	for i := range writes {
+		writes[i] = flowEntity.StateWrite{
+			To:   "StatusPending",
+			In:   flowEntity.CodeRef{Symbol: fmt.Sprintf("Handler%d", i), File: "service/order.go"},
+			Line: 10 + i,
+		}
+	}
+	states := *c.States
+	states.Writes = writes
+	c.States = &states
+
+	p := prompts.TestCase(c, f, nil).Render()
+	if !strings.Contains(p, "...and 8 more write site(s), in testigo/flow.json") {
+		t.Errorf("a case's write-site list should cap and point at flow.json once it runs long, got:\n%s", p)
+	}
+	if strings.Contains(p, "Handler19") {
+		t.Error("this block is Proof priority, which Trim() never cuts — it must cap itself rather than grow with the flow, or a busy state machine blows the prompt budget silently")
 	}
 }
