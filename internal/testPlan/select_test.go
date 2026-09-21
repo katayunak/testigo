@@ -138,6 +138,48 @@ func TestTenantRowsDontLeakBlockedWithoutASharedDiscriminatorColumn(t *testing.T
 	t.Fatal("TENANT-ROWS-DONT-LEAK was not offered at all")
 }
 
+func TestHashChainCatchesTamperingNeedsASelfTypedHashingMethod(t *testing.T) {
+	f := &flowEntity.Flow{
+		HashChains: []flowEntity.HashChain{
+			{Type: "example.com/x.Log", Method: flowEntity.CodeRef{Symbol: "Log.ChainLog", File: "x.go", Line: 10}},
+		},
+	}
+
+	var got *TestCase
+	for _, c := range Select(f, Facts{}) {
+		if c.Scenario.ID == "HASH-CHAIN-CATCHES-TAMPERING" {
+			cc := c
+			got = &cc
+		}
+	}
+	if got == nil {
+		t.Fatal("HASH-CHAIN-CATCHES-TAMPERING was not offered at all")
+	}
+	if !got.Runnable() {
+		t.Fatalf("should be runnable once a hash-chaining method is found, got blocked: %q", got.Blocked)
+	}
+	if got.HashChain == nil || got.HashChain.Type != "example.com/x.Log" {
+		t.Fatalf("expected the case to carry the hash chain found by the scanner, got %+v", got.HashChain)
+	}
+}
+
+func TestHashChainCatchesTamperingBlockedWithoutOne(t *testing.T) {
+	f := &flowEntity.Flow{}
+
+	for _, c := range Select(f, Facts{}) {
+		if c.Scenario.ID == "HASH-CHAIN-CATCHES-TAMPERING" {
+			if c.Runnable() {
+				t.Fatal("should be blocked when the scanner found no hash-chaining method")
+			}
+			if c.HashChain != nil {
+				t.Fatal("a blocked case should not carry a hash chain")
+			}
+			return
+		}
+	}
+	t.Fatal("HASH-CHAIN-CATCHES-TAMPERING was not offered at all")
+}
+
 func TestSelectFallsBackToFirstMachineBeforeRolesAreAnswered(t *testing.T) {
 	f := &flowEntity.Flow{
 		States: []flowEntity.StateMachine{

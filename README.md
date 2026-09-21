@@ -335,7 +335,7 @@ to keep them in sync by hand.
 
 ## Studies
 
-Every scenario testigo knows is listed in **[CATALOG.md](CATALOG.md)** — 33 of them,
+Every scenario testigo knows is listed in **[CATALOG.md](CATALOG.md)** — 34 of them,
 with what each needs, what passing means, and the specific wrong versions of each test.
 
 The research this is built on lives in [`studies/`](studies/).

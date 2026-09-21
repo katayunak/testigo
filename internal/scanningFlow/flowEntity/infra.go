@@ -88,15 +88,6 @@ type TenantScheme struct {
 	Tables []string
 }
 
-// TenantScheme finds a column that leads a composite uniqueness constraint
-// (a unique index or a unique constraint spanning two or more columns) on two
-// or more different tables. That shape — the same column scoping uniqueness
-// across a table family — is what a shared-table tenant discriminator looks
-// like structurally, whatever it happens to be named: formancehq/ledger's
-// `create unique index logs_idempotency_key on logs (ledger, idempotency_key)`
-// is one instance of it. A guess from the column's name alone is not used,
-// because an ordinary owner-reference column (a user id on that user's own
-// rows) is not the same shape and should not be offered this scenario.
 func (i Infra) TenantScheme() (TenantScheme, bool) {
 	tablesByColumn := map[string]map[string]bool{}
 	for _, c := range i.Constraints {

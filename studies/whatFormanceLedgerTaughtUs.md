@@ -55,14 +55,46 @@ firing on either wallet or payment — neither one is actually multi-tenant.
 
 See `TENANT-ROWS-DONT-LEAK` in [CATALOG.md](../CATALOG.md).
 
+### `HASH-CHAIN-CATCHES-TAMPERING`
+
+Every log row in ledger hashes the previous row's hash plus its own content
+(`internal/log.go`, `ChainLog`/`ComputeHash`) — an audit trail that's supposed
+to make "nobody edited history" something a script can check, not just a
+policy someone follows.
+
+Detecting "this is a hash chain" turned out not to need guessing at field or
+method names at all. The one part of the shape that can't be a coincidence is
+structural: a method that takes *the previous instance of its own type* and,
+somewhere in its body, calls a real cryptographic hash function
+(`sha256`/`sha512`/`sha1`/`md5`/`blake2`, either the one-shot `Sum*` form or
+the streaming `New()` form). `ledger.Log.ChainLog(previous *Log) Log` is
+exactly that shape; an ordinary method that happens to take another instance
+of its own type for some unrelated reason (a `Merge`, a diff, a comparison)
+does not also hash anything, and a method that hashes something unrelated (a
+password, say) does not also take a previous instance of its own type. Both
+have to be true together, which is what `extractHashChains` checks
+(`internal/scanningFlow/hashChain.go`).
+
+What the implemented scenario checks is narrower than the original idea: it
+proves tampering with any one record breaks verification of everything after
+it, using the metamorphic relation ledger's own report already implied
+(verify before / verify after one field changes). It does **not** check the
+other half of the original gap — that two concurrent inserts can't both claim
+the same "previous hash" (the reason ledger's synchronous hashing mode takes
+a per-ledger advisory lock before computing one). That's a genuine
+concurrency property, not a tamper-evidence one, and would need its own
+scenario rather than being folded into this one.
+
+See `HASH-CHAIN-CATCHES-TAMPERING` in [CATALOG.md](../CATALOG.md).
+
 ---
 
 ## What we're naming as a gap, not implementing yet
 
-These are real, concrete ideas the ledger's code justified — each one would
-need new fact-detection in the scanner before it could be a trustworthy,
-code-derived `Requires` gate rather than a guess. Naming them here, honestly,
-beats forcing a low-precision heuristic into the scanner just to check a box.
+This is a real, concrete idea the ledger's code justified — it would need new
+fact-detection in the scanner before it could be a trustworthy, code-derived
+`Requires` gate rather than a guess. Naming it here, honestly, beats forcing a
+low-precision heuristic into the scanner just to check a box.
 
 **An insert that reads the previous row first can still lose an update.**
 Ledger's `moves` table is append-only, but each new row's balance snapshot is
@@ -75,17 +107,6 @@ table safely insert-only and miss the race entirely. Detecting it needs
 recognizing a "select latest, then insert the next" shape inside one
 function — doable, but a real, separate piece of AST work from what exists
 today.
-
-**A hash-chained log is a checkable claim, not just a good idea.** Every log
-row in ledger hashes the previous row's hash plus its own content
-(`internal/log.go`, `ComputeHash`) — an audit trail that a script can actually
-verify wasn't tampered with, not just a policy. A scenario here would seed a
-chain, verify it holds, then prove that changing one field anywhere in the
-middle is detectable, and that concurrent inserts never both claim the same
-"previous hash" (which is exactly why ledger's synchronous hashing mode takes
-a per-ledger advisory lock before computing it). We don't yet have a reliable,
-low-false-positive way to detect "this struct is a hash chain" from source
-alone.
 
 ---
 

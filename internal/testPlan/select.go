@@ -66,6 +66,10 @@ func Select(f *flowEntity.Flow, b Facts) []TestCase {
 				c.Tenancy = &scheme
 			}
 		}
+		if sc.Requires.HashChain && len(f.HashChains) > 0 {
+			chain := f.HashChains[0]
+			c.HashChain = &chain
+		}
 
 		c.TargetPkg, c.TargetFile = target(f, sc, c.Size)
 		cases = append(cases, c)

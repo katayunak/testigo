@@ -22,6 +22,8 @@ type TestCase struct {
 
 	Tenancy *flowEntity.TenantScheme
 
+	HashChain *flowEntity.HashChain
+
 	Blocked string
 }
 

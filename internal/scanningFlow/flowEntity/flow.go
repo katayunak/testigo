@@ -26,6 +26,8 @@ type Flow struct {
 
 	TableWrites []TableWrites `json:"table_writes,omitempty"`
 
+	HashChains []HashChain `json:"hash_chains,omitempty"`
+
 	IdempotencyKeys Candidates `json:"idempotency_keys,omitempty"`
 	MoneyTypes      Candidates `json:"money_types,omitempty"`
 
@@ -60,6 +62,11 @@ type Finding struct {
 	Detail   string   `json:"detail"`
 	Ref      CodeRef  `json:"ref"`
 	Line     int      `json:"line"`
+}
+
+type HashChain struct {
+	Type   string  `json:"type"`
+	Method CodeRef `json:"method"`
 }
 
 type StateMachine struct {

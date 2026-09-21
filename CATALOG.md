@@ -1,6 +1,6 @@
 # The scenario catalogue
 
-Every way testigo knows a payment system can break. **33 scenarios in 7 families.**
+Every way testigo knows a payment system can break. **34 scenarios in 7 families.**
 
 Each one is a Go value in `internal/testPlan/catalog.go`, not a prompt. It says what
 it needs (`Requires`), how it is written (`Techniques`), what tells the test it passed
@@ -34,6 +34,7 @@ Some scenarios are picked by **how a table is written** — see
 | [`TENANT-ROWS-DONT-LEAK`](#tenant-rows-dont-leak) | consistency | critical | invariant | a shared-tenant discriminator column, a real database |
 | [`READ-MODIFY-WRITE-NEEDS-A-LOCK`](#read-modify-write-needs-a-lock) | consistency | critical | invariant | a table written `update_in_place`, an open transaction, a real database |
 | [`APPEND-ONLY-HISTORY-IS-IMMUTABLE`](#append-only-history-is-immutable) | consistency | high | invariant | a table written `insert_only`, a real database |
+| [`HASH-CHAIN-CATCHES-TAMPERING`](#hash-chain-catches-tampering) | consistency | high | metamorphic | a hash-chaining method |
 | [`TIMEOUT-UNKNOWN-OUTCOME`](#timeout-unknown-outcome) | failure | critical | specification | a http or queue boundary, an injectable seam |
 | [`ORPHANED-AUTHORIZATION`](#orphaned-authorization) | failure | critical | invariant | an injectable seam, an open transaction |
 | [`UNCLASSIFIED-ERROR-NOT-RETRIED`](#unclassified-error-not-retried) | failure | high | specification | an injectable seam |
@@ -529,6 +530,49 @@ read still returns something sensible.
 | oracle | `invariant` |
 | techniques | `narrowIntegration`, `property` |
 | needs | a table written `insert_only`, a real database |
+
+### HASH-CHAIN-CATCHES-TAMPERING
+
+**Editing one record breaks every hash after it**
+
+A record's hash is computed from the record before it plus its own content —
+the same shape as formancehq/ledger's own log, where each entry hashes the
+previous entry's hash together with its own data. The point of a chain like
+this is that "nobody edited history" stops being a policy and becomes
+something a script can check.
+
+Build a real chain of several records the normal way records get created.
+Recompute the hash of every one of them, in order, from its own content and
+the previous record's stored hash. Every recomputed hash must match what is
+stored — for every record, not just the newest one.
+
+Then falsify it on purpose: take any one field on any one record in the
+MIDDLE of the chain and change it, without touching anything downstream.
+Recompute from there forward. Every record from the tampered one onward must
+now fail to match. If changing that field does not change what the hash
+function computes — or if only the newest record was ever checked to begin
+with — the chain is decoration, not evidence.
+
+*Looking for:* a hash chain whose check only covers the newest record, or a tampered field the hash function never actually reads
+
+**Passes when**
+
+- recomputing every record's hash from its own content and the previous record's stored hash matches what is stored, for the whole chain
+- changing any single field on any one record invalidates the recomputed hash for that record and every record after it
+- the untouched prefix of the chain, before the tampered record, still verifies correctly
+
+**Wrong versions of this test**
+
+- verifying only the newest record, which says nothing about whether the middle of the chain was ever touched
+- tampering with a field the hash function does not read, which proves the test tampered with the wrong thing rather than that the chain is sound
+- recomputing the "previous" hash from the in-memory record used to build the chain rather than what is actually stored, which cannot catch a record edited after the fact
+
+| | |
+|---|---|
+| severity | high |
+| oracle | `metamorphic` |
+| techniques | `metamorphic`, `unit` |
+| needs | a hash-chaining method |
 
 ---
 
