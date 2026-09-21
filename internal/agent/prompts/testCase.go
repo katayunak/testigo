@@ -120,6 +120,8 @@ run and names a real gap is the most valuable thing this produces. Weakening an
 assertion so the suite comes back green is the least.
 `
 
+const maxCaseWriteSites = 12
+
 func TestCase(c testPlan.TestCase, f *flowEntity.Flow, k *domain.AgentResponse) *Prompt {
 	var b strings.Builder
 	props := c.Technique.Props()
@@ -187,12 +189,19 @@ func caseFacts(c testPlan.TestCase, f *flowEntity.Flow) string {
 			fmt.Fprintf(&b, "  %s\n", s)
 		}
 		b.WriteString("\nWhere the status is assigned:\n\n")
-		for _, w := range c.States.Writes {
+		shown := c.States.Writes
+		if len(shown) > maxCaseWriteSites {
+			shown = shown[:maxCaseWriteSites]
+		}
+		for _, w := range shown {
 			tx := "outside any transaction"
 			if w.InTx {
 				tx = "inside a transaction"
 			}
 			fmt.Fprintf(&b, "  -> %-20s in %s (%s:%d, %s)\n", w.To, w.In.Symbol, w.In.File, w.Line, tx)
+		}
+		if extra := len(c.States.Writes) - len(shown); extra > 0 {
+			fmt.Fprintf(&b, "  ...and %d more write site(s), in testigo/flow.json\n", extra)
 		}
 		b.WriteString("\n")
 	}
