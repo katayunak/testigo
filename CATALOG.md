@@ -1,6 +1,6 @@
 # The scenario catalogue
 
-Every way testigo knows a payment system can break. **31 scenarios in 7 families.**
+Every way testigo knows a payment system can break. **32 scenarios in 7 families.**
 
 Each one is a Go value in `internal/testPlan/catalog.go`, not a prompt. It says what
 it needs (`Requires`), how it is written (`Techniques`), what tells the test it passed
@@ -30,6 +30,7 @@ Some scenarios are picked by **how a table is written** — see
 | [`DOUBLE-ENTRY-SUMS-TO-ZERO`](#double-entry-sums-to-zero) | consistency | critical | invariant | money in the flow, a transfer function |
 | [`RECONCILER-IS-IDEMPOTENT`](#reconciler-is-idempotent) | consistency | high | invariant | two or more entry points |
 | [`TRANSFER-IS-ATOMIC`](#transfer-is-atomic) | consistency | critical | invariant | an injectable seam, an open transaction, a transfer function |
+| [`DEADLOCK-IS-RECOVERED`](#deadlock-is-recovered) | consistency | high | invariant | an open transaction, a real database, a transfer function |
 | [`READ-MODIFY-WRITE-NEEDS-A-LOCK`](#read-modify-write-needs-a-lock) | consistency | critical | invariant | a table written `update_in_place`, an open transaction, a real database |
 | [`APPEND-ONLY-HISTORY-IS-IMMUTABLE`](#append-only-history-is-immutable) | consistency | high | invariant | a table written `insert_only`, a real database |
 | [`TIMEOUT-UNKNOWN-OUTCOME`](#timeout-unknown-outcome) | failure | critical | specification | a http or queue boundary, an injectable seam |
@@ -371,6 +372,48 @@ destroyed and no error is reported to anyone.
 | oracle | `invariant` |
 | techniques | `faultInjection`, `narrowIntegration` |
 | needs | an injectable seam, an open transaction, a transfer function |
+
+### DEADLOCK-IS-RECOVERED
+
+**A deadlock between two transfers is retried, not corrupted**
+
+Run two transfers concurrently that touch the same two accounts in opposite
+order — one A to B, the other B to A — against a real database, enough times
+that Postgres's own deadlock detector eventually kills one of them.
+
+This is not a test that the deadlock never happens. Locking two rows in
+opposite orders across concurrent transactions WILL deadlock under real load;
+that is expected, documented database behaviour, not a bug to prevent. The
+bug this scenario finds is what happens next: the losing transaction must not
+leave a half-applied debit, and the deadlock must not reach the caller as a
+raw, unrecognised driver error it has no name for.
+
+There are two legitimate fixes, and this scenario accepts either: always lock
+the accounts in the same fixed order (so the deadlock cannot occur), or catch
+the database's deadlock/serialization error and retry the whole operation.
+What fails this test is neither: the deadlock surfaces unhandled, or one leg
+of a transfer is applied and the other lost.
+
+*Looking for:* a transaction that locks two or more account rows with no fixed ordering, and no retry around the whole operation when the driver reports a deadlock
+
+**Passes when**
+
+- both transfers eventually succeed, or the one that lost the deadlock returns a typed, retryable error rather than a raw driver error
+- the account that lost the deadlock has no partially-applied write — its balance reflects only committed transfers
+- running the same two transfers many times never leaves the two accounts' combined balance different from before
+
+**Wrong versions of this test**
+
+- asserting only that no panic occurred, which passes even if one transfer silently vanishes
+- running every transfer in the same account order, which can never trigger the deadlock this scenario exists to find
+- treating the retry itself as the bug — a caught-and-retried deadlock is the correct outcome, not a failure
+
+| | |
+|---|---|
+| severity | high |
+| oracle | `invariant` |
+| techniques | `concurrency`, `narrowIntegration` |
+| needs | an open transaction, a real database, a transfer function |
 
 ### READ-MODIFY-WRITE-NEEDS-A-LOCK
 

@@ -755,6 +755,45 @@ destroyed and no error is reported to anyone.`,
 	},
 
 	{
+		ID:     "DEADLOCK-IS-RECOVERED",
+		Name:   "A deadlock between two transfers is retried, not corrupted",
+		Family: FamilyConsistency,
+		CaseScenario: `Run two transfers concurrently that touch the same two accounts in opposite
+order — one A to B, the other B to A — against a real database, enough times
+that Postgres's own deadlock detector eventually kills one of them.
+
+This is not a test that the deadlock never happens. Locking two rows in
+opposite orders across concurrent transactions WILL deadlock under real load;
+that is expected, documented database behaviour, not a bug to prevent. The
+bug this scenario finds is what happens next: the losing transaction must not
+leave a half-applied debit, and the deadlock must not reach the caller as a
+raw, unrecognised driver error it has no name for.
+
+There are two legitimate fixes, and this scenario accepts either. One is to
+always acquire the account locks in the same fixed order (sort the account
+identifiers before locking) so the deadlock cannot occur in the first place.
+The other is to catch the database's specific deadlock/serialization error
+and retry the whole operation. What fails this test is neither: the deadlock
+surfaces unhandled, or the account is left with one leg of the transfer
+applied and the other lost.`,
+		LookingFor: "a transaction that locks two or more account rows with no fixed ordering, and no retry around the whole operation when the driver reports a deadlock",
+		Acceptance: []string{
+			"both transfers eventually succeed, or the one that lost the deadlock returns a typed, retryable error rather than a raw driver error",
+			"the account that lost the deadlock has no partially-applied write — its balance reflects only committed transfers",
+			"running the same two transfers many times never leaves the two accounts' combined balance different from before",
+		},
+		AntiGoals: []string{
+			"asserting only that no panic occurred, which passes even if one transfer silently vanishes",
+			"running every transfer in the same account order, which can never trigger the deadlock this scenario exists to find",
+			"treating the retry itself as the bug — a caught-and-retried deadlock is the correct outcome, not a failure",
+		},
+		Techniques: []Technique{TechniqueConcurrency, TechniqueNarrowIntegration},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{OpensTx: true, RealDatabase: true, TransferFunc: true},
+		Severity:   flowEntity.SevHigh,
+	},
+
+	{
 		ID:     "SELF-TRANSFER-REFUSED",
 		Name:   "A wallet cannot transfer to itself",
 		Family: FamilyMoney,
