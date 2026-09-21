@@ -115,9 +115,7 @@ asked; anything marked settled above is already recorded.
   "money":        { "type": "pkg.Money" | null, "amount_field": "Cents" | null, "proof": { "symbol": "pkg.Money", "at": "money.go:14" } },
   "idempotency":  { "key_field": "IdempotencyKey" | null, "proof": { "symbol": "Order.IdempotencyKey", "at": "order.go:22" } },
   "transfer_func": { "symbol": "pkg#(*Ledger).Post" | null, "at": "ledger.go:41" },
-  "balance_func":  { "symbol": "pkg#(*Ledger).Balance" | null, "at": "ledger.go:88" },
-  "entity_id_field": "ID" | null,
-  "notes": "anything the questions did not cover that a test author needs"
+  "balance_func":  { "symbol": "pkg#(*Ledger).Balance" | null, "at": "ledger.go:88" }
 }
 ` + "```" + `
 

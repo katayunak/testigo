@@ -98,36 +98,30 @@ the moment it must decide whether to act.
 {
   "main_entity": {
     "struct": "Order",
-    "package": "example.com/pay/domain/entity",
-    "proof": { "symbol": "Order", "at": "domain/entity/order.go:9" },
-    "why": "one sentence: what real-world thing one row of it is"
+    "proof": { "symbol": "Order", "at": "domain/entity/order.go:9" }
   },
   "idempotency_key": {
     "field": "OrderID" | null,
     "proof": { "symbol": "Order.OrderID", "at": "domain/entity/order.go:12" },
     "supplied_by": "client" | "provider" | "queue" | "unknown",
-    "read_before_acting": true | false | "unknown",
-    "confidence": "high" | "medium" | "low"
+    "read_before_acting": true | false | "unknown"
   },
   "other_identifiers": [
     { "field": "ID",     "purpose": "surrogate primary key, generated here",              "proof": { "symbol": "Order.ID",     "at": "domain/entity/order.go:10" }, "could_be_key": false },
     { "field": "RRN",    "purpose": "bank retrieval number, arrives after authorization", "proof": { "symbol": "Order.RRN",    "at": "domain/entity/order.go:21" }, "could_be_key": false },
     { "field": "UserID", "purpose": "who owns the order",                                 "proof": { "symbol": "Order.UserID", "at": "domain/entity/order.go:14" }, "could_be_key": false }
   ],
-  "no_key_reason": "fill this in ONLY if idempotency_key.field is null: say what stops duplicates instead, or say nothing does",
-  "notes": ""
+  "no_key_reason": "fill this in ONLY if idempotency_key.field is null: say what stops duplicates instead, or say nothing does"
 }
 ` + "```" + `
 
 Every ` + "`proof`" + ` is ` + "`{ \"symbol\", \"at\" }`" + ` and ` + "`at`" + ` must be a real ` + "`file.go:line`" + `.
 Every entry in ` + "`other_identifiers`" + ` needs one too — an uncited identifier is the
 one field nothing checks, and that is where a wrong answer gets through. Point
-` + "`at`" + ` at the declaration; put anything you want to say about it in ` + "`why`" + ` or
-` + "`notes`" + `, not inside the citation.
+` + "`at`" + ` at the declaration, and keep prose out of the citation.
 
-For the key, the line worth citing is where the value ARRIVES, and the reason to
-believe it is where the value is READ BACK before the charge. If those are two
-different files, cite the arrival and say the read-back line in ` + "`notes`" + `.
+For the key, cite where the value ARRIVES. Whether it is READ BACK before the
+charge is what ` + "`read_before_acting`" + ` records.
 
 If ` + "`idempotency_key.field`" + ` is null, ` + "`no_key_reason`" + ` is required. "There is no
 deduplication key and nothing else prevents a repeat" is a legitimate answer and

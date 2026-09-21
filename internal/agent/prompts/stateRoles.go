@@ -55,8 +55,26 @@ func StateRoles(f *flowEntity.Flow, m flowEntity.StateMachine) *Prompt {
 	p := New("testigo — what part does each state play?").
 		Fact(Proof, "The type and its declared states", b.String())
 
-	var decide strings.Builder
-	decide.WriteString(`Exactly ONE of these:
+	var out strings.Builder
+	fmt.Fprintf(&out, `The roles, how to choose them and the shape are in PREAMBLE.md, under
+"stateRoles". Every declared state above
+must appear exactly once in `+"`roles`"+`.
+
+There are %d state(s). That is %d role assignments, not %d matrix cells.
+`, len(m.States), len(m.States), len(m.States)*len(m.States))
+
+	return p.Answers(out.String()).Where("testigo/flow.json")
+}
+
+const StateRolesPreamble = `
+## stateRoles — classifying one state machine
+
+Classify every state of ONE type. Do NOT list which transitions are legal:
+testigo derives those from the roles you give, by rule, in code you can read.
+
+### The roles
+
+Exactly ONE of these:
 
   initializing   the value a new row is created with
   in_progress    work is happening; more changes are expected
@@ -77,7 +95,7 @@ Then, only where they apply:
   retryable      a payment in this FINAL state may legitimately re-enter the
                  flow. Say where it lands in ` + "`retry_enters_at`" + `.
 
-## The two that are usually got wrong
+### The two that are usually got wrong
 
 **Is failure really final?** Stripe returns a PaymentIntent to
 ` + "`requires_payment_method`" + ` after a decline so it can be retried. If anything
@@ -89,26 +107,6 @@ time a customer retries a declined card, and somebody deletes the test.
 **Is the finished state really finished?** Captured is done until a chargeback
 arrives weeks later. If this repository models refunds or reversals, those are
 ` + "`compensating`" + ` and the finished state can reach them.
-
-`)
-
-	p.Fact(Subject, "What to decide, per state", decide.String())
-
-	var out strings.Builder
-	fmt.Fprintf(&out, `The shape is in PREAMBLE.md, under "stateRoles". Every declared state above
-must appear exactly once in `+"`roles`"+`.
-
-There are %d state(s). That is %d role assignments, not %d matrix cells.
-`, len(m.States), len(m.States), len(m.States)*len(m.States))
-
-	return p.Answers(out.String()).Where("testigo/flow.json")
-}
-
-const StateRolesPreamble = `
-## stateRoles — classifying one state machine
-
-Classify every state of ONE type. Do NOT list which transitions are legal:
-testigo derives those from the roles you give, by rule, in code you can read.
 
 ### The shape
 
@@ -131,8 +129,7 @@ testigo derives those from the roles you give, by rule, in code you can read.
   "exceptions": [
     { "from": "SUCCESS", "to": "REFUNDED",
       "why": "a chargeback can arrive up to 40 days after settlement" }
-  ],
-  "notes": "anything the roles above cannot carry"
+  ]
 }
 ` + "```" + `
 

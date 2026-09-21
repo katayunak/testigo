@@ -75,7 +75,7 @@ func parseSchema(sql, file string) (tables []flowEntity.Table, fks []flowEntity.
 			}
 			if ch := reInlineChk.FindStringSubmatch(item); ch != nil {
 				checks = append(checks, flowEntity.Check{
-					Table: table, Column: col.Name, Expr: space(ch[1]),
+					Table: table, Expr: space(ch[1]),
 					Values: inListValues(ch[1]), File: file, Line: line,
 				})
 			}

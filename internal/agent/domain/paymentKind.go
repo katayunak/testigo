@@ -100,21 +100,6 @@ func (c Classification) All() []PaymentType {
 	return append(out, c.Overlays...)
 }
 
-func (c Classification) Questions() []Question {
-	var out []Question
-	seen := map[string]bool{}
-	for _, t := range c.All() {
-		for _, q := range PaymentTypeQuestions[t] {
-			if seen[q.ID] {
-				continue
-			}
-			seen[q.ID] = true
-			out = append(out, q)
-		}
-	}
-	return out
-}
-
 func (c Classification) MissingOverlays() []PaymentType {
 	expected := map[PaymentType][]PaymentType{
 		MotionTopup:       {OverlayRefundReversal, OverlayReconciliation},

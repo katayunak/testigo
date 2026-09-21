@@ -13,7 +13,6 @@ type Candidate struct {
 	Asks    int
 	Output  int
 	Settled bool
-	Stale   bool
 }
 
 type Choice struct {
@@ -24,7 +23,6 @@ type Choice struct {
 	Value     int
 	Chosen    bool
 	Why       string
-	By        []string
 }
 
 type Plan struct {
@@ -114,7 +112,7 @@ func decide(c Candidate, d Demand) Choice {
 	out := Choice{Candidate: c, Method: Open, Value: 1}
 
 	all := FieldsOf(c.Kind)
-	worth, use := Worth(c.Kind)
+	worth, _ := Worth(c.Kind)
 
 	if len(all) == 0 {
 		out.Why = "not in the consumer registry — kept until someone records what reads it"
@@ -137,7 +135,6 @@ func decide(c Candidate, d Demand) Choice {
 			out.Why = "no runnable scenario touches this seam"
 			return out
 		}
-		out.By = by
 		out.Value = len(by)
 		out.Method = Verify
 
@@ -148,7 +145,6 @@ func decide(c Candidate, d Demand) Choice {
 			out.Why = "no runnable scenario uses this state machine"
 			return out
 		}
-		out.By = by
 		out.Value = len(by)
 
 	case "moneyModel":
@@ -170,18 +166,9 @@ func decide(c Candidate, d Demand) Choice {
 		}
 		out.Value = d.Runnable
 
-	case "notes":
-		if !c.Stale {
-			out.Method = Skip
-			out.Why = "the note on disk still matches this function body"
-			return out
-		}
-		out.Value = 1
 	}
 
-	if use == Dormant {
-		out.Why = dormantReason(c.Kind)
-	} else if out.Why == "" {
+	if out.Why == "" {
 		out.Why = fmt.Sprintf("%d field(s) read downstream", len(worth))
 	}
 
@@ -200,13 +187,4 @@ func decide(c Candidate, d Demand) Choice {
 		out.Trimmable = Cost{Output: OutputTokens(c.Kind, out.Method, asks-len(worth))}
 	}
 	return out
-}
-
-func dormantReason(kind string) string {
-	for _, f := range FieldsOf(kind) {
-		if f.Use == Dormant {
-			return "kept, but " + f.Reader
-		}
-	}
-	return "kept"
 }

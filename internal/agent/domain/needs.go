@@ -5,7 +5,9 @@ import "sort"
 var PaymentKindScenarios = map[PaymentType][]string{
 	SpineDoubleEntry: {"DOUBLE-ENTRY-SUMS-TO-ZERO", "CONSERVATION-UNDER-CONCURRENCY",
 		"LEDGER-OUTSIDE-CALLER-TRANSACTION", "LOST-UPDATE"},
-	SpineWallet: {"CONSERVATION-UNDER-CONCURRENCY", "LOST-UPDATE", "MONEY-ROUND-TRIP-EXACT"},
+	SpineWallet: {"CONSERVATION-UNDER-CONCURRENCY", "LOST-UPDATE", "MONEY-ROUND-TRIP-EXACT",
+		"BALANCE-NEVER-NEGATIVE", "TRANSFER-IS-ATOMIC", "SELF-TRANSFER-REFUSED",
+		"BALANCE-LIMIT-ENFORCED", "WALLET-STATUS-GATES-MOVEMENT"},
 	SpineStateless: {"TIMEOUT-UNKNOWN-OUTCOME", "ASYNC-RESPONSE-BEFORE-DURABILITY",
 		"UNCLASSIFIED-ERROR-NOT-RETRIED"},
 
@@ -43,6 +45,43 @@ func (c Classification) Scenarios() []string {
 }
 
 var ScenarioQuestions = map[string][]Question{
+	"BALANCE-NEVER-NEGATIVE": {
+		*Discover("BALANCE-NEVER-NEGATIVE.guard_is_atomic",
+			"Is the balance check and the balance write done in ONE statement or under a row lock, rather than a read followed by a separate update?",
+			"This decides whether the test is expected to pass or to fail. A read-then-write guard is the bug, and the test should prove it rather than be written to accommodate it.").Bool(),
+		*Discover("BALANCE-NEVER-NEGATIVE.may_go_negative",
+			"Is a negative balance ever legitimate here — an overdraft, a credit line, or a settlement account?",
+			"If negative balances are legal for some wallet types, an invariant test asserting `balance >= 0` would be wrong for those and must be scoped to the types where it holds.").Bool(),
+	},
+	"TRANSFER-IS-ATOMIC": {
+		*Discover("TRANSFER-IS-ATOMIC.same_transaction",
+			"Do the debit and the credit happen inside the same database transaction?",
+			"If they do not, the test asserts money is conserved across a failure and is expected to go red. If they do, it asserts the rollback works.").Bool(),
+		*Discover("TRANSFER-IS-ATOMIC.async_leg",
+			"Is either leg completed asynchronously — a queued job, an outbox, or another service?",
+			"An asynchronous leg cannot be rolled back by the caller's transaction, so the correct assertion becomes eventual settlement plus a compensating entry, not atomicity."),
+	},
+	"SELF-TRANSFER-REFUSED": {
+		*Discover("SELF-TRANSFER-REFUSED.is_refused",
+			"Is a transfer whose source and destination are the same wallet rejected before any write?",
+			"If it is not, the test must check whether the two writes overwrite each other, which invents or destroys money silently.").Bool(),
+	},
+	"BALANCE-LIMIT-ENFORCED": {
+		*Discover("BALANCE-LIMIT-ENFORCED.limit_exists",
+			"Is there a maximum balance or a per-transaction ceiling, and where does its value come from?",
+			"A limit read from configuration must be read by the test too. A hard-coded expectation passes while the real limit drifts."),
+		*Discover("BALANCE-LIMIT-ENFORCED.checked_atomically",
+			"Is the ceiling enforced in the same statement that writes the balance?",
+			"A limit checked separately from the write can be crossed by two concurrent deposits, which is exactly what the test reproduces.").Bool(),
+	},
+	"WALLET-STATUS-GATES-MOVEMENT": {
+		*Discover("WALLET-STATUS-GATES-MOVEMENT.blocks_credits",
+			"Do non-active wallet statuses block money coming IN, or only money going out?",
+			"Guarding only withdrawals is the usual shape, and it strands deposits in a closed wallet. The test enumerates both directions and needs to know which is intended.").Bool(),
+		*Discover("WALLET-STATUS-GATES-MOVEMENT.active_states",
+			"Which wallet statuses are considered active enough to move money?",
+			"The test enumerates every declared status and asserts the rest are refused. Without this list it would guess, and a wrongly-included status makes the test assert the bug."),
+	},
 	"IDEM-REPLAY": {
 		*Discover("IDEM-REPLAY.stores_result",
 			"Does this system store the RESULT of a completed request against its key, so a repeat returns the same body rather than doing the work again?",
@@ -212,36 +251,6 @@ var TechniqueQuestions = map[string][]Question{
 	},
 }
 
-func TechniqueQuestionsFor(techniques []string) []Question {
-	var out []Question
-	seen := map[string]bool{}
-	for _, t := range techniques {
-		for _, q := range TechniqueQuestions[t] {
-			if seen[q.ID] {
-				continue
-			}
-			seen[q.ID] = true
-			out = append(out, q)
-		}
-	}
-	return out
-}
-
-func ScenarioQuestionsFor(scenarios []string) []Question {
-	var out []Question
-	seen := map[string]bool{}
-	for _, s := range scenarios {
-		for _, q := range ScenarioQuestions[s] {
-			if seen[q.ID] {
-				continue
-			}
-			seen[q.ID] = true
-			out = append(out, q)
-		}
-	}
-	return out
-}
-
 type Need struct {
 	Question Question
 	Because  []string
@@ -285,4 +294,29 @@ func Needed(c Classification, scenarios, techniques []string, answered map[strin
 		out = append(out, Need{Question: q, Because: because[q.ID]})
 	}
 	return out
+}
+
+var questionIndex map[string]Question
+
+func QuestionByID(id string) (Question, bool) {
+	if questionIndex == nil {
+		questionIndex = map[string]Question{}
+		for _, qs := range PaymentTypeQuestions {
+			for _, q := range qs {
+				questionIndex[q.ID] = q
+			}
+		}
+		for _, qs := range ScenarioQuestions {
+			for _, q := range qs {
+				questionIndex[q.ID] = q
+			}
+		}
+		for _, qs := range TechniqueQuestions {
+			for _, q := range qs {
+				questionIndex[q.ID] = q
+			}
+		}
+	}
+	q, ok := questionIndex[id]
+	return q, ok
 }

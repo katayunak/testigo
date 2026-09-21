@@ -242,25 +242,6 @@ func TestUnreachedFunctionsAreExcluded(t *testing.T) {
 	}
 }
 
-func TestNodeCodeRefsCarryTheirBodyHash(t *testing.T) {
-	res := scanFixture(t)
-	for id, n := range res.Flow.Nodes {
-		if n.Ref.BodyHash == "" {
-			t.Errorf("%s has no body hash: every future scanningFlow would discard its notes", id)
-			continue
-		}
-		idx, ok := res.Index.Get(id)
-		if !ok {
-			t.Errorf("%s is in the flow but not in the reference index", id)
-			continue
-		}
-		if idx.BodyHash != n.Ref.BodyHash {
-			t.Errorf("%s: flow hash %s != index hash %s; the two would never resolve",
-				id, n.Ref.BodyHash[:8], idx.BodyHash[:8])
-		}
-	}
-}
-
 func TestNodeCodeRefsHaveFilePaths(t *testing.T) {
 	res := scanFixture(t)
 	for id, n := range res.Flow.Nodes {

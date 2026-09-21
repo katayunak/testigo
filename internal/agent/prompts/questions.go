@@ -84,3 +84,20 @@ Every question ID above must appear exactly once. If you genuinely cannot tell,
 omit ` + "`verdict`" + ` and say in ` + "`info`" + ` what would settle it.`)
 	return b.String()
 }
+
+const QuestionsPreamble = `
+## questions — what this repository needs answered
+
+1. The classification in the question is testigo's, made from the schema and the
+   Go type names. Disagree with it if the code says otherwise, and say so with a
+   file:line.
+2. Answer every question ID.
+3. A true/false question needs only the ` + "`verdict`" + ` boolean. A bare ` + "`true`" + ` is a
+   complete answer — do not justify it.
+4. Add ` + "`info`" + `, one line, when the verdict is ` + "`false`" + ` on a question that re-checks
+   something testigo already found in the source. Overturning a fact is the one
+   place an explanation is worth paying for.
+5. Answer about the BUSINESS RULE, not only about the implementation. Where the
+   two differ, that difference is the most valuable thing you can report.
+6. One sentence is the budget for a free-text answer.
+`

@@ -11,7 +11,6 @@ func candidate(kind, subject string, fields int) Candidate {
 		Subject: subject,
 		Prompt:  strings.Repeat("x", 4000),
 		Asks:    fields,
-		Stale:   true,
 	}
 }
 
@@ -28,25 +27,6 @@ func TestOutputIsWeightedFiveTimesInput(t *testing.T) {
 	c := Cost{Input: 100, Output: 100}
 	if got, want := c.Weighted(), 600; got != want {
 		t.Fatalf("weighted = %d, want %d: an answer costs five times what the question does", got, want)
-	}
-}
-
-func TestAnAnswerNothingReadsIsNotBought(t *testing.T) {
-	d := Demand{Runnable: 5, States: map[string][]string{}, Seams: map[string][]string{}}
-	p := Make([]Candidate{candidate("paymentKind", "stateless", 2)}, d, 0)
-
-	c, ok := find(p, "paymentKind", "stateless")
-	if !ok {
-		t.Fatal("candidate vanished")
-	}
-	if c.Chosen {
-		t.Error("bought an answer no code path reads")
-	}
-	if !strings.Contains(c.Why, "nothing reads") {
-		t.Errorf("the reason has to say why, got %q", c.Why)
-	}
-	if c.Cost.Weighted() != 0 {
-		t.Errorf("a skipped ask costs nothing, got %s", c.Cost)
 	}
 }
 
@@ -123,22 +103,6 @@ func TestAnUnregisteredKindIsKeptRatherThanSilentlyDropped(t *testing.T) {
 	}
 }
 
-func TestUnreadFieldsAreReportedAsTrimmable(t *testing.T) {
-	d := Demand{Runnable: 1, States: map[string][]string{}, Seams: map[string][]string{}}
-	p := Make([]Candidate{candidate("notes", "pkg#Fn", 5)}, d, 0)
-
-	c, _ := find(p, "notes", "pkg#Fn")
-	if !c.Chosen {
-		t.Fatal("notes.step is read, so the ask is worth making")
-	}
-	if c.Trimmable.Weighted() == 0 {
-		t.Error("four of the five note fields are unread; that should show as trimmable")
-	}
-	if !strings.Contains(p.Explain(), "STILL PAID FOR") {
-		t.Error("explain must surface what is bought and never read")
-	}
-}
-
 func TestEveryRegisteredFieldNamesItsReader(t *testing.T) {
 	for _, f := range Registry() {
 		if f.Use != Unread && f.Reader == "" {
@@ -147,5 +111,53 @@ func TestEveryRegisteredFieldNamesItsReader(t *testing.T) {
 		if f.Use == Unread && f.Reader != "" {
 			t.Errorf("%s names reader %q but is marked unread", f.Path, f.Reader)
 		}
+	}
+}
+
+func withRegistry(t *testing.T, fields []Field) {
+	t.Helper()
+	saved := registry
+	registry = fields
+	t.Cleanup(func() { registry = saved })
+}
+
+func TestAnAnswerNothingReadsIsNotBought(t *testing.T) {
+	withRegistry(t, []Field{{Path: "sample.detail", Use: Unread}})
+	d := Demand{Runnable: 5, States: map[string][]string{}, Seams: map[string][]string{}}
+	p := Make([]Candidate{candidate("sample", "x", 1)}, d, 0)
+
+	c, ok := find(p, "sample", "x")
+	if !ok {
+		t.Fatal("candidate vanished")
+	}
+	if c.Chosen {
+		t.Error("bought an answer no code path reads")
+	}
+	if !strings.Contains(c.Why, "nothing reads") {
+		t.Errorf("the reason has to say why, got %q", c.Why)
+	}
+	if c.Cost.Weighted() != 0 {
+		t.Errorf("a skipped ask costs nothing, got %s", c.Cost)
+	}
+}
+
+func TestUnreadFieldsAreReportedAsTrimmable(t *testing.T) {
+	withRegistry(t, []Field{
+		{Path: "sample.label", Use: Live, Reader: "report"},
+		{Path: "sample.purpose", Use: Unread},
+		{Path: "sample.effects", Use: Unread},
+	})
+	d := Demand{Runnable: 1, States: map[string][]string{}, Seams: map[string][]string{}}
+	p := Make([]Candidate{candidate("sample", "x", 3)}, d, 0)
+
+	c, _ := find(p, "sample", "x")
+	if !c.Chosen {
+		t.Fatal("sample.label is read, so the ask is worth making")
+	}
+	if c.Trimmable.Weighted() == 0 {
+		t.Error("two of the three fields are unread; that should show as trimmable")
+	}
+	if !strings.Contains(p.Explain(), "STILL PAID FOR") {
+		t.Error("explain must surface what is bought and never read")
 	}
 }

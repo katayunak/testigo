@@ -7,14 +7,16 @@ import (
 
 func boolp(b bool) *bool { return &b }
 
-func TestAnswerShapeFollowsTheMode(t *testing.T) {
+func TestAnswerShapeFollowsWhatTheQuestionCites(t *testing.T) {
 	cases := []struct {
 		name string
 		q    *Question
 		want string
 	}{
-		{"recheck is bounded and says when to explain",
-			Recheck("r", "is it?", "why"), "true/false (one line only if false)"},
+		{"a question citing a found fact is bounded and says when to explain",
+			Discover("r", "is it?", "why").Bool().
+				Citing(Proof{Symbol: "domain.Money", At: "domain/payment.go:12"}),
+			"true/false (one line only if false)"},
 		{"a discovered true/false costs one token",
 			Discover("d", "is it?", "why").Bool(), "true/false"},
 		{"an open question is capped at one sentence",
@@ -30,7 +32,8 @@ func TestAnswerShapeFollowsTheMode(t *testing.T) {
 }
 
 func TestATrueVerdictNeedsNoExplanation(t *testing.T) {
-	q := *Recheck("money.type", "is Money the money type?", "everything downstream reads this")
+	q := *Discover("money.type", "is Money the money type?", "everything downstream reads this").Bool().
+		Citing(Proof{Symbol: "domain.Money", At: "domain/payment.go:12"})
 	a := &QuestionAnswer{Verdict: boolp(true)}
 	if err := a.Validate(q); err != nil {
 		t.Fatalf("a bare true must be a complete answer, got %v", err)
@@ -38,8 +41,8 @@ func TestATrueVerdictNeedsNoExplanation(t *testing.T) {
 }
 
 func TestAFalseRecheckMustSayWhatIsTrueInstead(t *testing.T) {
-	q := *Recheck("money.type", "is Money the money type?", "everything downstream reads this",
-		Proof{Symbol: "domain.Money", At: "domain/payment.go:12"})
+	q := *Discover("money.type", "is Money the money type?", "everything downstream reads this").Bool().
+		Citing(Proof{Symbol: "domain.Money", At: "domain/payment.go:12"})
 
 	bare := &QuestionAnswer{Verdict: boolp(false)}
 	err := bare.Validate(q)
@@ -81,8 +84,8 @@ func TestAnOpenQuestionCannotComeBackEmpty(t *testing.T) {
 }
 
 func TestReferencesReachThePrompt(t *testing.T) {
-	q := Recheck("idem.key", "is OrderID the key?", "a retry test needs a key to retry with",
-		Proof{Symbol: "Order.OrderID", At: "domain/order.go:12"}).
+	q := Discover("idem.key", "is OrderID the key?", "a retry test needs a key to retry with").Bool().
+		Citing(Proof{Symbol: "Order.OrderID", At: "domain/order.go:12"}).
 		At("api/server.go").
 		Knowing("the value arrives in the request body")
 

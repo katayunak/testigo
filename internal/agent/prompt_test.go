@@ -6,20 +6,10 @@ import (
 
 	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/agent/prompts"
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
 func TestNothingConstantAcrossAKindIsRepeatedPerQuestion(t *testing.T) {
-	f := fixtureFlow()
-
-	f.Seams = append(f.Seams,
-		flowEntity.Seam{In: f.Seams[0].In, Kind: flowEntity.SeamHTTP,
-			Target: "(example.com/paysvc/psp.Gateway).Capture", Line: 71,
-			Injectable: true, Iface: "example.com/paysvc/psp.Gateway"},
-		flowEntity.Seam{In: f.Seams[0].In, Kind: flowEntity.SeamQueue,
-			Target: "(example.com/paysvc/bus.Publisher).Publish", Line: 80,
-			Injectable: true, Iface: "example.com/paysvc/bus.Publisher"},
-	)
+	f := batchedFixture()
 
 	checked := 0
 	for _, b := range Batches(Plan(f, domain.NewAgentResponse(), domain.RoundUnderstand)) {

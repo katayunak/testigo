@@ -2,15 +2,14 @@ package testPlan
 
 import (
 	"fmt"
-	"github.com/katayunak/testigo/internal/testPlan/planEntity"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"strings"
 )
 
-func CheckSize(filename, src string, want planEntity.Size) []string {
-	if want != planEntity.SizeSmall {
+func CheckSize(filename, src string, want Size) []string {
+	if want != SizeSmall {
 		return nil
 	}
 	fset := token.NewFileSet()

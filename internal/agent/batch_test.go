@@ -12,7 +12,7 @@ import (
 )
 
 func TestBatchingCutsTurnsNotJustBytes(t *testing.T) {
-	f := fixtureFlow()
+	f := batchedFixture()
 	asks := Plan(f, domain.NewAgentResponse(), domain.RoundUnderstand)
 	if len(asks) < 4 {
 		t.Fatalf("fixture produced %d asks; too few to say anything about batching", len(asks))
@@ -38,7 +38,7 @@ func TestBatchingCutsTurnsNotJustBytes(t *testing.T) {
 }
 
 func TestBatchPromptNamesEveryAnswerKey(t *testing.T) {
-	f := fixtureFlow()
+	f := batchedFixture()
 	for _, b := range Batches(Plan(f, domain.NewAgentResponse(), domain.RoundUnderstand)) {
 		if b.Single() {
 			continue

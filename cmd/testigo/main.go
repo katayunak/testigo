@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -9,17 +8,19 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/katayunak/testigo/internal"
 	"github.com/katayunak/testigo/internal/agent"
 	"github.com/katayunak/testigo/internal/agent/domain"
+	"github.com/katayunak/testigo/internal/agent/prompts"
 	"github.com/katayunak/testigo/internal/config"
 	"github.com/katayunak/testigo/internal/report"
 	"github.com/katayunak/testigo/internal/scanningFlow"
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
-	"github.com/katayunak/testigo/internal/storage"
-	"github.com/katayunak/testigo/internal/testPlan/planEntity"
+	"github.com/katayunak/testigo/internal/testPlan"
+)
 
-	model "github.com/katayunak/testigo/internal"
+const (
+	phaseScanningTheFlow = "ScanningTheFlow"
+	phaseAskingTheAgent  = "AskingTheAgent"
 )
 
 func main() {
@@ -45,6 +46,7 @@ phase 1 · ScanningTheFlow
   testigo collect [dir]   read the answers back, validate them, apply them
   testigo cases   [dir]   list the test plan and what it would cost, spending nothing
   testigo report  [dir]   everything found so far, and what it cost to find
+                          --ask writes the prompt for an agent to produce REPORT.md
   testigo rules   [dir]   write a starter testigo/rules.json: what money movement means here
 
 Phase 1 (ScanningTheFlow) reads only. Everything testigo writes goes in testigo/;
@@ -62,6 +64,7 @@ func run(args []string) error {
 	round := fs.Int("round", 1, "which round of questions to write: 1 collects context, 2 asks for tests")
 	budget := fs.Int("budget", 0, "stop planning asks once this many weighted tokens are committed; 0 means no ceiling")
 	explain := fs.Bool("explain", false, "print what the planner chose, what it skipped and why, then carry on")
+	askFor := fs.Bool("ask", false, "report: write the prompt that has an agent produce testigo/REPORT.md")
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
@@ -94,7 +97,7 @@ func run(args []string) error {
 	case "rules":
 		return cmdRules(root)
 	case "report":
-		return cmdReport(root)
+		return cmdReport(root, *askFor)
 	default:
 		fmt.Print(usage)
 		return fmt.Errorf("unknown command %q", cmd)
@@ -140,20 +143,15 @@ func cmdScan(root string) error {
 		return err
 	}
 
-	prev, err := storage.Load(root)
-	if err != nil && !errors.Is(err, storage.ErrNoSidecar) {
+	if err := config.SaveFlow(root, res.Flow); err != nil {
 		return err
 	}
-	stats := storage.Merge(prev, res.Flow, res.Index)
-	if err := storage.Save(root, res.Flow); err != nil {
-		return err
-	}
-	printSummary(res.Flow, stats, storage.Path(root))
+	printSummary(res.Flow, config.FlowPath(root))
 	return nil
 }
 
 func cmdFlow(root string) error {
-	f, err := storage.Load(root)
+	f, err := config.LoadFlow(root)
 	if err != nil {
 		return fmt.Errorf("%w — run 'testigo scan' first", err)
 	}
@@ -166,8 +164,8 @@ func cmdFlow(root string) error {
 	return nil
 }
 
-func printSummary(f *flowEntity.Flow, stats storage.MergeStats, path string) {
-	fmt.Printf("phase       1 · %s\n", internal.PhaseScanningTheFlow)
+func printSummary(f *flowEntity.Flow, path string) {
+	fmt.Printf("phase       1 · %s\n", phaseScanningTheFlow)
 	fmt.Printf("module      %s\n", f.Module)
 	fmt.Printf("entries     %d\n", len(f.Entries))
 	fmt.Printf("nodes       %d functions reachable from the entry points\n", len(f.Nodes))
@@ -184,7 +182,6 @@ func printSummary(f *flowEntity.Flow, stats storage.MergeStats, path string) {
 	for _, m := range f.States {
 		fmt.Printf("states      %s: %d states, %d write sites\n", m.Type, len(m.States), len(m.Writes))
 	}
-	fmt.Printf("notes       %s\n", stats)
 	if f.GeneratedFiles > 0 {
 
 		fmt.Printf("generated   %d file(s) marked DO NOT EDIT; %d finding(s) from them not reported\n",
@@ -222,9 +219,6 @@ func printSummary(f *flowEntity.Flow, stats storage.MergeStats, path string) {
 	if con > 0 {
 		unknown = append(unknown, "how the uninjectable seams behave under failure")
 	}
-	if stats.NeedsAgent() > 0 {
-		unknown = append(unknown, fmt.Sprintf("what %d unannotated step(s) mean in business terms", stats.NeedsAgent()))
-	}
 	if len(unknown) > 0 {
 		fmt.Printf("\nstill unknown (phase 2 asks an agent):\n")
 		for _, u := range unknown {
@@ -235,19 +229,12 @@ func printSummary(f *flowEntity.Flow, stats storage.MergeStats, path string) {
 	_ = sort.Strings
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func cmdAsk(root string, roundNum int, budget int, explain bool) error {
-	flow, err := storage.Load(root)
+	flow, err := config.LoadFlow(root)
 	if err != nil {
 		return fmt.Errorf("%w — run 'testigo scan' first", err)
 	}
-	answers, err := agent.LoadAgentResponse(storage.Dir(root))
+	answers, err := agent.LoadAgentResponse(config.Dir(root))
 	if err != nil {
 		return err
 	}
@@ -274,7 +261,7 @@ func cmdAsk(root string, roundNum int, budget int, explain bool) error {
 		fmt.Println("nothing to ask — every question for this round is already answered")
 		return nil
 	}
-	pack, err := agent.Write(storage.Dir(root), round, asks, agent.Preamble(flow, round))
+	pack, err := agent.Write(config.Dir(root), round, asks, agent.Preamble(flow, round))
 	if err != nil {
 		return err
 	}
@@ -283,15 +270,15 @@ func cmdAsk(root string, roundNum int, budget int, explain bool) error {
 	for _, a := range asks {
 		byKind[a.Kind]++
 	}
-	fmt.Printf("phase       2 · %s\n", model.PhaseAskingTheAgent)
+	fmt.Printf("phase       2 · %s\n", phaseAskingTheAgent)
 	fmt.Printf("round       %d (%s)\n", roundNum, round)
 	fmt.Printf("questions   %d\n", len(asks))
 
 	shown := map[domain.Kind]bool{}
 	for _, k := range []domain.Kind{
 		domain.KindMoneyModel, domain.KindMainEntity,
-		domain.KindStateRoles, domain.KindTransitions,
-		domain.KindExternalEffect, domain.KindNotes,
+		domain.KindStateRoles,
+		domain.KindExternalEffect,
 		domain.KindTestCase,
 	} {
 		shown[k] = true
@@ -331,11 +318,11 @@ func cmdAsk(root string, roundNum int, budget int, explain bool) error {
 }
 
 func cmdCollect(root string) error {
-	flow, err := storage.Load(root)
+	flow, err := config.LoadFlow(root)
 	if err != nil {
 		return fmt.Errorf("%w — run 'testigo scan' first", err)
 	}
-	answers, err := agent.LoadAgentResponse(storage.Dir(root))
+	answers, err := agent.LoadAgentResponse(config.Dir(root))
 	if err != nil {
 		return err
 	}
@@ -343,19 +330,19 @@ func cmdCollect(root string) error {
 	if err != nil {
 		return err
 	}
-	pack, err := agent.ReadPack(storage.Dir(root))
+	pack, err := agent.ReadPack(config.Dir(root))
 	if err != nil {
 		return fmt.Errorf("%w — run 'testigo ask' first", err)
 	}
 
 	_ = rules
 
-	got, err := agent.Collect(storage.Dir(root), flow, answers, pack.Asks)
+	got, err := agent.Collect(config.Dir(root), flow, answers, pack.Asks)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("phase       2 · %s\n", model.PhaseAskingTheAgent)
+	fmt.Printf("phase       2 · %s\n", phaseAskingTheAgent)
 	fmt.Printf("round       %d\n", int(pack.Round))
 	fmt.Printf("answers     %s\n\n", got)
 
@@ -369,15 +356,15 @@ func cmdCollect(root string) error {
 		fmt.Println()
 	}
 
-	if err := agent.SaveAgentResponse(storage.Dir(root), answers); err != nil {
+	if err := agent.SaveAgentResponse(config.Dir(root), answers); err != nil {
 		return err
 	}
-	if err := storage.Save(root, flow); err != nil {
+	if err := config.SaveFlow(root, flow); err != nil {
 		return err
 	}
 
 	if len(got.Cases) > 0 {
-		return applyGeneratedTests(root, got.Cases)
+		return applyGeneratedTests(root, config.Dir(root), answers, got.Cases)
 	}
 	if reason := agent.BlockedReason(flow, answers); reason != "" {
 		fmt.Printf("round 2 not ready: %s\n", reason)
@@ -387,15 +374,20 @@ func cmdCollect(root string) error {
 	return nil
 }
 
-func applyGeneratedTests(root string, cases []*domain.CaseAnswer) error {
-	var ran []struct {
-		file  string
-		names []string
-	}
+func applyGeneratedTests(root, sidecarDir string, answers *domain.AgentResponse, cases []*domain.CaseAnswer) error {
 	byFile := map[string][]string{}
+	runs := map[string]*domain.TestRun{}
+	var ids []string
 
 	for _, c := range cases {
+		r := &domain.TestRun{CaseID: c.CaseID,
+			Func: c.FuncName, ExpectedToFail: c.ExpectedToFail}
+		runs[c.CaseID] = r
+		ids = append(ids, c.CaseID)
+
 		if !c.Written() {
+			r.Status = "blocked"
+			r.Reason = c.BlockedReason
 			fmt.Printf("  blocked   %s\n            %s\n", c.CaseID, c.BlockedReason)
 			if c.Needed != "" {
 				fmt.Printf("            needs: %s\n", c.Needed)
@@ -404,18 +396,26 @@ func applyGeneratedTests(root string, cases []*domain.CaseAnswer) error {
 		}
 		out, err := agent.WriteTest(root, c)
 		if err != nil {
+			r.Status = "refused"
+			r.Reason = err.Error()
 			fmt.Printf("  REFUSED   %s: %v\n", c.CaseID, err)
 			continue
 		}
+		r.File = out.Path
 		switch {
 		case !out.Compiles:
+			r.Status = "no_build"
+			r.Output = trimOutput(out.Output)
 			fmt.Printf("  no build  %s -> %s\n%s\n", c.CaseID, out.Path, indentBlock(out.Output))
 			fmt.Println("            feed that output back and re-answer this one case")
 			continue
 		case !out.Vets:
+			r.Status = "vet_fail"
+			r.Output = trimOutput(out.Output)
 			fmt.Printf("  vet fail  %s -> %s\n%s\n", c.CaseID, out.Path, indentBlock(out.Output))
 			continue
 		}
+		r.Status = "written"
 		fmt.Printf("  written   %-34s %s\n", c.CaseID, out.Path)
 		if c.ExpectedToFail != "" {
 			fmt.Printf("            expected to fail: %s\n", c.ExpectedToFail)
@@ -423,27 +423,69 @@ func applyGeneratedTests(root string, cases []*domain.CaseAnswer) error {
 		byFile[out.Path] = append(byFile[out.Path], c.FuncName)
 	}
 
-	for file, names := range byFile {
-		ran = append(ran, struct {
-			file  string
-			names []string
-		}{file, names})
-	}
-	if len(ran) == 0 {
+	if len(byFile) == 0 {
 		fmt.Println("\nnothing compiled — no tests were run")
-		return nil
-	}
-
-	fmt.Printf("\nrunning with -race...\n\n")
-	for _, r := range ran {
-		out, passed := agent.RunTests(root, r.file, r.names)
-		fmt.Println(out)
-		if !passed {
-			fmt.Println("A red result may be the point. Check it against any")
-			fmt.Println("expected-to-fail note above before assuming the test is wrong.")
+	} else {
+		fmt.Printf("\nrunning with -race...\n\n")
+		var files []string
+		for f := range byFile {
+			files = append(files, f)
+		}
+		sort.Strings(files)
+		for _, file := range files {
+			out, passed := agent.RunTests(root, file, byFile[file])
+			fmt.Println(out)
+			failed := failedNames(out)
+			for _, r := range runs {
+				if r.File != file || r.Status != "written" {
+					continue
+				}
+				ok := passed
+				if !passed && len(failed) > 0 {
+					ok = !failed[r.Func]
+				}
+				r.Passed = &ok
+				if !ok {
+					r.Output = trimOutput(out)
+				}
+			}
+			if !passed {
+				fmt.Println("A red result may be the point. Check it against any")
+				fmt.Println("expected-to-fail note above before assuming the test is wrong.")
+			}
 		}
 	}
-	return nil
+
+	sort.Strings(ids)
+	answers.TestRuns = nil
+	for _, id := range ids {
+		answers.TestRuns = append(answers.TestRuns, *runs[id])
+	}
+	return agent.SaveAgentResponse(sidecarDir, answers)
+}
+
+func failedNames(out string) map[string]bool {
+	m := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "--- FAIL:") {
+			continue
+		}
+		name := strings.TrimSpace(strings.TrimPrefix(line, "--- FAIL:"))
+		if i := strings.IndexAny(name, " \t("); i > 0 {
+			name = name[:i]
+		}
+		m[name] = true
+	}
+	return m
+}
+
+func trimOutput(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 1200 {
+		return s[:1200] + "\n… truncated"
+	}
+	return s
 }
 
 func indentBlock(s string) string {
@@ -462,11 +504,11 @@ func thousands(n int) string {
 }
 
 func cmdCases(root string) error {
-	flow, err := storage.Load(root)
+	flow, err := config.LoadFlow(root)
 	if err != nil {
 		return fmt.Errorf("%w — run 'testigo scan' first", err)
 	}
-	answers, err := agent.LoadAgentResponse(storage.Dir(root))
+	answers, err := agent.LoadAgentResponse(config.Dir(root))
 	if err != nil {
 		return err
 	}
@@ -476,7 +518,7 @@ func cmdCases(root string) error {
 	}
 	cases := agent.Cases(flow, answers, rules)
 
-	var runnable, blocked []planEntity.TestCase
+	var runnable, blocked []testPlan.TestCase
 	for _, c := range cases {
 		if c.Runnable() {
 			runnable = append(runnable, c)
@@ -521,10 +563,10 @@ func cmdRules(root string) error {
 		return err
 	}
 	fmt.Printf("wrote %s\n\n", p)
-	fmt.Println("Everything in it is optional. The field worth the most thought is")
-	fmt.Println("money_movement.external_signal — set it only if money moves in this system")
-	fmt.Println("because a message was SENT, not because a row changed. That single fact")
-	fmt.Println("changes which tests make sense.")
+	fmt.Println("Both fields are optional. money_movement.symbols is the one worth")
+	fmt.Println("thought: name the function that actually commits money and testigo")
+	fmt.Println("stops guessing which one it is. skip turns off catalogue scenarios")
+	fmt.Println("that do not apply here, with the reason recorded beside each.")
 	return nil
 }
 
@@ -571,17 +613,60 @@ func cmdEntry(root string, args []string) error {
 	return nil
 }
 
-func cmdReport(root string) error {
-	flow, err := storage.Load(root)
+func cmdReport(root string, askFor bool) error {
+	flow, err := config.LoadFlow(root)
 	if err != nil {
 		return fmt.Errorf("%w — run 'testigo scan' first", err)
 	}
 
-	answers, _ := agent.LoadAgentResponse(storage.Dir(root))
+	answers, _ := agent.LoadAgentResponse(config.Dir(root))
 
-	asksDir := filepath.Join(storage.Dir(root), "asks")
-	ledger := report.Measure(asksDir, filepath.Join(storage.Dir(root), "answers"))
+	asksDir := filepath.Join(config.Dir(root), "asks")
+	ledger := report.Measure(asksDir, filepath.Join(config.Dir(root), "answers"))
 
-	fmt.Print(report.Report(flow, answers, ledger, asksDir))
+	if !askFor {
+		fmt.Print(report.Report(flow, answers, ledger, asksDir))
+		return nil
+	}
+
+	rules, err := config.LoadRules(root)
+	if err != nil {
+		return err
+	}
+	tok := prompts.Tokens{
+		AskTokens:    ledger.AskBytes / 4,
+		AnswerTokens: ledger.AnswerBytes / 4,
+		Prompts:      ledger.Prompts,
+	}
+	if ledger.Prompts > 1 {
+		tok.Saved = ledger.PreambleByes * (ledger.Prompts - 1) / 4
+	}
+
+	p := prompts.Report(flow, answers, agent.Cases(flow, answers, rules), tok)
+	p.Trim(agent.MaxPromptChars)
+	body := p.Render()
+
+	if err := os.MkdirAll(asksDir, 0o755); err != nil {
+		return err
+	}
+	path := filepath.Join(asksDir, "report.md")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return err
+	}
+
+	fmt.Printf("phase       3 · report\n")
+	fmt.Printf("prompt      %s  (~%s tokens)\n", path, kilo(len(body)/4))
+	fmt.Printf("tests       %d run(s) on record\n", len(answers.TestRuns))
+	fmt.Printf("findings    %d\n", len(flow.Findings))
+	fmt.Println()
+	fmt.Printf("Point your agent at %s.\n", path)
+	fmt.Println("It writes one file: testigo/REPORT.md")
 	return nil
+}
+
+func kilo(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }

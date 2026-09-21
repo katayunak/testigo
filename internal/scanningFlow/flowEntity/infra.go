@@ -3,10 +3,6 @@ package flowEntity
 type Infra struct {
 	Constraints []Constraint `json:"constraints,omitempty"`
 
-	Services []Service `json:"services,omitempty"`
-
-	Topics []Topic `json:"topics,omitempty"`
-
 	Tables []Table `json:"tables,omitempty"`
 
 	ForeignKeys []ForeignKey `json:"foreign_keys,omitempty"`
@@ -16,7 +12,17 @@ type Infra struct {
 	MigrationDirs []string `json:"migration_dirs,omitempty"`
 
 	MigrationFiles int `json:"migration_files,omitempty"`
+
+	MigrationTool string `json:"migration_tool,omitempty"`
+
+	MigrationsTotal int `json:"migrations_total,omitempty"`
+
+	MigrationsWithDown int `json:"migrations_with_down,omitempty"`
+
+	SchemaSources []string `json:"schema_sources,omitempty"`
 }
+
+func (i Infra) SchemaKnown() bool { return len(i.Tables) > 0 || len(i.Constraints) > 0 }
 
 type Table struct {
 	Name    string   `json:"name"`
@@ -45,7 +51,6 @@ type ForeignKey struct {
 
 type Check struct {
 	Table  string   `json:"table"`
-	Column string   `json:"column,omitempty"`
 	Expr   string   `json:"expr"`
 	Values []string `json:"values,omitempty"`
 	File   string   `json:"file"`
@@ -88,18 +93,4 @@ func (i Infra) CoversColumn(table, column string) (Constraint, bool) {
 		}
 	}
 	return Constraint{}, false
-}
-
-type Service struct {
-	Name  string `json:"name"`
-	Image string `json:"image"`
-	Kind  string `json:"kind"`
-	File  string `json:"file"`
-}
-
-type Topic struct {
-	Name       string `json:"name"`
-	Partitions int    `json:"partitions,omitempty"`
-	Replicas   int    `json:"replicas,omitempty"`
-	File       string `json:"file"`
 }

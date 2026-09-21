@@ -30,13 +30,15 @@ func Classify(f *flowEntity.Flow) Classification {
 		note(SpineDoubleEntry, 2, "columns named debit and credit")
 	}
 
-	if e.anyColumn("balance", "balance_cents", "credits", "points", "wallet_balance", "available_balance") {
+	if e.anyColumn("balance", "balance_cents", "credits", "points", "wallet_balance", "available_balance",
+		"blocked_balance", "pending_balance") {
 		note(SpineWallet, 3, "a mutable balance column")
 	}
 	if e.anyTable("wallets", "wallet", "balances", "user_balances") {
 		note(SpineWallet, 2, "a wallets or balances table")
 	}
-	if e.anySymbol("deductbalance", "addbalance", "creditwallet", "debitwallet", "updatebalance", "chargewallet") {
+	if e.anySymbol("deductbalance", "addbalance", "creditwallet", "debitwallet", "updatebalance", "chargewallet",
+		"coretransfer", "singletransfer", "deposit", "withdraw", "topup", "reclaim", "ensurewallet") {
 		note(SpineWallet, 2, "functions that add to and subtract from a balance")
 	}
 
@@ -290,16 +292,3 @@ func (e evidence) anyState(names ...string) bool {
 }
 
 func (e evidence) distinctCurrencies() bool { return len(e.currencies) > 1 }
-
-func Fields(f *flowEntity.Flow) []string {
-	e := gather(f)
-	out := make([]string, 0, len(e.fields)+len(e.columns))
-	for k := range e.fields {
-		out = append(out, k)
-	}
-	for k := range e.columns {
-		out = append(out, "col:"+k)
-	}
-	sort.Strings(out)
-	return out
-}

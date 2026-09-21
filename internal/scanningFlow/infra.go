@@ -4,15 +4,17 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
+	"sort"
 	"strings"
 
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"golang.org/x/tools/go/packages"
 )
 
-func Infra(root string) flowEntity.Infra {
+func Infra(pkgs []*packages.Package, root string) flowEntity.Infra {
 	var out flowEntity.Infra
 	seenDir := map[string]bool{}
+	sawSQLFile := false
 
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -45,31 +47,72 @@ func Infra(root string) flowEntity.Infra {
 			out.ForeignKeys = append(out.ForeignKeys, fks...)
 			out.Checks = append(out.Checks, checks...)
 			out.MigrationFiles++
+			sawSQLFile = true
 
 			if dir := filepath.Dir(rel); !seenDir[dir] {
 				seenDir[dir] = true
 				out.MigrationDirs = append(out.MigrationDirs, dir)
 			}
 
-		case name == "docker-compose.yml" || name == "docker-compose.yaml" || name == "compose.yml":
-			body, e := os.ReadFile(path)
-			if e == nil {
-				out.Services = append(out.Services, parseCompose(string(body), rel)...)
-			}
-
-		case strings.HasSuffix(name, ".yml"), strings.HasSuffix(name, ".yaml"),
-			strings.HasSuffix(name, ".json"), strings.HasSuffix(name, ".toml"):
-			if strings.Contains(rel, "testdata/") {
-				return nil
-			}
-			body, e := os.ReadFile(path)
-			if e == nil {
-				out.Topics = append(out.Topics, parseTopics(string(body), rel)...)
-			}
 		}
 
 		return nil
 	})
+
+	if sawSQLFile {
+		out.SchemaSources = append(out.SchemaSources, "sql files")
+	}
+
+	chunks, tool, withDown, total := sqlFromGo(pkgs, root)
+	out.MigrationTool = tool
+	out.MigrationsTotal = total
+	out.MigrationsWithDown = withDown
+
+	sawGoSQL := false
+	for _, c := range chunks {
+		if c.Down || isReversalOnly(c.SQL) {
+			continue
+		}
+		sawGoSQL = true
+		out.Constraints = append(out.Constraints, parseConstraints(c.SQL, c.File)...)
+		tables, fks, checks := parseSchema(c.SQL, c.File)
+		out.Tables = append(out.Tables, tables...)
+		out.ForeignKeys = append(out.ForeignKeys, fks...)
+		out.Checks = append(out.Checks, checks...)
+
+		if dir := filepath.Dir(c.File); !seenDir[dir] {
+			seenDir[dir] = true
+			out.MigrationDirs = append(out.MigrationDirs, dir)
+		}
+	}
+	if sawGoSQL {
+		out.MigrationFiles += len(chunks)
+		out.SchemaSources = append(out.SchemaSources, "sql inside go files")
+	}
+
+	tagTables, tagCons := schemaFromTags(pkgs, root)
+	have := map[string]bool{}
+	for _, t := range out.Tables {
+		have[t.Name] = true
+	}
+	added := false
+	for _, t := range tagTables {
+		if have[t.Name] {
+			continue
+		}
+		have[t.Name] = true
+		out.Tables = append(out.Tables, t)
+		added = true
+	}
+	for _, c := range tagCons {
+		out.Constraints = append(out.Constraints, c)
+		added = true
+	}
+	if added {
+		out.SchemaSources = append(out.SchemaSources, "orm struct tags")
+	}
+
+	sort.Strings(out.MigrationDirs)
 	return out
 }
 
@@ -108,73 +151,6 @@ func parseConstraints(sql, file string) []flowEntity.Constraint {
 		for _, pk := range rePrimaryKey.FindAllStringSubmatch(body, -1) {
 			add(table, pk[1], "primary_key", m[0])
 		}
-	}
-	return out
-}
-
-var (
-	reComposeService = regexp.MustCompile(`(?m)^  ([a-zA-Z0-9_-]+):\s*$`)
-	reComposeImage   = regexp.MustCompile(`(?m)^\s+image:\s*["']?([^"'\s]+)`)
-	reTopicName      = regexp.MustCompile(`(?i)(?:^|[\s"'])topic\w*\s*[:=]\s*["']?([a-zA-Z0-9._-]{3,})`)
-	rePartitions     = regexp.MustCompile(`(?i)partitions?\s*[:=]\s*["']?(\d+)`)
-	reReplicas       = regexp.MustCompile(`(?i)replica(?:tion)?[_-]?factor\s*[:=]\s*["']?(\d+)`)
-)
-
-func parseCompose(body, file string) []flowEntity.Service {
-	var out []flowEntity.Service
-	blocks := reComposeService.FindAllStringSubmatchIndex(body, -1)
-	for i, b := range blocks {
-		name := body[b[2]:b[3]]
-		end := len(body)
-		if i+1 < len(blocks) {
-			end = blocks[i+1][0]
-		}
-		image := ""
-		if m := reComposeImage.FindStringSubmatch(body[b[1]:end]); m != nil {
-			image = m[1]
-		}
-		out = append(out, flowEntity.Service{Name: name, Image: image, Kind: kindOfImage(image + " " + name), File: file})
-	}
-	return out
-}
-
-func kindOfImage(s string) string {
-	s = strings.ToLower(s)
-	for _, k := range []struct{ needle, kind string }{
-		{"postgres", "postgres"}, {"timescale", "postgres"}, {"mysql", "mysql"},
-		{"maria", "mysql"}, {"redis", "redis"}, {"kafka", "kafka"},
-		{"redpanda", "kafka"}, {"nats", "nats"}, {"rabbit", "rabbitmq"},
-		{"mongo", "mongo"}, {"elastic", "elasticsearch"}, {"etcd", "etcd"},
-		{"clickhouse", "clickhouse"}, {"cassandra", "cassandra"},
-	} {
-		if strings.Contains(s, k.needle) {
-			return k.kind
-		}
-	}
-	return "other"
-}
-
-func parseTopics(body, file string) []flowEntity.Topic {
-	names := reTopicName.FindAllStringSubmatch(body, -1)
-	if len(names) == 0 {
-		return nil
-	}
-	partitions, replicas := 0, 0
-	if m := rePartitions.FindStringSubmatch(body); m != nil {
-		partitions, _ = strconv.Atoi(m[1])
-	}
-	if m := reReplicas.FindStringSubmatch(body); m != nil {
-		replicas, _ = strconv.Atoi(m[1])
-	}
-	seen := map[string]bool{}
-	var out []flowEntity.Topic
-	for _, n := range names {
-		name := n[1]
-		if seen[name] || strings.Contains(name, "${") {
-			continue
-		}
-		seen[name] = true
-		out = append(out, flowEntity.Topic{Name: name, Partitions: partitions, Replicas: replicas, File: file})
 	}
 	return out
 }
