@@ -13,7 +13,6 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
-// one kindSet can represent several kinds at the same time
 type kindSet uint8
 
 const (
@@ -43,9 +42,6 @@ func (k kindSet) list() []flowEntity.SeamKind {
 	return out
 }
 
-// fromSeamKind bridges the reviewable table in patterns to the bitmask this file
-// uses internally. The table is written in terms a person edits; the bitmask is
-// written in terms a fixpoint iterates cheaply.
 func fromSeamKind(k flowEntity.SeamKind) kindSet {
 	switch k {
 	case flowEntity.SeamDB:
@@ -86,7 +82,6 @@ func pkgPathOf(fn *ssa.Function) string {
 	return ""
 }
 
-// directKind classifies a call by where it lands, with no reachability needed.
 func directKind(fn *ssa.Function) kindSet {
 	path := pkgPathOf(fn)
 	if path == "" {
@@ -117,14 +112,6 @@ func directKind(fn *ssa.Function) kindSet {
 	return k
 }
 
-// computeReach answers "if I call this function, what kinds of I/O can happen?"
-//
-// It is a fixpoint over the call graph. Without it, an interface call like
-// `s.ledger.Post(ctx, e)` is unclassifiable — the interface name tells you
-// nothing about whether the implementation opens a transaction or calls a
-// provider. With it, testigo can say "this invoke reaches the database" and
-// therefore "this is a database seam that IS injectable", which is exactly the
-// distinction that decides whether a failure test can be written at all.
 func computeReach(cg *callgraph.Graph, isLocal func(*ssa.Function) bool) map[*ssa.Function]kindSet {
 	reach := make(map[*ssa.Function]kindSet, len(cg.Nodes))
 	callers := make(map[*ssa.Function][]*ssa.Function, len(cg.Nodes))
@@ -141,25 +128,10 @@ func computeReach(cg *callgraph.Graph, isLocal func(*ssa.Function) bool) map[*ss
 		}
 	}
 
-	// Worklist propagation backwards along the call edges. The naive version is
-	// a fixpoint that rescans every node on every pass; on a repo that pulls in
-	// net/http and database/sql that is tens of thousands of nodes scanned
-	// dozens of times. Pushing only the callers of a node that actually changed
-	// makes this linear in the number of edges instead.
 	for len(work) > 0 {
 		fn := work[len(work)-1]
 		work = work[:len(work)-1]
 
-		// Propagation stops at the module boundary. A function we own
-		// contributes everything it can reach; a dependency contributes only
-		// what it does directly.
-		//
-		// Without this bound, CHA's over-approximation is fatal to the report:
-		// it assumes every implementation of an interface is a possible callee,
-		// so (error).Error unions the reach of every error type in the program,
-		// and the tool concludes that formatting an error message touches the
-		// database, the network and the random source. Correct as a bound,
-		// useless as information.
 		k := reach[fn]
 		if !isLocal(fn) {
 			k = directKind(fn)
@@ -177,8 +149,6 @@ func computeReach(cg *callgraph.Graph, isLocal func(*ssa.Function) bool) map[*ss
 	return reach
 }
 
-// factsFor extracts everything provable about one declared function, including
-// the closures nested inside it.
 func (g *graph) factsFor(fn *ssa.Function, a codeRef.CodeRef) (flowEntity.Facts, []flowEntity.Seam) {
 	var facts flowEntity.Facts
 	var seams []flowEntity.Seam
@@ -234,9 +204,6 @@ func (g *graph) factsFor(fn *ssa.Function, a codeRef.CodeRef) (flowEntity.Facts,
 	return facts, dedupeSeams(seams)
 }
 
-// sitesOf indexes the call graph edges leaving a function by their call site,
-// so an interface call can be resolved to its possible implementations in O(1)
-// instead of scanning every edge for every instruction.
 func (g *graph) sitesOf(fn *ssa.Function) map[ssa.CallInstruction][]*ssa.Function {
 	out := map[ssa.CallInstruction][]*ssa.Function{}
 	var add func(f *ssa.Function)
@@ -256,23 +223,10 @@ func (g *graph) sitesOf(fn *ssa.Function) map[ssa.CallInstruction][]*ssa.Functio
 	return out
 }
 
-// classify decides what a single call site is, and — the field that matters —
-// whether a test can replace it.
-//
-// Injectable is not a heuristic. SSA reports an interface method call as an
-// "invoke", and an invoke is by definition dispatched through a value the
-// caller was handed, which a test can substitute. A static call on a concrete
-// *sql.DB or http.DefaultClient cannot be intercepted at all without editing
-// the code under test.
 func (g *graph) classify(c *ssa.CallCommon, callees []*ssa.Function) (target string, kinds kindSet, injectable bool, iface string) {
 	if c.IsInvoke() {
 		iface = types.TypeString(c.Value.Type(), relativeTo)
 
-		// An injectable seam is an interface whose implementation lives in this
-		// module. (error).Error, io.Closer and http.ResponseWriter are calls
-		// through interfaces too, but substituting them tests nothing about the
-		// payment flow — they are language and framework plumbing, not the
-		// boundary where a provider times out.
 		ownIface := g.local[ifacePkg(c.Method)]
 		anyLocal := false
 		for _, callee := range callees {
@@ -297,15 +251,12 @@ func (g *graph) classify(c *ssa.CallCommon, callees []*ssa.Function) (target str
 	}
 	callee := c.StaticCallee()
 	if callee == nil {
-		return "", 0, false, "" // call through a func value; nothing provable
+		return "", 0, false, ""
 	}
 	if g.isLocal(callee) {
-		return "", 0, false, "" // it gets its own node in the flow
+		return "", 0, false, ""
 	}
-	// Direct classification only. Using transitive reach here was the same
-	// mistake as above at a different scale: net/url.URL.Query transitively
-	// touches almost everything in a large program, and reporting it as four
-	// separate seams is noise a user will learn to ignore.
+
 	if kinds = directKind(callee); kinds == 0 {
 		return "", 0, false, ""
 	}
@@ -321,10 +272,6 @@ func ifacePkg(m *types.Func) string {
 
 func relativeTo(p *types.Package) string { return p.Path() }
 
-// guessFromName is the last resort, used only when the call graph could not
-// reach a concrete implementation — typically because the real one lives behind
-// a build tag or is only wired up in main. Naming conventions are weak
-// proof, so anything found this way should be treated as a hint.
 func guessFromName(iface, method string) kindSet {
 	s := strings.ToLower(iface + "." + method)
 	switch {

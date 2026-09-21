@@ -27,14 +27,11 @@ func flowOf(ns ...*flowEntity.Node) *flowEntity.Flow {
 func indexOf(ns ...*flowEntity.Node) *codeRef.Index {
 	ix := codeRef.NewIndex()
 	for _, n := range ns {
-		ix.Add(n.Ref, 500) // large enough to be move-eligible
+		ix.Add(n.Ref, 500)
 	}
 	return ix
 }
 
-// The economics of the whole design come down to this test. If a repeat scanningFlow on
-// an unchanged repo re-asks an agent about every function, testigo costs money
-// every run and nobody will run it in CI.
 func TestUnchangedRepoNeedsNoAgent(t *testing.T) {
 	prev := flowOf(
 		node("pay/api", "(*S).Create", "h1", "accept request"),
@@ -53,10 +50,6 @@ func TestUnchangedRepoNeedsNoAgent(t *testing.T) {
 	}
 }
 
-// A changed function must NOT keep its old notes. This is the safety half of
-// the trade: a note that describes the previous body is not proof about the
-// new one, and a plausible-but-wrong description is more dangerous in a report
-// than an admitted gap.
 func TestChangedFunctionDropsItsNotes(t *testing.T) {
 	prev := flowOf(node("pay/api", "(*S).process", "h2", "reserve funds"))
 	changed := node("pay/api", "(*S).process", "h2-EDITED", "")
@@ -74,7 +67,6 @@ func TestChangedFunctionDropsItsNotes(t *testing.T) {
 	}
 }
 
-// A rename keeps the notes and rewrites the codeRef.
 func TestRenameCarriesNotesForward(t *testing.T) {
 	prev := flowOf(node("pay/api", "(*S).process", "h2", "reserve funds"))
 	renamed := node("pay/api", "(*S).handle", "h2", "")
@@ -89,8 +81,6 @@ func TestRenameCarriesNotesForward(t *testing.T) {
 	}
 }
 
-// Deleted code must not silently take its notes with it. A human should see
-// that a step named "reverse the hold" no longer exists anywhere.
 func TestDeletedCodeIsQuarantinedNotDropped(t *testing.T) {
 	prev := flowOf(node("pay/api", "(*S).compensate", "h9", "reverse the hold"))
 	next := flowOf()
@@ -124,9 +114,6 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
-// A sidecar written by a newer binary must be refused, not misread. Silently
-// misinterpreting it would produce a confidently wrong report, which is the one
-// failure mode a testing tool cannot afford.
 func TestSchemaMismatchIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(Dir(dir), 0o755); err != nil {

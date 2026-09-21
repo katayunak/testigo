@@ -10,14 +10,6 @@ import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// Infra reads the environment the code expects, from the files that describe it.
-//
-// Deliberately regex based and deliberately shallow. A real SQL parser would be
-// more correct and would take a week; these patterns cover the shape that
-// migration tools actually emit, and anything they miss is visible as an absent
-// row rather than a wrong one. The rule everywhere in testigo applies here too:
-// a heuristic that reports nothing is recoverable, a heuristic that reports
-// something false is not.
 func Infra(root string) flowEntity.Infra {
 	var out flowEntity.Infra
 	seenDir := map[string]bool{}
@@ -82,11 +74,10 @@ func Infra(root string) flowEntity.Infra {
 }
 
 var (
-	// CREATE UNIQUE INDEX ... ON table (a, b)
 	reUniqueIndex = regexp.MustCompile(`(?is)create\s+unique\s+index\s+(?:concurrently\s+)?(?:if\s+not\s+exists\s+)?\S+\s+on\s+([\w."]+)\s*\(([^)]*)\)`)
-	// ALTER TABLE t ADD CONSTRAINT c UNIQUE (a, b)
+
 	reUniqueConstraint = regexp.MustCompile(`(?is)alter\s+table\s+([\w."]+)\s+add\s+constraint\s+\S+\s+unique\s*\(([^)]*)\)`)
-	// inline: CREATE TABLE t ( ... UNIQUE (a) ... )  /  PRIMARY KEY (a)
+
 	reCreateTable  = regexp.MustCompile(`(?is)create\s+table\s+(?:if\s+not\s+exists\s+)?([\w."]+)\s*\((.*?)\n\s*\)\s*;`)
 	reInlineUnique = regexp.MustCompile(`(?i)\bunique\s*\(([^)]*)\)`)
 	rePrimaryKey   = regexp.MustCompile(`(?i)\bprimary\s+key\s*\(([^)]*)\)`)
@@ -200,7 +191,7 @@ func splitColumns(s string) []string {
 	var out []string
 	for _, part := range strings.Split(s, ",") {
 		c := cleanIdent(part)
-		// index expressions like lower(email) are not plain columns
+
 		if c == "" || strings.Contains(c, "(") {
 			continue
 		}

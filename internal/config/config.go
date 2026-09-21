@@ -11,46 +11,22 @@ import (
 )
 
 const (
-	// DirName is the one directory testigo owns inside a repository.
-	//
-	// Everything it writes lives here: the config, the rules, the sidecar, the
-	// prompt pack and the answers. One visible directory beats four scattered
-	// files, two of which used to be hidden — a dot-directory is easy to forget
-	// you have, and the pack inside it is something you are meant to READ.
 	DirName = "testigo"
 
-	// FileName is the config, inside DirName.
 	FileName = "config.json"
 )
 
-// Dir is testigo's directory inside a repository.
 func Dir(root string) string { return filepath.Join(root, DirName) }
 
-// Path is the config file.
 func Path(root string) string { return filepath.Join(Dir(root), FileName) }
 
-// legacy paths, from before everything moved under testigo/. Kept only so the
-// error message can tell someone exactly what to move, rather than reporting a
-// missing file they can see with their own eyes.
 const (
 	legacyConfig = "testigo.json"
 	legacyRules  = "testigo.rules.json"
 	legacyDir    = ".testigo"
 )
 
-// Config is the entry points, and nothing else.
-//
-// There used to be a `patterns` field here, holding Go package patterns so a
-// large repository could load less. It is gone, and the reason is worth keeping:
-// narrowing the load is a knob whose misuse is SILENT. Exclude a package the
-// flow actually calls into and that call becomes invisible — the graph simply
-// stops there, and the report looks complete. Trading a correct answer for
-// twenty seconds is a bad trade for a tool whose only product is trust.
-//
-// If scan time ever becomes a real problem, the fix is caching what did not
-// change, not looking at less code.
 type Config struct {
-	// Entries are the starting points of the payment flow. Plural on purpose.
 	Entries []Entry `json:"entries"`
 }
 
@@ -63,9 +39,7 @@ type Entry struct {
 func Load(root string) (*Config, error) {
 	b, err := os.ReadFile(Path(root))
 	if os.IsNotExist(err) {
-		// Everything testigo writes moved under testigo/. If the old layout is
-		// still on disk, say exactly what to move rather than reporting a
-		// missing file the person can plainly see is present.
+
 		if _, old := os.Stat(filepath.Join(root, legacyConfig)); old == nil {
 			return nil, fmt.Errorf(
 				"testigo now keeps everything in one directory.\n\n"+
@@ -90,9 +64,6 @@ func Load(root string) (*Config, error) {
 	if err := json.Unmarshal(stripComments(b), &c); err != nil {
 		return nil, fmt.Errorf("%s: %w", FileName, err)
 	}
-	// An empty list is valid on disk: `testigo init` writes one, and
-	// `testigo entry add` exists to fill it. Only the commands that need to WALK
-	// the flow require entries, and they say so themselves.
 
 	for i, e := range c.Entries {
 		if e.Pkg == "" || e.Symbol == "" {
@@ -142,8 +113,6 @@ func (c *Config) EntryPoints() []flowEntity.EntryPoint {
 	return out
 }
 
-// Example is written by `testigo init` so a first-time user has something to
-// edit rather than a blank file and a manual to read.
 const Example = `{
   // Every function where a payment flow can START.
   //

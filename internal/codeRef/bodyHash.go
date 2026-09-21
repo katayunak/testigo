@@ -8,11 +8,6 @@ import (
 	"io"
 )
 
-// StructuralHash hashes the shape and semantic content of a function's
-// signature and body. It returns the hash and the number of AST nodeCounts walked,
-// which callers use to decide whether the function is distinctive enough to be
-// tracked across a rename
-
 func StructuralHash(decl *ast.FuncDecl) (string, int) {
 	h := sha256.New()
 	n := 0
@@ -38,8 +33,7 @@ func writeStructure(w io.Writer, root ast.Node) int {
 
 		count++
 		switch t := n.(type) {
-		// Comments carry no behavior, skipping them here is what makes the
-		// hash survive documentation edits and testigo's own annotations
+
 		case *ast.Comment, *ast.CommentGroup:
 			return false
 

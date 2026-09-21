@@ -7,31 +7,6 @@ import (
 	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-// This file reads the rest of a migration.
-//
-// infra.go already read the UNIQUE and PRIMARY KEY rules, because those decide
-// whether a duplicate request can be inserted twice. Everything else in the file
-// was thrown away, and that was a waste of the most useful text in the
-// repository. A migration is the only place where the shape of the data is
-// stated once, in full, by a person who meant it.
-//
-// Three things come out of it, and each one buys something specific:
-//
-//	columns   an integration test has to insert a row the database will accept.
-//	          NOT NULL with no default means every insert must set it.
-//	CHECK     an invariant somebody already wrote, in a language the database
-//	          enforces. CHECK (balance >= 0) is a property test for free, and
-//	          CHECK (status IN (...)) is the database's own list of states,
-//	          which can be compared with the constants the Go code declares.
-//	foreign   the order rows must be inserted in, and what a delete does to the
-//	keys      rows below. A fixture that inserts a child first just fails.
-//
-// All of it is regex, not a SQL parser. That is a deliberate trade: a real
-// parser is a dependency and a dialect problem, and being wrong here costs one
-// line of a prompt rather than a wrong answer. Anything not recognised is
-// skipped silently, so a weird migration produces less information rather than
-// bad information.
-
 var (
 	reCreateTableFull = regexp.MustCompile(`(?is)create\s+table\s+(?:if\s+not\s+exists\s+)?([\w."]+)\s*\((.*?)\n\s*\)[^;]*;`)
 	reAlterFK         = regexp.MustCompile(`(?is)alter\s+table\s+(?:only\s+)?([\w."]+)\s+add\s+constraint\s+\S+\s+foreign\s+key\s*\(([^)]*)\)\s*references\s+([\w."]+)\s*(?:\(([^)]*)\))?([^;]*);`)
@@ -45,15 +20,11 @@ var (
 	reInList     = regexp.MustCompile(`(?is)\bin\s*\(([^)]*)\)`)
 	reQuotedItem = regexp.MustCompile(`'([^']*)'`)
 
-	// Table-level items inside CREATE TABLE that are not columns.
 	reTableLevel = regexp.MustCompile(`(?i)^\s*(constraint|primary\s+key|unique|check|foreign\s+key|exclude|like|partition)\b`)
 )
 
-// parseSchema reads one .sql file for everything infra.go does not already take.
 func parseSchema(sql, file string) (tables []flowEntity.Table, fks []flowEntity.ForeignKey, checks []flowEntity.Check) {
-	// CREATE TYPE ... AS ENUM is recorded as a check with no table, because that
-	// is what it is: a closed set of values the database will accept. Naming the
-	// type in Column.Type is what ties them back together.
+
 	for _, m := range reCreateEnum.FindAllStringSubmatchIndex(sql, -1) {
 		checks = append(checks, flowEntity.Check{
 			Expr:   "enum type " + cleanIdent(sql[m[2]:m[3]]),
@@ -74,8 +45,7 @@ func parseSchema(sql, file string) (tables []flowEntity.Table, fks []flowEntity.
 				continue
 			}
 			if reTableLevel.MatchString(item) {
-				// UNIQUE and PRIMARY KEY are infra.go's job. Only the two it
-				// does not read are taken here.
+
 				if fk, ok := tableLevelFK(table, item, file, line); ok {
 					fks = append(fks, fk)
 				}
@@ -143,9 +113,6 @@ func parseSchema(sql, file string) (tables []flowEntity.Table, fks []flowEntity.
 	return tables, fks, checks
 }
 
-// parseColumn reads one column definition. It returns false for anything that
-// does not look like "name type ...", which is how comments and oddities are
-// dropped without a special case for each.
 func parseColumn(item string) (flowEntity.Column, bool) {
 	fields := strings.Fields(item)
 	if len(fields) < 2 {
@@ -157,9 +124,7 @@ func parseColumn(item string) (flowEntity.Column, bool) {
 	}
 	c := flowEntity.Column{
 		Name: name,
-		// The type can be several words ("timestamp with time zone") or carry a
-		// size ("numeric(20,4)"), so it is everything up to the first keyword
-		// that starts a column option.
+
 		Type:       columnType(fields[1:]),
 		NotNull:    matchesWord(item, "not null"),
 		PrimaryKey: matchesWord(item, "primary key"),
@@ -225,8 +190,6 @@ func tableLevelCheck(table, item, file string, line int) (flowEntity.Check, bool
 	}, true
 }
 
-// splitTopLevel splits a CREATE TABLE body on commas that are not inside
-// parentheses, so numeric(20,4) and CHECK (x IN ('a','b')) survive intact.
 func splitTopLevel(body string) []string {
 	var out []string
 	depth, start := 0, 0
@@ -248,7 +211,6 @@ func splitTopLevel(body string) []string {
 	return append(out, body[start:])
 }
 
-// firstParens returns the contents of the first balanced (...) group.
 func firstParens(s string) string {
 	i := strings.Index(s, "(")
 	if i < 0 {
@@ -269,8 +231,6 @@ func firstParens(s string) string {
 	return ""
 }
 
-// inListValues pulls the values out of "status IN ('a','b')", which is the
-// database's own list of legal states.
 func inListValues(expr string) []string {
 	m := reInList.FindStringSubmatch(expr)
 	if m == nil {
@@ -293,8 +253,6 @@ func matchesWord(s, phrase string) bool {
 	return strings.Contains(space(strings.ToLower(s)), phrase)
 }
 
-// space collapses runs of whitespace, so a constraint split over four lines
-// prints as one readable line.
 func space(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 func isIdent(s string) bool {

@@ -14,28 +14,23 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// Options is the scanningFlow's configuration
 type Options struct {
 	Root    string
-	Entries []flowEntity.EntryPoint // where the payment flow starts
+	Entries []flowEntity.EntryPoint
 }
 
 type Result struct {
 	Flow  *flowEntity.Flow
 	Index *codeRef.Index
-	Local map[string]bool // repository's internal package imports (no dependencies)
+	Local map[string]bool
 }
 
-// the info needed from packages pkg, almost everything possible
 const loadMode = packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
 	packages.NeedImports | packages.NeedDeps | packages.NeedTypes | packages.NeedSyntax |
 	packages.NeedTypesInfo | packages.NeedModule
 
 func Scan(opts Options) (*Result, error) {
-	// GOWORK=off, always.
-	//
-	// A go.work outside the repository can change package loading and make the
-	// scan produce different results.
+
 	cfg := &packages.Config{
 		Mode:  loadMode,
 		Dir:   opts.Root,
@@ -43,18 +38,15 @@ func Scan(opts Options) (*Result, error) {
 		Env:   append(os.Environ(), "GOWORK=off"),
 	}
 
-	// getting all comprehensive AST info we need
 	pkgs, err := packages.Load(cfg, []string{"./..."}...)
 	if err != nil {
 		return nil, fmt.Errorf("load packages: %w", err)
 	}
 
-	// Real repositories often have a package that will not build for reasons unrelated to the payment flow,
-	// and refusing to analyze anything because of it would make testigo useless exactly where it is most needed.
 	var hardErrs []string
 	packages.Visit(pkgs, nil, func(p *packages.Package) {
 		for _, e := range p.Errors {
-			// collecting errors instead of returning at the first one
+
 			hardErrs = append(hardErrs, fmt.Sprintf("%s: %s", p.PkgPath, e))
 		}
 	})
@@ -66,9 +58,8 @@ func Scan(opts Options) (*Result, error) {
 	local := map[string]bool{}
 	moduleName := ""
 	for _, p := range pkgs {
-		local[p.PkgPath] = true // ./... is passed as patterns when getting all packages, and means all in this repo
-		// so these are all internal packages
-		// this map is used later for separation
+		local[p.PkgPath] = true
+
 		if p.Module != nil && moduleName == "" {
 			moduleName = p.Module.Path
 		}
@@ -78,23 +69,20 @@ func Scan(opts Options) (*Result, error) {
 	flow.GeneratedAt = time.Now().Local().Format(time.RFC3339)
 	flow.Entries = opts.Entries
 
-	// populating the index
 	ix := codeRef.NewIndex()
 	decls := map[string]*declRef{}
 
-	// entering every package
 	for _, p := range pkgs {
-		// entering every file
+
 		for _, file := range p.Syntax {
-			// entering every declaration
+
 			for _, declaration := range file.Decls {
-				// we're in the heart of the declaration
+
 				functionDeclaration, ok := declaration.(*ast.FuncDecl)
 				if !ok || functionDeclaration.Body == nil {
 					continue
 				}
 
-				// creating new codeRef for each node(function)
 				newCodeRef := codeRef.NewCodeRef(p.PkgPath, opts.Root, p.Fset, functionDeclaration)
 				_, astNodesCounts := codeRef.StructuralHash(functionDeclaration)
 				ix.Add(newCodeRef, astNodesCounts)
@@ -112,25 +100,17 @@ func Scan(opts Options) (*Result, error) {
 		return nil, err
 	}
 
-	// Machine-written files keep their place in the graph but lose the right to
-	// raise findings or contribute patterns. See generated.go for why.
 	gen := generatedFiles(pkgs, opts.Root)
 
 	flow.Infra = Infra(opts.Root)
 	flow.Docs = FindDocs(opts.Root)
-	// States FIRST. The candidate scorers ask which structs carry a lifecycle
-	// state, and a struct that carries one is the entity the flow moves — the
-	// single strongest signal either scorer has. Computing candidates first left
-	// that set empty and silently threw the signal away.
+
 	flow.States = extractStateMachines(pkgs, opts.Root, local, gen)
 	linkStateWritesToNodes(flow)
 
 	flow.IdempotencyKeys = idempotencyCandidates(pkgs, flow, opts.Root, local)
 	flow.MoneyTypes = moneyCandidates(pkgs, flow, opts.Root, local)
 
-	// A candidate from a .pb.go is a protobuf request field, not a decision this
-	// repository made. Dropping them here rather than at the finding keeps them
-	// out of the round-1 prompts too, which is where they would have cost money.
 	fileOfCandidate := func(c flowEntity.Candidate) string { return c.File }
 	flow.IdempotencyKeys, _ = withoutGenerated(flow.IdempotencyKeys, gen, fileOfCandidate)
 	flow.MoneyTypes, _ = withoutGenerated(flow.MoneyTypes, gen, fileOfCandidate)
@@ -164,26 +144,13 @@ type declRef struct {
 	pkg     *packages.Package
 }
 
-// linkStateWritesToNodes joins the state machine back onto the call graph.
-//
-// The two are extracted separately: the graph walk knows which functions the
-// flow reaches, and the state extractor knows where the status is assigned.
-// Neither knows about the other, so until they are joined, flowEntity.Facts.WritesStatus
-// and flowEntity.StateWrite.InTx sit empty and the report cannot answer the question that
-// matters most about a payment state machine:
-//
-//	is the status change committed in the same transaction as the money?
-//
-// A status write in a function that never opened a transaction means the row
-// and the ledger can disagree if the process dies between them. That is the
-// shape of a real production incident, and it is visible here for free.
 func linkStateWritesToNodes(f *flowEntity.Flow) {
 	for mi := range f.States {
 		for wi := range f.States[mi].Writes {
 			write := &f.States[mi].Writes[wi]
 			node, ok := f.Nodes[write.In.ID()]
 			if !ok {
-				continue // the status is written outside any reachable flow
+				continue
 			}
 			write.InTx = node.Facts.OpensTx
 			node.Facts.WritesStatus = appendUnique(node.Facts.WritesStatus, write.To)
@@ -200,15 +167,9 @@ func appendUnique(list []string, value string) []string {
 	return append(list, value)
 }
 
-// structuralFindings are conclusions drawn from the assembled graph rather than
-// from any single expression. They are still deterministic.
 func structuralFindings(f *flowEntity.Flow) []flowEntity.Finding {
 	var out []flowEntity.Finding
 
-	// A seam that is not behind an interface cannot be made to fail on demand.
-	// Since almost every serious payment bug only shows up when something
-	// downstream fails, an uninjectable seam is a hole in the test plan, and
-	// saying so is more useful than pretending we can test around it.
 	byFn := map[string][]flowEntity.Seam{}
 	for _, s := range f.Seams {
 		if !s.Injectable {
@@ -235,8 +196,6 @@ func structuralFindings(f *flowEntity.Flow) []flowEntity.Finding {
 		_ = id
 	}
 
-	// Opening a transaction with no rollback anywhere in the same function is a
-	// leak on the error path
 	for _, n := range f.Nodes {
 		if n.Facts.OpensTx && !n.Facts.RollsBackTx {
 			out = append(out, flowEntity.Finding{
@@ -258,14 +217,6 @@ func structuralFindings(f *flowEntity.Flow) []flowEntity.Finding {
 	return out
 }
 
-// stateFindings reports states the code declares but never enters.
-//
-// This is a genuinely useful deterministic result. A declared-but-unwritten
-// state is one of three things, and all three are worth a human looking at:
-// dead code left over from a removed feature, a state that is only ever set by
-// a SQL migration or an operations runbook (so it exists in the database but
-// not in the code that has to handle it), or a transition someone forgot to
-// implement. The tool cannot tell which, and says so rather than guessing.
 func stateFindings(ms []flowEntity.StateMachine) []flowEntity.Finding {
 	var out []flowEntity.Finding
 	for _, m := range ms {
@@ -288,19 +239,10 @@ func pkgOf(qualified string) string {
 	return qualified
 }
 
-// infraFindings compares what the Go code assumes against what the database
-// actually enforces.
-//
-// This is the cheapest high-value check in testigo, and it needs no agent. If a
-// struct has an idempotency key field and no migration makes that column unique,
-// then whatever the application code does to prevent duplicates is a check
-// followed by a write, and two concurrent requests can both pass the check
-// before either writes. That is a real double-spend window, provable from two
-// files neither of which mentions the other.
 func infraFindings(pkgs []*packages.Package, f *flowEntity.Flow, root string) []flowEntity.Finding {
 	var out []flowEntity.Finding
 	if len(f.Infra.MigrationDirs) == 0 {
-		return nil // no migrations to compare against; say nothing rather than guess
+		return nil
 	}
 
 	for _, p := range pkgs {
@@ -316,19 +258,7 @@ func infraFindings(pkgs []*packages.Package, f *flowEntity.Flow, root string) []
 				}
 				for _, fld := range st.Fields.List {
 					for _, nm := range fld.Names {
-						// Ask the scorer, not the name.
-						//
-						// This used to be a regex on nm.Name, which made the
-						// loudest finding in the tool disagree with the most
-						// careful analysis in it: TraceID scored -3 ("generated
-						// in this process, so a retry produces a different
-						// value") and was still reported as a critical missing
-						// unique index. Two detectors, one opinion each, and
-						// the wrong one had the megaphone.
-						//
-						// Now a finding needs the same proof a decision
-						// needs. A field that only matched the vocabulary
-						// scores 1 and says nothing.
+
 						cand, scored := f.IdempotencyKeys.Find(spec.Name.Name, nm.Name)
 						if !scored || !cand.Credible() {
 							continue
@@ -354,8 +284,6 @@ func infraFindings(pkgs []*packages.Package, f *flowEntity.Flow, root string) []
 	return out
 }
 
-// columnOf reads the db column name from a struct tag, falling back to the
-// snake_case of the field name, which is what every Go ORM defaults to.
 func columnOf(fld *ast.Field, fieldName string) string {
 	if fld.Tag != nil {
 		tag := strings.Trim(fld.Tag.Value, "`")
@@ -372,12 +300,6 @@ func columnOf(fld *ast.Field, fieldName string) string {
 	return snakeCase(fieldName)
 }
 
-// snakeCase converts a Go field name to the column name an ORM would default to.
-//
-// The naive version put an underscore before every capital, which turns OrderID
-// into order_i_d and silently breaks every lookup against the migrations. Runs of
-// capitals are acronyms — ID, URL, HTTP — and only the boundary between the
-// acronym and the next word gets a separator.
 func snakeCase(s string) string {
 	runes := []rune(s)
 	var b strings.Builder
@@ -386,8 +308,7 @@ func snakeCase(s string) string {
 		if upper && i > 0 {
 			prevLower := runes[i-1] >= 'a' && runes[i-1] <= 'z'
 			nextLower := i+1 < len(runes) && runes[i+1] >= 'a' && runes[i+1] <= 'z'
-			// aB -> a_b   (word boundary)
-			// ABc -> a_bc (end of an acronym, start of a word)
+
 			if prevLower || nextLower {
 				b.WriteByte('_')
 			}

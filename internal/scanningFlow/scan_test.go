@@ -9,14 +9,6 @@ import (
 	"testing"
 )
 
-// fixtureRoot is a deliberately broken payment service. Every defect in it was
-// planted on purpose, and this test asserts testigo still finds each one.
-//
-// This is the only kind of test that means anything for a bug-finding tool. A
-// unit test on the parser proves the parser parses; it says nothing about
-// whether the tool would catch a float64 balance. If someone tightens a
-// heuristic to reduce noise and silently stops reporting TX-NET-CALL, this test
-// is what fails.
 func fixtureRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "testdata", "paysvc"))
@@ -29,10 +21,6 @@ func fixtureRoot(t *testing.T) string {
 	return root
 }
 
-// The fixture scanningFlow builds SSA for the whole of net/http and database/sql, which
-// costs a few seconds. Running it once per test would make the suite slow
-// enough that people stop running it, so it is computed once and shared. The
-// scanningFlow is read-only, so sharing is safe.
 var (
 	fixtureOnce sync.Once
 	fixtureRes  *Result
@@ -42,10 +30,7 @@ var (
 func scanFixture(t *testing.T) *Result {
 	t.Helper()
 	root := fixtureRoot(t)
-	// The fixture is a self-contained module living inside testigo's own tree,
-	// so it is also the case that proves GOWORK=off has to be unconditional: a
-	// go.work at the testigo root would otherwise hide the fixture's packages
-	// entirely. Scan sets it internally now, which is why nothing is passed.
+
 	fixtureOnce.Do(func() {
 		fixtureRes, fixtureErr = scanFixtureOnce(root)
 	})
@@ -75,13 +60,13 @@ func TestFindsPlantedDefects(t *testing.T) {
 		sev  flowEntity.Severity
 	}
 	wants := []want{
-		{"MONEY-FLOAT", "domain/payment.go", flowEntity.SevCritical},     // Payment.Amount is a float64
-		{"MONEY-FLOAT", "api/server.go", flowEntity.SevCritical},         // applyDiscount takes a float
-		{"MONEY-DIV", "api/server.go", flowEntity.SevHigh},               // splitFee truncates the remainder
-		{"MONEY-NO-CURRENCY", "domain/payment.go", flowEntity.SevMedium}, // FeeCents with no currency
-		{"TX-NET-CALL", "api/server.go", flowEntity.SevCritical},         // PSP call inside the transaction
-		{"TX-NO-ROLLBACK", "api/server.go", flowEntity.SevHigh},          // BeginTx with no rollback
-		{"STATE-NEVER-SET", "", flowEntity.SevMedium},                    // StatusRefunded / StatusAbandoned
+		{"MONEY-FLOAT", "domain/payment.go", flowEntity.SevCritical},
+		{"MONEY-FLOAT", "api/server.go", flowEntity.SevCritical},
+		{"MONEY-DIV", "api/server.go", flowEntity.SevHigh},
+		{"MONEY-NO-CURRENCY", "domain/payment.go", flowEntity.SevMedium},
+		{"TX-NET-CALL", "api/server.go", flowEntity.SevCritical},
+		{"TX-NO-ROLLBACK", "api/server.go", flowEntity.SevHigh},
+		{"STATE-NEVER-SET", "", flowEntity.SevMedium},
 	}
 	for _, w := range wants {
 		found := false
@@ -100,10 +85,6 @@ func TestFindsPlantedDefects(t *testing.T) {
 	}
 }
 
-// Noise is a correctness problem, not a cosmetic one: a user who learns to
-// scroll past the findings list will scroll past the real bug too. These are
-// the false positives that actually showed up during development, kept as a
-// test so they cannot come back.
 func TestDoesNotReportNoise(t *testing.T) {
 	res := scanFixture(t)
 	banned := map[string]string{
@@ -124,8 +105,6 @@ func TestDoesNotReportNoise(t *testing.T) {
 	}
 }
 
-// Injectability is the field that decides whether a failure test can be written
-// at all, so it gets its own assertions rather than being checked by count.
 func TestInjectabilityIsCorrect(t *testing.T) {
 	res := scanFixture(t)
 	byTarget := map[string]flowEntity.Seam{}
@@ -133,11 +112,11 @@ func TestInjectabilityIsCorrect(t *testing.T) {
 		byTarget[s.Target] = s
 	}
 	cases := map[string]bool{
-		"(example.com/paysvc/psp.Gateway).Authorize": true,  // our interface: a test can make it time out
-		"(example.com/paysvc/ledger.Ledger).Post":    true,  // our interface
-		"(*database/sql.DB).BeginTx":                 false, // concrete: nothing to substitute
-		"(*net/http.Client).Do":                      false, // concrete
-		"time.Now":                                   false, // concrete: expiry logic is untestable as written
+		"(example.com/paysvc/psp.Gateway).Authorize": true,
+		"(example.com/paysvc/ledger.Ledger).Post":    true,
+		"(*database/sql.DB).BeginTx":                 false,
+		"(*net/http.Client).Do":                      false,
+		"time.Now":                                   false,
 	}
 	for target, wantInjectable := range cases {
 		s, ok := byTarget[target]
@@ -153,11 +132,7 @@ func TestInjectabilityIsCorrect(t *testing.T) {
 
 func TestStateMachineExtraction(t *testing.T) {
 	res := scanFixture(t)
-	// PaymentStatus by its name, SettlementMode by its behaviour. DeclineCode is
-	// also a named string with constants and must NOT be here: it is returned
-	// and compared, never stored and never advanced, so it is an enum and not a
-	// lifecycle. Asking an agent which of its transitions are illegal would be
-	// nonsense that costs money.
+
 	byType := map[string]flowEntity.StateMachine{}
 	for _, m := range res.Flow.States {
 		byType[shortName(m.Type)] = m
@@ -178,9 +153,7 @@ func TestStateMachineExtraction(t *testing.T) {
 	if m.Field != "Status" {
 		t.Errorf("field: got %q want %q", m.Field, "Status")
 	}
-	// The declared constants are the complete state set — the compiler
-	// guarantees no others exist, which is exactly why this is worth extracting
-	// statically instead of asking a models to read the code and list them.
+
 	wantStates := []string{
 		"StatusAbandoned", "StatusAuthorized", "StatusCaptured",
 		"StatusFailed", "StatusPending", "StatusRefunded",
@@ -214,9 +187,6 @@ func TestStateMachineExtraction(t *testing.T) {
 	}
 }
 
-// The graph must include the webhook and the reconciliation job. Following only
-// the API handler is the mistake that hides double-credit bugs, so it is worth
-// a test that the plural entry points actually work.
 func TestAllEntryPointsAreFollowed(t *testing.T) {
 	res := scanFixture(t)
 	want := map[string]flowEntity.NodePosition{
@@ -238,13 +208,11 @@ func TestAllEntryPointsAreFollowed(t *testing.T) {
 			t.Errorf("%s: kind %s, want %s", id, n.Position, kind)
 		}
 	}
-	// The webhook spawns a goroutine before responding, so the caller gets a
-	// 200 before the capture has happened. The fact must survive into the node
-	// even though the work is inside a closure.
+
 	if n := res.Flow.Nodes["example.com/paysvc/webhook#(*Handler).PSPCallback"]; n == nil || !n.Facts.SpawnsGoroutine {
 		t.Error("PSPCallback should be marked as spawning a goroutine")
 	}
-	// flowEntity.Facts from a closure belong to the function a human would name.
+
 	if n := res.Flow.Nodes["example.com/paysvc/api#(*Server).process"]; n != nil {
 		if !n.Facts.OpensTx || !n.Facts.CommitsTx || n.Facts.RollsBackTx {
 			t.Errorf("process tx facts wrong: %+v", n.Facts)
@@ -252,8 +220,6 @@ func TestAllEntryPointsAreFollowed(t *testing.T) {
 	}
 }
 
-// A function the flow does not reach must not appear in the graph, or the
-// diagram stops describing the payment flow and starts describing the package.
 func TestUnreachedFunctionsAreExcluded(t *testing.T) {
 	res := scanFixture(t)
 	for _, id := range []string{
@@ -264,9 +230,7 @@ func TestUnreachedFunctionsAreExcluded(t *testing.T) {
 			t.Errorf("%s is not reachable from any entry point but appears in the flow", id)
 		}
 	}
-	// It is still findable by the money checks, which deliberately run over the
-	// whole module: a rounding bug matters whether or not today's entry points
-	// happen to reach it.
+
 	found := false
 	for _, f := range res.Flow.Findings {
 		if f.ID == "MONEY-DIV" {
@@ -278,15 +242,6 @@ func TestUnreachedFunctionsAreExcluded(t *testing.T) {
 	}
 }
 
-// Regression test. The scanner once emitted node code references with an empty
-// BodyHash. Nothing failed, nothing warned — but every rescan compared the
-// empty hash against a real one, decided all eight nodes had changed, and threw
-// away every note. The incremental path silently degraded into a full
-// re-analysis on every run, which on a real repo means paying for a complete
-// phase 2 every time.
-//
-// The lesson worth keeping: a cache that misses is invisible. It has to be
-// asserted, because it will never announce itself.
 func TestNodeCodeRefsCarryTheirBodyHash(t *testing.T) {
 	res := scanFixture(t)
 	for id, n := range res.Flow.Nodes {
@@ -306,8 +261,6 @@ func TestNodeCodeRefsCarryTheirBodyHash(t *testing.T) {
 	}
 }
 
-// The flow anchor and the index anchor must agree on the file path too, or a
-// report links to one place and the resolver looks in another.
 func TestNodeCodeRefsHaveFilePaths(t *testing.T) {
 	res := scanFixture(t)
 	for id, n := range res.Flow.Nodes {
@@ -327,16 +280,9 @@ func shortName(qualified string) string {
 	return qualified
 }
 
-// The discovery walk computes a SET, so the order it drains its worklist in must
-// not be observable in the output. This is asserted rather than assumed because
-// the claim is load-bearing: two READMEs and a long code comment say there is no
-// traversal decision to defend here, and if that ever stops being true the docs
-// become wrong before anyone notices the behaviour changed.
 func TestDiscoveryOrderIsNotObservable(t *testing.T) {
 	res := scanFixture(t)
 
-	// Every reachable function appears exactly once, whatever order it was found
-	// in. A duplicate would mean a node emitted its edges twice.
 	seen := map[string]bool{}
 	for id := range res.Flow.Nodes {
 		if seen[id] {
@@ -345,8 +291,6 @@ func TestDiscoveryOrderIsNotObservable(t *testing.T) {
 		seen[id] = true
 	}
 
-	// Calls are sorted by call-site position, which is the ordering that IS
-	// observable and the only one the walk is allowed to affect.
 	for id, n := range res.Flow.Nodes {
 		lines := make([]int, 0, len(n.Calls))
 		for _, callee := range n.Calls {
@@ -354,7 +298,7 @@ func TestDiscoveryOrderIsNotObservable(t *testing.T) {
 				lines = append(lines, c.Ref.Line)
 			}
 		}
-		_ = lines // positions are of call SITES, not of callee declarations
+		_ = lines
 		if len(n.Calls) != len(uniqueStrings(n.Calls)) {
 			t.Errorf("%s lists the same callee more than once: %v", id, n.Calls)
 		}
@@ -373,19 +317,6 @@ func uniqueStrings(in []string) []string {
 	return out
 }
 
-// Two different things get called "order", and only one of them is used.
-//
-//	DECLARATION order — where `func A` sits in the file. Irrelevant in Go, which
-//	                    allows forward references at package level, and never
-//	                    consulted by testigo.
-//	CALL-SITE order   — where the call expression sits INSIDE a function body.
-//	                    That is statement order, and it is the sequence those
-//	                    statements run in.
-//
-// This test writes a package whose declaration order is the REVERSE of its call
-// order and asserts the graph follows the calls. It exists because the
-// distinction is easy to blur in prose, and a reader who thinks testigo sorts by
-// declaration position would rightly not trust the flow it prints.
 func TestDeclarationOrderIsIgnored(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, body string) {
@@ -398,7 +329,7 @@ func TestDeclarationOrderIsIgnored(t *testing.T) {
 		}
 	}
 	write("go.mod", "module example.com/decl\n\ngo 1.24\n")
-	// Declared: last, third, second, first.  Called: first, second, third, last.
+
 	write("svc/svc.go", `package svc
 
 import "context"
@@ -420,7 +351,6 @@ func Entry(ctx context.Context) error { return Second(ctx) }
 		t.Fatalf("scan: %v", err)
 	}
 
-	// The chain must follow the calls, not the file layout.
 	chain := []string{"Entry", "Second", "Third", "Last"}
 	for i := 0; i < len(chain)-1; i++ {
 		id := "example.com/decl/svc#" + chain[i]
@@ -434,8 +364,6 @@ func Entry(ctx context.Context) error { return Second(ctx) }
 		}
 	}
 
-	// And the declaration lines really are reversed, so the test is testing
-	// something rather than accidentally agreeing.
 	entryLine := res.Flow.Nodes["example.com/decl/svc#Entry"].Ref.Line
 	lastLine := res.Flow.Nodes["example.com/decl/svc#Last"].Ref.Line
 	if entryLine <= lastLine {
@@ -443,9 +371,6 @@ func Entry(ctx context.Context) error { return Second(ctx) }
 	}
 }
 
-// Within ONE function body, the calls come out in the order they are written.
-// This is the ordering that actually gets used, and the one a crash-at-each-step
-// test depends on.
 func TestCallsWithinABodyFollowSourceOrder(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, body string) {
@@ -458,7 +383,7 @@ func TestCallsWithinABodyFollowSourceOrder(t *testing.T) {
 		}
 	}
 	write("go.mod", "module example.com/order\n\ngo 1.24\n")
-	// Declared alphabetically backwards; called in a deliberate sequence.
+
 	write("svc/svc.go", `package svc
 
 func zulu() {}
@@ -494,7 +419,6 @@ func Flow() {
 	}
 }
 
-// writeRepo lays out a throwaway module and returns its root.
 func writeRepo(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -523,14 +447,6 @@ func scanRepo(t *testing.T, root string, entries ...flowEntity.EntryPoint) *flow
 	return res.Flow
 }
 
-// TestFindingsAgreeWithTheScorer is the regression for the worst bug this tool
-// had: two idempotency detectors with one opinion each, and the wrong one
-// holding the megaphone.
-//
-// The finding used to run a name regex over every struct field, so a `bool`
-// called AcceptsDedupKey was reported as a critical missing unique index while
-// the actual key went unmentioned. A finding now needs the same proof a
-// decision needs.
 func TestFindingsAgreeWithTheScorer(t *testing.T) {
 	root := writeRepo(t, map[string]string{
 		"go.mod": "module example.com/idem\n\ngo 1.21\n",
@@ -584,7 +500,6 @@ func (s *Server) Handle(ctx context.Context, r *http.Request) error {
 		}
 	}
 
-	// And the scorer must not carry them either, or they reach the prompts.
 	for _, c := range flow.IdempotencyKeys {
 		if c.Name == "AcceptsDedupKey" || c.Name == "DedupKeyArgument" {
 			t.Errorf("%s is not a type that can hold a key, but it was scored", c.Name)
@@ -592,12 +507,6 @@ func (s *Server) Handle(ctx context.Context, r *http.Request) error {
 	}
 }
 
-// TestReturnedStateIsNotDead covers the other half of the same class of bug:
-// a detector that measured one thing and reported another.
-//
-// `return StatusSettled` produces a state. The old inspector walked only
-// AssignStmt and CompositeLit, so every status a function RETURNS looked dead,
-// and returning a status is ordinary Go.
 func TestReturnedStateIsNotDead(t *testing.T) {
 	root := writeRepo(t, map[string]string{
 		"go.mod": "module example.com/st\n\ngo 1.21\n",
@@ -662,26 +571,17 @@ func (s *Server) Handle() error {
 		dead[s] = true
 	}
 
-	// Produced three ways: returned, set in a struct literal, and bound with :=.
 	for _, live := range []string{"StatusSettled", "StatusVoided", "StatusDisputed"} {
 		if dead[live] {
 			t.Errorf("%s is produced in the source but was reported as never set", live)
 		}
 	}
-	// This one really is dead, and must survive the fix.
+
 	if !dead["StatusGhost"] {
 		t.Error("StatusGhost is never produced anywhere and should still be reported")
 	}
 }
 
-// TestNameAloneIsNotALifecycle guards the door that skips the other checks.
-//
-// A strong type name lets a candidate bypass the "stored in a field" and
-// "assigned in two places" rules, which is right — PaymentStatus is a lifecycle
-// even when one function sets it. But testigo's own Phase type showed what
-// happens when a name alone is enough: two constants nothing ever assigns
-// became a state machine, two STATE-NEVER-SET findings, and a paid round-1
-// prompt asking which transitions between phases are legal.
 func TestNameAloneIsNotALifecycle(t *testing.T) {
 	root := writeRepo(t, map[string]string{
 		"go.mod": "module example.com/lc\n\ngo 1.21\n",

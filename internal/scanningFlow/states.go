@@ -15,20 +15,6 @@ import (
 	"github.com/katayunak/testigo/internal/codeRef"
 )
 
-// extractStateMachines recovers the payment state machine from source.
-//
-// This is the highest-leverage deterministic extraction in testigo, and it is
-// worth being precise about why. A named status type's declared constants are
-// the COMPLETE state set — the compiler guarantees there are no others. Every
-// assignment of that type is a write site, and go/types has already folded the
-// constants for us, so we know which state each write moves to.
-//
-// What we cannot know statically is which transitions are LEGAL. That is a
-// business rule, not a fact about the code. So this function produces the
-// states and the writes, and phase 2 asks an agent one narrow question — "which
-// of these transitions should be impossible?" — instead of the open-ended and
-// far less reliable "explain this code to me". Every illegal transition the
-// agent names becomes a generated test.
 func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[string]bool) []flowEntity.StateMachine {
 	var out []flowEntity.StateMachine
 	type cand struct {
@@ -47,17 +33,11 @@ func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[
 			if !ok {
 				continue
 			}
-			// Both lists are collected. The weak ones have to earn their place
-			// further down, on proof rather than on their name.
+
 			if !patterns.IsStateType(name) && !patterns.IsWeakStateType(name) {
 				continue
 			}
-			// A protobuf enum is not a lifecycle. ActionType, EventType,
-			// SchedulingType and PushState all pass the name test and all come
-			// out of a .proto, where the states are a wire format rather than
-			// something a payment moves through. On a real gRPC service six of
-			// the ten machines found this way were generated, and each one would
-			// have bought a round-1 prompt asking which transitions are legal.
+
 			if gen[relPath(p.Fset, tn.Pos(), root)] {
 				continue
 			}
@@ -77,7 +57,6 @@ func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[
 		return nil
 	}
 
-	// The declared constants are the state set.
 	for _, p := range pkgs {
 		if p.Types == nil {
 			continue
@@ -118,10 +97,7 @@ func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[
 						}
 					}
 				case *ast.CompositeLit:
-					// Real code initialises state in a struct literal as often
-					// as it assigns it: &Payment{Status: StatusPending}. Only
-					// walking AssignStmt would miss the state a payment is
-					// CREATED in, which is the one the whole machine starts from.
+
 					for _, el := range t.Elts {
 						kv, ok := el.(*ast.KeyValueExpr)
 						if !ok {
@@ -145,25 +121,7 @@ func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[
 						})
 					}
 				case *ast.ReturnStmt:
-					// `return StatusFailed, nil` produces a state just as
-					// surely as `p.Status = StatusFailed` does — the caller
-					// stores what it is handed. Walking only AssignStmt and
-					// CompositeLit made every status that a function RETURNS
-					// look dead, and returning a status is ordinary Go.
-					//
-					// Call ARGUMENTS are deliberately not here, though they
-					// look like the same case. A status passed to a function is
-					// ambiguous: it is as likely to be a query filter as a
-					// write. The fixture proves it —
-					//
-					//   QueryContext(ctx, "... WHERE status = $1", StatusPending)
-					//
-					// reads payments in a state; it does not put one there.
-					// Counting that would not just inflate the count, it would
-					// record the WRONG FUNCTION as the write site, and the
-					// transitions prompt hands those write sites to an agent as
-					// fact. A missed write costs one noisy finding. A false
-					// write teaches the agent something untrue.
+
 					for _, r := range t.Results {
 						addWrite(p, fns, isLifecycleType, writes, relativeTo, root, r)
 					}
@@ -173,14 +131,6 @@ func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[
 							continue
 						}
 
-						// The left side of a short declaration is a DEFINITION,
-						// so go/types files it under Defs and TypesInfo.Types
-						// has nothing for it. That made `kind := StatusPending`
-						// invisible while `p.Status = StatusPending` was seen —
-						// same statement, two spellings, one of them ignored.
-						//
-						// Falling back to the right-hand side covers both, and
-						// covers assignment through an alias as a bonus.
 						tv, ok := p.TypesInfo.Types[lhs]
 						if !ok || !isLifecycleType(types.TypeString(tv.Type, relativeTo)) {
 							addWrite(p, fns, isLifecycleType, writes, relativeTo, root, t.Rhs[i])
@@ -207,7 +157,7 @@ func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[
 			continue
 		}
 		if why, ok := isLifecycle(key, cd.named.Obj().Name(), fields[key], writes[key]); !ok {
-			_ = why // reported through the weak list, not as a machine
+			_ = why
 			continue
 		}
 		states := make([]string, 0, len(cd.states))
@@ -240,44 +190,12 @@ func extractStateMachines(pkgs []*packages.Package, root string, local, gen map[
 	return out
 }
 
-// isLifecycle decides whether an enum is a STATE MACHINE or just an enum.
-//
-// A named string or integer type with declared constants is how Go writes an
-// enum, and payment lifecycles are written that way. So is everything else:
-// ErrorCode, TransactionKind, SettlementMode. Asking an agent which transitions
-// of an ErrorCode are illegal is nonsense that costs money, and never asking
-// about SettlementMode misses a real machine in some repositories.
-//
-// The name alone cannot separate them, so the name is only the tiebreaker. What
-// actually separates a lifecycle from an enum is BEHAVIOUR:
-//
-//   - a lifecycle is PERSISTED. It lives in a struct field, because the whole
-//     point is that it survives between requests.
-//   - a lifecycle is REASSIGNED, in more than one place. A payment moves from
-//     pending to authorised in one function and to captured in another. An
-//     ErrorCode is returned and compared, rarely stored and updated.
-//
-// A strong name passes on its own, because "PaymentStatus" is not ambiguous and
-// demanding proof would drop real machines in repositories that keep their
-// transitions in one place. A weak name has to show both behaviours.
 func isLifecycle(qualified, simple, field string, writes []flowEntity.StateWrite) (string, bool) {
 	distinct := map[string]bool{}
 	for _, w := range writes {
 		distinct[w.In.ID()] = true
 	}
 
-	// A strong name skips the storage and two-writer rules, because a type
-	// called PaymentStatus is a lifecycle even in a package that only sets it
-	// once. It does NOT skip this one.
-	//
-	// A type that nothing anywhere ever assigns is not a lifecycle whatever it
-	// is called. testigo's own `Phase` is the example: two constants, a
-	// lifecycle-sounding name, and the only thing the code does with them is
-	// print them. Admitting it produced a state machine with zero write sites,
-	// a STATE-NEVER-SET finding for each constant, and a round-1 prompt asking
-	// an agent which transitions between phases are legal — which is the
-	// ErrorCode mistake this package exists to avoid, arriving through the one
-	// door that skips the checks.
 	if patterns.IsStateType(simple) {
 		if len(writes) == 0 {
 			return "named like a lifecycle, but nothing in this module ever assigns it, so nothing moves through it", false
@@ -294,8 +212,6 @@ func isLifecycle(qualified, simple, field string, writes []flowEntity.StateWrite
 	return "", true
 }
 
-// constName prefers the constant's identifier over its literal value, because
-// PaymentCaptured reads better in a report than "captured".
 func constName(p *packages.Package, e ast.Expr, fallback string) string {
 	switch x := e.(type) {
 	case *ast.Ident:
@@ -306,10 +222,6 @@ func constName(p *packages.Package, e ast.Expr, fallback string) string {
 	return strings.Trim(fallback, `"`)
 }
 
-// funcTable maps a position back to the function that contains it, so a finding
-// deep inside a body can be anchored to a symbol rather than to a bare line
-// number. A line number goes stale the moment someone adds an import; a symbol
-// does not.
 type funcTable []funcSpan
 
 type funcSpan struct {
@@ -342,13 +254,12 @@ func funcIndex(p *packages.Package, root string) funcTable {
 	return ft
 }
 
-// at finds the enclosing function by binary search over the sorted spans.
 func (ft funcTable) at(pos token.Pos) codeRef.CodeRef {
 	i := sort.Search(len(ft), func(i int) bool { return ft[i].end >= pos })
 	if i < len(ft) && ft[i].start <= pos && pos < ft[i].end {
 		return ft[i].a
 	}
-	return codeRef.CodeRef{} // package-level declaration, not inside any function
+	return codeRef.CodeRef{}
 }
 
 func relPath(fset *token.FileSet, pos token.Pos, root string) string {
@@ -362,12 +273,6 @@ func relPath(fset *token.FileSet, pos token.Pos, root string) string {
 	return filepath.ToSlash(p.Filename)
 }
 
-// addWrite records one expression as a site that produces a lifecycle state.
-//
-// Shared by the return, call-argument and composite-literal cases so all three
-// agree on what counts and how it is named. An expression whose value the type
-// checker cannot fold to a constant is recorded as <dynamic>: the state was
-// produced, we just cannot say which one, and that is still not "never".
 func addWrite(
 	p *packages.Package,
 	fns funcTable,
@@ -391,28 +296,12 @@ func addWrite(
 		to = constName(p, e, tv.Value.String())
 	}
 
-	// A write site with no location is worse than no write site.
-	//
-	// fns.at returns an empty reference for anything not inside a declared
-	// function — a package-level var, a composite literal in a global, a
-	// closure the index did not span. The write is real, so dropping it would
-	// under-report, but recording it blank printed "set in   (:32)" in the
-	// prompt, which asks a reader to go and look at nothing. Fill in the file
-	// and package from the position, which are always available.
 	pos := p.Fset.Position(e.Pos())
 	writes[key] = append(writes[key], flowEntity.StateWrite{
 		In: siteOf(p, fns, root, e.Pos()), To: to, Line: pos.Line,
 	})
 }
 
-// siteOf names where a state is written, and never returns a blank.
-//
-// funcTable.at returns an empty reference for anything not inside a declared
-// function — a package-level var, a composite literal in a global, a seed
-// script. The write is real, so dropping it would under-report; recording it
-// blank printed "set in   (:32)" into a prompt, which asks a reader to go and
-// look at nothing. The file and package are always available from the position,
-// so they are filled in and the symbol says plainly that there is no function.
 func siteOf(p *packages.Package, fns funcTable, root string, pos token.Pos) codeRef.CodeRef {
 	in := fns.at(pos)
 	if in.File == "" {

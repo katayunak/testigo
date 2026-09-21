@@ -63,9 +63,6 @@ func Flowchart(f *flowEntity.Flow) string {
 		}
 	}
 
-	// Uninjectable seams are drawn as dashed edges to a distinct node so the
-	// untestable boundaries are visible at a glance rather than buried in a
-	// findings table.
 	drawn := map[string]bool{}
 	for _, id := range ids {
 		for _, s := range seamsBy[id] {
@@ -90,11 +87,6 @@ func Flowchart(f *flowEntity.Flow) string {
 	return b.String()
 }
 
-// StateDiagram renders the statically recovered state machine.
-//
-// Only transitions the compiler can prove are drawn. Which of them SHOULD be
-// possible is a business rule, and the diagram deliberately does not guess: a
-// confident wrong arrow is worse than a missing one.
 func StateDiagram(m flowEntity.StateMachine) string {
 	var b strings.Builder
 	b.WriteString("stateDiagram-v2\n")
@@ -112,9 +104,6 @@ func StateDiagram(m flowEntity.StateMachine) string {
 	return b.String()
 }
 
-// mid makes a Mermaid-safe node id. Full import paths produce ids so long the
-// diagram source is unreadable in a code review, which defeats the point of
-// choosing a text format, so only the last path element is kept.
 func mid(s string) string {
 	if pkg, sym, ok := strings.Cut(s, "#"); ok {
 		if i := strings.LastIndex(pkg, "/"); i >= 0 {

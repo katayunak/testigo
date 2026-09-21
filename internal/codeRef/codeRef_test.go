@@ -28,8 +28,6 @@ func hashOf(t *testing.T, src string) string {
 	return h
 }
 
-// The property that makes the sidecar usable: documentation churn must not
-// invalidate every note in the repository.
 func TestHashIgnoresCommentsAndFormatting(t *testing.T) {
 	base := `func Debit(acct string, cents int64) error {
 	if cents <= 0 { return errBadAmount }
@@ -63,8 +61,6 @@ return errBadAmount}
 	}
 }
 
-// The other half: anything that changes behaviour must change the hash, or a
-// stale note silently describes code that no longer does what it says.
 func TestHashDetectsBehaviourChange(t *testing.T) {
 	base := `func Debit(acct string, cents int64) error {
 	if cents <= 0 { return errBadAmount }
@@ -99,7 +95,6 @@ func TestHashDetectsBehaviourChange(t *testing.T) {
 	}
 }
 
-// A pure rename must not lose the notes.
 func TestResolveMovedOnRename(t *testing.T) {
 	body := `{
 	if cents <= 0 { return errBadAmount }
@@ -163,8 +158,6 @@ func TestResolveOutcomes(t *testing.T) {
 	})
 }
 
-// Two trivial functions share a structure. Carrying notes between them would be
-// worse than losing them, so the size guard must refuse the match.
 func TestTinyBodiesAreNotMoveCandidates(t *testing.T) {
 	oldFn := parseFunc(t, `func ID() string { return s.id }`)
 	newFn := parseFunc(t, `func Ref() string { return s.id }`)
