@@ -159,6 +159,14 @@ exact problem so you can fix that one file rather than redo the round.
 	return b.String()
 }
 
+func WriteAnswer(sidecarDir string, b Batch, raw []byte) error {
+	dir := filepath.Join(sidecarDir, answersDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, b.AnswerFile()), raw, 0o644)
+}
+
 func ReadPack(sidecarDir string) (*Pack, error) {
 	b, err := os.ReadFile(filepath.Join(sidecarDir, asksDir, "manifest.json"))
 	if err != nil {
