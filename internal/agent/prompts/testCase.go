@@ -206,6 +206,16 @@ func caseFacts(c testPlan.TestCase, f *flowEntity.Flow) string {
 		b.WriteString("\n")
 	}
 
+	if c.Tenancy != nil {
+		fmt.Fprintf(&b, "Shared-tenant discriminator column: %s\n", c.Tenancy.Column)
+		fmt.Fprintf(&b, "Scopes uniqueness on: %s\n\n", strings.Join(c.Tenancy.Tables, ", "))
+	}
+
+	if c.HashChain != nil {
+		fmt.Fprintf(&b, "Hash-chaining method: %s#%s (%s:%d)\n\n",
+			c.HashChain.Type, c.HashChain.Method.Symbol, c.HashChain.Method.File, c.HashChain.Method.Line)
+	}
+
 	if c.Entry != nil {
 		fmt.Fprintf(&b, "Entry point under test: %s#%s", c.Entry.Pkg, c.Entry.Symbol)
 		if c.Entry.Label != "" {

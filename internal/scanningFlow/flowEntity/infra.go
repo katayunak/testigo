@@ -1,5 +1,7 @@
 package flowEntity
 
+import "sort"
+
 type Infra struct {
 	Constraints []Constraint `json:"constraints,omitempty"`
 
@@ -79,6 +81,53 @@ type Constraint struct {
 	Kind    string   `json:"kind"`
 	File    string   `json:"file"`
 	Line    int      `json:"line"`
+}
+
+type TenantScheme struct {
+	Column string
+	Tables []string
+}
+
+func (i Infra) TenantScheme() (TenantScheme, bool) {
+	tablesByColumn := map[string]map[string]bool{}
+	for _, c := range i.Constraints {
+		if len(c.Columns) < 2 {
+			continue
+		}
+		if c.Kind != "unique_index" && c.Kind != "unique_constraint" {
+			continue
+		}
+		leading := c.Columns[0]
+		if tablesByColumn[leading] == nil {
+			tablesByColumn[leading] = map[string]bool{}
+		}
+		tablesByColumn[leading][c.Table] = true
+	}
+
+	var candidates []string
+	for col, tables := range tablesByColumn {
+		if len(tables) >= 2 {
+			candidates = append(candidates, col)
+		}
+	}
+	sort.Slice(candidates, func(a, b int) bool {
+		ca, cb := len(tablesByColumn[candidates[a]]), len(tablesByColumn[candidates[b]])
+		if ca != cb {
+			return ca > cb
+		}
+		return candidates[a] < candidates[b]
+	})
+	if len(candidates) == 0 {
+		return TenantScheme{}, false
+	}
+
+	col := candidates[0]
+	var tables []string
+	for t := range tablesByColumn[col] {
+		tables = append(tables, t)
+	}
+	sort.Strings(tables)
+	return TenantScheme{Column: col, Tables: tables}, true
 }
 
 func (i Infra) CoversColumn(table, column string) (Constraint, bool) {

@@ -1,6 +1,6 @@
 # The scenario catalogue
 
-Every way testigo knows a payment system can break. **31 scenarios in 7 families.**
+Every way testigo knows a payment system can break. **34 scenarios in 7 families.**
 
 Each one is a Go value in `internal/testPlan/catalog.go`, not a prompt. It says what
 it needs (`Requires`), how it is written (`Techniques`), what tells the test it passed
@@ -30,8 +30,11 @@ Some scenarios are picked by **how a table is written** — see
 | [`DOUBLE-ENTRY-SUMS-TO-ZERO`](#double-entry-sums-to-zero) | consistency | critical | invariant | money in the flow, a transfer function |
 | [`RECONCILER-IS-IDEMPOTENT`](#reconciler-is-idempotent) | consistency | high | invariant | two or more entry points |
 | [`TRANSFER-IS-ATOMIC`](#transfer-is-atomic) | consistency | critical | invariant | an injectable seam, an open transaction, a transfer function |
+| [`DEADLOCK-IS-RECOVERED`](#deadlock-is-recovered) | consistency | high | invariant | an open transaction, a real database, a transfer function |
+| [`TENANT-ROWS-DONT-LEAK`](#tenant-rows-dont-leak) | consistency | critical | invariant | a shared-tenant discriminator column, a real database |
 | [`READ-MODIFY-WRITE-NEEDS-A-LOCK`](#read-modify-write-needs-a-lock) | consistency | critical | invariant | a table written `update_in_place`, an open transaction, a real database |
 | [`APPEND-ONLY-HISTORY-IS-IMMUTABLE`](#append-only-history-is-immutable) | consistency | high | invariant | a table written `insert_only`, a real database |
+| [`HASH-CHAIN-CATCHES-TAMPERING`](#hash-chain-catches-tampering) | consistency | high | metamorphic | a hash-chaining method |
 | [`TIMEOUT-UNKNOWN-OUTCOME`](#timeout-unknown-outcome) | failure | critical | specification | a http or queue boundary, an injectable seam |
 | [`ORPHANED-AUTHORIZATION`](#orphaned-authorization) | failure | critical | invariant | an injectable seam, an open transaction |
 | [`UNCLASSIFIED-ERROR-NOT-RETRIED`](#unclassified-error-not-retried) | failure | high | specification | an injectable seam |
@@ -372,6 +375,91 @@ destroyed and no error is reported to anyone.
 | techniques | `faultInjection`, `narrowIntegration` |
 | needs | an injectable seam, an open transaction, a transfer function |
 
+### DEADLOCK-IS-RECOVERED
+
+**A deadlock between two transfers is retried, not corrupted**
+
+Run two transfers concurrently that touch the same two accounts in opposite
+order — one A to B, the other B to A — against a real database, enough times
+that Postgres's own deadlock detector eventually kills one of them.
+
+This is not a test that the deadlock never happens. Locking two rows in
+opposite orders across concurrent transactions WILL deadlock under real load;
+that is expected, documented database behaviour, not a bug to prevent. The
+bug this scenario finds is what happens next: the losing transaction must not
+leave a half-applied debit, and the deadlock must not reach the caller as a
+raw, unrecognised driver error it has no name for.
+
+There are two legitimate fixes, and this scenario accepts either: always lock
+the accounts in the same fixed order (so the deadlock cannot occur), or catch
+the database's deadlock/serialization error and retry the whole operation.
+What fails this test is neither: the deadlock surfaces unhandled, or one leg
+of a transfer is applied and the other lost.
+
+*Looking for:* a transaction that locks two or more account rows with no fixed ordering, and no retry around the whole operation when the driver reports a deadlock
+
+**Passes when**
+
+- both transfers eventually succeed, or the one that lost the deadlock returns a typed, retryable error rather than a raw driver error
+- the account that lost the deadlock has no partially-applied write — its balance reflects only committed transfers
+- running the same two transfers many times never leaves the two accounts' combined balance different from before
+
+**Wrong versions of this test**
+
+- asserting only that no panic occurred, which passes even if one transfer silently vanishes
+- running every transfer in the same account order, which can never trigger the deadlock this scenario exists to find
+- treating the retry itself as the bug — a caught-and-retried deadlock is the correct outcome, not a failure
+
+| | |
+|---|---|
+| severity | high |
+| oracle | `invariant` |
+| techniques | `concurrency`, `narrowIntegration` |
+| needs | an open transaction, a real database, a transfer function |
+
+### TENANT-ROWS-DONT-LEAK
+
+**One tenant's rows never answer for another's**
+
+The schema already scopes uniqueness by a discriminator column shared across
+several tables — the same shape as formancehq/ledger's buckets, where
+`create unique index ... on logs (ledger, idempotency_key)` lets two
+different ledgers each have their own row keyed `idempotency_key = abc`,
+because the ledger column is part of what makes a row unique, not the whole
+of it.
+
+Seed two tenants with a row carrying the SAME business key value in each —
+that only works at all because the schema allows it, which is what proves
+this is really a multi-tenant table and not a coincidence. Then call this
+tenant's own read path — the function every caller actually goes through,
+not a hand-written query — asking for the other tenant's business key.
+
+It must come back empty or not-found. The schema being right is not evidence
+the code is: the bug this looks for is a query that filters on the business
+key alone, written before the discriminator column existed or copied from
+one that never had it.
+
+*Looking for:* a query on a shared table that filters by business key alone, with no discriminator column in its WHERE clause
+
+**Passes when**
+
+- a query scoped to tenant B never returns a row that belongs to tenant A, even though both share the same business key value
+- the read is made through the application's own repository/query function, not a query built just for this test
+- the negative case is checked too: tenant A's own query for its own business key still succeeds
+
+**Wrong versions of this test**
+
+- using two tenants with different business keys, where a missing discriminator column would still happen to return the right row
+- querying the database directly instead of through the code path every real caller uses, which proves the schema is fine but not that the code uses it
+- assuming a NOT NULL or foreign key on the discriminator column is enough; neither one stops a WHERE clause that simply omits it
+
+| | |
+|---|---|
+| severity | critical |
+| oracle | `invariant` |
+| techniques | `narrowIntegration` |
+| needs | a shared-tenant discriminator column, a real database |
+
 ### READ-MODIFY-WRITE-NEEDS-A-LOCK
 
 **A row read then written back must be locked in between**
@@ -442,6 +530,49 @@ read still returns something sensible.
 | oracle | `invariant` |
 | techniques | `narrowIntegration`, `property` |
 | needs | a table written `insert_only`, a real database |
+
+### HASH-CHAIN-CATCHES-TAMPERING
+
+**Editing one record breaks every hash after it**
+
+A record's hash is computed from the record before it plus its own content —
+the same shape as formancehq/ledger's own log, where each entry hashes the
+previous entry's hash together with its own data. The point of a chain like
+this is that "nobody edited history" stops being a policy and becomes
+something a script can check.
+
+Build a real chain of several records the normal way records get created.
+Recompute the hash of every one of them, in order, from its own content and
+the previous record's stored hash. Every recomputed hash must match what is
+stored — for every record, not just the newest one.
+
+Then falsify it on purpose: take any one field on any one record in the
+MIDDLE of the chain and change it, without touching anything downstream.
+Recompute from there forward. Every record from the tampered one onward must
+now fail to match. If changing that field does not change what the hash
+function computes — or if only the newest record was ever checked to begin
+with — the chain is decoration, not evidence.
+
+*Looking for:* a hash chain whose check only covers the newest record, or a tampered field the hash function never actually reads
+
+**Passes when**
+
+- recomputing every record's hash from its own content and the previous record's stored hash matches what is stored, for the whole chain
+- changing any single field on any one record invalidates the recomputed hash for that record and every record after it
+- the untouched prefix of the chain, before the tampered record, still verifies correctly
+
+**Wrong versions of this test**
+
+- verifying only the newest record, which says nothing about whether the middle of the chain was ever touched
+- tampering with a field the hash function does not read, which proves the test tampered with the wrong thing rather than that the chain is sound
+- recomputing the "previous" hash from the in-memory record used to build the chain rather than what is actually stored, which cannot catch a record edited after the fact
+
+| | |
+|---|---|
+| severity | high |
+| oracle | `metamorphic` |
+| techniques | `metamorphic`, `unit` |
+| needs | a hash-chaining method |
 
 ---
 

@@ -52,6 +52,8 @@ type Requires struct {
 	Goroutine       bool
 
 	RealDatabase bool
+	MultiTenant  bool
+	HashChain    bool
 
 	BalanceFunc    bool
 	TransferFunc   bool
@@ -135,6 +137,14 @@ func (s Scenario) Applies(f *flowEntity.Flow, b Facts) (bool, string) {
 	if r.InjectableSeam && !anySeam(f, func(sm flowEntity.Seam) bool { return sm.Injectable }) {
 
 		return false, "every boundary in this flow is a concrete type, so no fault can be injected — extract an interface first"
+	}
+	if r.MultiTenant {
+		if _, ok := f.Infra.TenantScheme(); !ok {
+			return false, "no column leads a composite uniqueness constraint on two or more tables, so there is no shared-tenant discriminator to test for a leak"
+		}
+	}
+	if r.HashChain && len(f.HashChains) == 0 {
+		return false, "no method takes the previous instance of its own type and computes a cryptographic hash, so there is no hash chain to test"
 	}
 	return true, ""
 }

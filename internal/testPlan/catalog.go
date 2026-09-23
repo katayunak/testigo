@@ -755,6 +755,84 @@ destroyed and no error is reported to anyone.`,
 	},
 
 	{
+		ID:     "DEADLOCK-IS-RECOVERED",
+		Name:   "A deadlock between two transfers is retried, not corrupted",
+		Family: FamilyConsistency,
+		CaseScenario: `Run two transfers concurrently that touch the same two accounts in opposite
+order — one A to B, the other B to A — against a real database, enough times
+that Postgres's own deadlock detector eventually kills one of them.
+
+This is not a test that the deadlock never happens. Locking two rows in
+opposite orders across concurrent transactions WILL deadlock under real load;
+that is expected, documented database behaviour, not a bug to prevent. The
+bug this scenario finds is what happens next: the losing transaction must not
+leave a half-applied debit, and the deadlock must not reach the caller as a
+raw, unrecognised driver error it has no name for.
+
+There are two legitimate fixes, and this scenario accepts either. One is to
+always acquire the account locks in the same fixed order (sort the account
+identifiers before locking) so the deadlock cannot occur in the first place.
+The other is to catch the database's specific deadlock/serialization error
+and retry the whole operation. What fails this test is neither: the deadlock
+surfaces unhandled, or the account is left with one leg of the transfer
+applied and the other lost.`,
+		LookingFor: "a transaction that locks two or more account rows with no fixed ordering, and no retry around the whole operation when the driver reports a deadlock",
+		Acceptance: []string{
+			"both transfers eventually succeed, or the one that lost the deadlock returns a typed, retryable error rather than a raw driver error",
+			"the account that lost the deadlock has no partially-applied write — its balance reflects only committed transfers",
+			"running the same two transfers many times never leaves the two accounts' combined balance different from before",
+		},
+		AntiGoals: []string{
+			"asserting only that no panic occurred, which passes even if one transfer silently vanishes",
+			"running every transfer in the same account order, which can never trigger the deadlock this scenario exists to find",
+			"treating the retry itself as the bug — a caught-and-retried deadlock is the correct outcome, not a failure",
+		},
+		Techniques: []Technique{TechniqueConcurrency, TechniqueNarrowIntegration},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{OpensTx: true, RealDatabase: true, TransferFunc: true},
+		Severity:   flowEntity.SevHigh,
+	},
+
+	{
+		ID:     "TENANT-ROWS-DONT-LEAK",
+		Name:   "One tenant's rows never answer for another's",
+		Family: FamilyConsistency,
+		CaseScenario: `The schema already scopes uniqueness by a discriminator column shared across
+several tables — the same shape as formancehq/ledger's buckets, where
+"create unique index ... on logs (ledger, idempotency_key)" lets two
+different ledgers each have their own row keyed "idempotency_key = abc",
+because the ledger column is part of what makes a row unique, not the whole
+of it.
+
+Seed two tenants with a row carrying the SAME business key value in each —
+that only works at all because the schema allows it, which is what proves
+this is really a multi-tenant table and not a coincidence. Then call this
+tenant's own read path — the function every caller actually goes through,
+not a hand-written query — asking for the other tenant's business key.
+
+It must come back empty or not-found. It must never return the other
+tenant's row. The schema being right is not evidence the code is: the
+discriminator column already exists and evidently scopes uniqueness: the bug
+this looks for is a query that was written before that column existed, or
+copied from one that never had it, filtering on the business key alone.`,
+		LookingFor: "a query on a shared table that filters by business key alone, with no discriminator column in its WHERE clause",
+		Acceptance: []string{
+			"a query scoped to tenant B never returns a row that belongs to tenant A, even though both share the same business key value",
+			"the read is made through the application's own repository/query function, not a query built just for this test",
+			"the negative case is checked too: tenant A's own query for its own business key still succeeds",
+		},
+		AntiGoals: []string{
+			"using two tenants with different business keys, where a missing discriminator column would still happen to return the right row",
+			"querying the database directly instead of through the code path every real caller uses, which proves the schema is fine but not that the code uses it",
+			"assuming a NOT NULL or foreign key on the discriminator column is enough; neither one stops a WHERE clause that simply omits it",
+		},
+		Techniques: []Technique{TechniqueNarrowIntegration},
+		Oracle:     OracleInvariant,
+		Requires:   Requires{MultiTenant: true, RealDatabase: true},
+		Severity:   flowEntity.SevCritical,
+	},
+
+	{
 		ID:     "SELF-TRANSFER-REFUSED",
 		Name:   "A wallet cannot transfer to itself",
 		Family: FamilyMoney,
@@ -903,6 +981,44 @@ read still returns something sensible.`,
 		Requires: Requires{RealDatabase: true,
 			WritePatterns: []flowEntity.WritePattern{flowEntity.WriteInsertOnly}},
 		Severity: flowEntity.SevHigh,
+	},
+
+	{
+		ID:     "HASH-CHAIN-CATCHES-TAMPERING",
+		Name:   "Editing one record breaks every hash after it",
+		Family: FamilyConsistency,
+		CaseScenario: `A record's hash is computed from the record before it plus its own content —
+the same shape as formancehq/ledger's own log, where each entry hashes the
+previous entry's hash together with its own data. The point of a chain like
+this is that "nobody edited history" stops being a policy and becomes
+something a script can check.
+
+Build a real chain of several records the normal way records get created.
+Recompute the hash of every one of them, in order, from its own content and
+the previous record's stored hash. Every recomputed hash must match what is
+stored — for every record, not just the newest one.
+
+Then falsify it on purpose: take any one field on any one record in the
+MIDDLE of the chain and change it, without touching anything downstream.
+Recompute from there forward. Every record from the tampered one onward must
+now fail to match. If changing that field does not change what the hash
+function computes — or if only the newest record was ever checked to begin
+with — the chain is decoration, not evidence.`,
+		LookingFor: "a hash chain whose check only covers the newest record, or a tampered field the hash function never actually reads",
+		Acceptance: []string{
+			"recomputing every record's hash from its own content and the previous record's stored hash matches what is stored, for the whole chain",
+			"changing any single field on any one record invalidates the recomputed hash for that record and every record after it",
+			"the untouched prefix of the chain, before the tampered record, still verifies correctly",
+		},
+		AntiGoals: []string{
+			"verifying only the newest record, which says nothing about whether the middle of the chain was ever touched",
+			"tampering with a field the hash function does not read, which proves the test tampered with the wrong thing rather than that the chain is sound",
+			"recomputing the 'previous' hash from the in-memory record used to build the chain rather than what is actually stored, which cannot catch a record edited after the fact",
+		},
+		Techniques: []Technique{TechniqueMetamorphic, TechniqueUnit},
+		Oracle:     OracleMetamorphic,
+		Requires:   Requires{HashChain: true},
+		Severity:   flowEntity.SevHigh,
 	},
 
 	{

@@ -335,10 +335,12 @@ to keep them in sync by hand.
 
 ## Studies
 
-Every scenario testigo knows is listed in **[CATALOG.md](CATALOG.md)** — 31 of them,
+Every scenario testigo knows is listed in **[CATALOG.md](CATALOG.md)** — 34 of them,
 with what each needs, what passing means, and the specific wrong versions of each test.
 
 The research this is built on lives in [`studies/`](studies/).
 
 - [How real fintech systems test payment flows](studies/howRealFintechSystemsTestPaymentFlows.md) — 19 practices from Stripe, Adyen, Airbnb, Uber, Monzo, Starling, Nubank, Jepsen, TigerBeetle and others, each turned into a catalogue scenario.
+- [How tables are written, and how that breaks](studies/howTablesAreWrittenAndHowThatBreaks.md) — the write-pattern classifier behind scenarios like `LOST-UPDATE` and `UPSERT-HIDES-A-SECOND-EFFECT`.
+- [What Formance Ledger taught us](studies/whatFormanceLedgerTaughtUs.md) — reading a real open-source double-entry ledger end to end: one new scenario, three gaps we named instead of guessing at, and one thing even a mature ledger team leaves untested.
 - [Context engineering](studies/contextEngineering.md) — how to get a better answer from a model for fewer tokens, measured on this project.

@@ -61,6 +61,15 @@ func Select(f *flowEntity.Flow, b Facts) []TestCase {
 		if sc.Requires.StateMachine {
 			c.States = bestStateMachine(f, b.StateMachines)
 		}
+		if sc.Requires.MultiTenant {
+			if scheme, ok := f.Infra.TenantScheme(); ok {
+				c.Tenancy = &scheme
+			}
+		}
+		if sc.Requires.HashChain && len(f.HashChains) > 0 {
+			chain := f.HashChains[0]
+			c.HashChain = &chain
+		}
 
 		c.TargetPkg, c.TargetFile = target(f, sc, c.Size)
 		cases = append(cases, c)

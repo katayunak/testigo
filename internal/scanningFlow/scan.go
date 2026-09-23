@@ -84,6 +84,8 @@ func Scan(opts Options) (*Result, error) {
 	flow.States = extractStateMachines(pkgs, opts.Root, local, gen)
 	linkStateWritesToNodes(flow)
 
+	flow.HashChains = extractHashChains(pkgs, opts.Root)
+
 	flow.IdempotencyKeys = idempotencyCandidates(pkgs, flow, opts.Root, local)
 	flow.MoneyTypes = moneyCandidates(pkgs, flow, opts.Root, local)
 
