@@ -48,6 +48,8 @@ phase 1 · ScanningTheFlow
   testigo report  [dir]   everything found so far, and what it cost to find
                           --ask writes the prompt for an agent to produce REPORT.md
   testigo rules   [dir]   write a starter testigo/rules.json: what money movement means here
+  testigo mcp     [dir]   serve round 1 and round 2 as MCP tools over stdio,
+                          instead of files an agent reads and a human collects
 
 Phase 1 (ScanningTheFlow) reads only. Everything testigo writes goes in testigo/;
 your source files are never touched.
@@ -98,6 +100,8 @@ func run(args []string) error {
 		return cmdRules(root)
 	case "report":
 		return cmdReport(root, *askFor)
+	case "mcp":
+		return cmdMCP(root)
 	default:
 		fmt.Print(usage)
 		return fmt.Errorf("unknown command %q", cmd)
