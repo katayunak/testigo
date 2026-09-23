@@ -1,5 +1,9 @@
 # testigo
 
+[![CI](https://github.com/katayunak/testigo/actions/workflows/ci.yml/badge.svg)](https://github.com/katayunak/testigo/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)](go.mod)
+
 Testigo starts with the entry points of your payment flow and figures out what kind of payment system you have — whether it's a credit system, wallet, PSP payment, or something else.
 
 Then it reads your code and figures out what is actually happening inside the flow: how money moves, where state changes, what external systems are involved, what can go wrong, and what needs to be tested.
@@ -19,7 +23,7 @@ The result is faster and more focused testing, fewer wasted tokens, and a detail
 go install ./cmd/testigo
 ```
 
-Go 1.22+. No API key, no network, no vendor lock — the prompts are markdown you can
+Go 1.25+. No API key, no network, no vendor lock — the prompts are markdown you can
 read before you spend anything.
 
 ---
