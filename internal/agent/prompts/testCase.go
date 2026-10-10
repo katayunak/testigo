@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/katayunak/gofacts/fact"
 	"github.com/katayunak/testigo/internal/agent/domain"
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 	"github.com/katayunak/testigo/internal/testPlan"
 )
 
@@ -122,7 +122,7 @@ assertion so the suite comes back green is the least.
 
 const maxCaseWriteSites = 12
 
-func TestCase(c testPlan.TestCase, f *flowEntity.Flow, k *domain.AgentResponse) *Prompt {
+func TestCase(c testPlan.TestCase, f *fact.Flow, k *domain.AgentResponse) *Prompt {
 	var b strings.Builder
 	props := c.Technique.Props()
 
@@ -167,7 +167,7 @@ func TestCase(c testPlan.TestCase, f *flowEntity.Flow, k *domain.AgentResponse) 
 	return p
 }
 
-func caseFacts(c testPlan.TestCase, f *flowEntity.Flow) string {
+func caseFacts(c testPlan.TestCase, f *fact.Flow) string {
 	var b strings.Builder
 
 	if len(c.Seams) > 0 {

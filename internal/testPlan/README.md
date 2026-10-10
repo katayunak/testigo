@@ -68,15 +68,14 @@ anything touching money.
 
 Every scenario is listed in [CATALOG.md](../../CATALOG.md).
 
-**31 scenarios** in `catalog.go` across 7 families — consistency (7), money (6), idempotency (5), boundary (4), state (4), failure (3), ordering (2) — each written by
-boundary (4), idempotency (4), state (4), failure (3), ordering (2) — each written by
+**34 scenarios** in `catalog.go` across 7 families — consistency (10), money (6), idempotency (5), boundary (4), state (4), failure (3), ordering (2) — each written by
 hand from the published practice of companies that move money at scale, and each
 traceable to a source in
 [studies/](../../studies/howRealFintechSystemsTestPaymentFlows.md).
 
 Owning a scenario costs nothing. Only the ones whose preconditions match a repository
 are ever rendered, so the catalogue can grow without the prompt pack growing. On the
-wallet fixture, 24 of the 28 apply; the rest are reported *with the reason they do
+wallet fixture, 27 of the 34 apply; the rest are reported *with the reason they do
 not apply*, which is itself information.
 
 The sharpest filters come from **round one**, not from the compiler:
@@ -106,7 +105,7 @@ of "be careful".
 | file | holds |
 |---|---|
 | `scenario.go` | the `Scenario` struct, `Requires`, `Facts`, and `Applies` |
-| `catalog.go` | the 31 scenarios |
+| `catalog.go` | the 34 scenarios |
 | `testCase.go` | a scenario bound to a repository |
 | `testType.go` | Technique, Size, OracleProvenance, and each technique's stated limits |
 | `select.go` | which scenarios apply here, and why the others do not |

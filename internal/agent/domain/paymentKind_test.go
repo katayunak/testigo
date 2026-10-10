@@ -4,29 +4,29 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
-func flowWith(tables []flowEntity.Table, entities []string, fields []string, symbols []string) *flowEntity.Flow {
-	f := flowEntity.NewFlow("example.com/x")
+func flowWith(tables []fact.Table, entities []string, fields []string, symbols []string) *fact.Flow {
+	f := fact.NewFlow("example.com/x")
 	f.Infra.Tables = tables
 	f.Entities = map[string]string{}
 	for _, e := range entities {
 		f.Entities[e] = "pkg.Status"
 	}
 	for _, name := range fields {
-		f.MoneyTypes = append(f.MoneyTypes, flowEntity.Candidate{Name: name, Owner: "Order"})
+		f.MoneyTypes = append(f.MoneyTypes, fact.Candidate{Name: name, Owner: "Order"})
 	}
 	for i, s := range symbols {
-		f.Nodes[string(rune('a'+i))] = &flowEntity.Node{Ref: flowEntity.CodeRefOf("p", s, "x.go", 1)}
+		f.Nodes[string(rune('a'+i))] = &fact.Node{Ref: fact.CodeRefOf("p", s, "x.go", 1)}
 	}
 	return f
 }
 
-func table(name string, cols ...string) flowEntity.Table {
-	t := flowEntity.Table{Name: name, File: "1.sql", Line: 1}
+func table(name string, cols ...string) fact.Table {
+	t := fact.Table{Name: name, File: "1.sql", Line: 1}
 	for _, c := range cols {
-		t.Columns = append(t.Columns, flowEntity.Column{Name: c, Type: "text"})
+		t.Columns = append(t.Columns, fact.Column{Name: c, Type: "text"})
 	}
 	return t
 }
@@ -34,7 +34,7 @@ func table(name string, cols ...string) flowEntity.Table {
 func TestClassifyTellsTheKindsApart(t *testing.T) {
 	for _, c := range []struct {
 		name      string
-		flow      *flowEntity.Flow
+		flow      *fact.Flow
 		wantSpine PaymentType
 		wantMotor PaymentType
 		notMotor  []PaymentType
@@ -42,7 +42,7 @@ func TestClassifyTellsTheKindsApart(t *testing.T) {
 		{
 			name: "double entry ledger",
 			flow: flowWith(
-				[]flowEntity.Table{
+				[]fact.Table{
 					table("ledger_accounts", "id", "normal_side", "currency"),
 					table("entries", "id", "transaction_id", "amount", "direction"),
 				},
@@ -53,7 +53,7 @@ func TestClassifyTellsTheKindsApart(t *testing.T) {
 		{
 			name: "wallet and one-shot purchase",
 			flow: flowWith(
-				[]flowEntity.Table{
+				[]fact.Table{
 					table("wallets", "user_id", "balance"),
 					table("orders", "id", "amount", "status"),
 				},
@@ -64,7 +64,7 @@ func TestClassifyTellsTheKindsApart(t *testing.T) {
 		{
 			name: "authorize then capture",
 			flow: flowWith(
-				[]flowEntity.Table{
+				[]fact.Table{
 					table("payments", "id", "authorized_amount", "captured_amount", "captured_at"),
 				},
 				nil, nil, []string{"Capture", "Void"}),
@@ -74,7 +74,7 @@ func TestClassifyTellsTheKindsApart(t *testing.T) {
 		{
 			name: "subscription billing",
 			flow: flowWith(
-				[]flowEntity.Table{
+				[]fact.Table{
 					table("subscriptions", "id", "current_period_end", "billing_cycle_anchor"),
 					table("invoices", "id", "amount"),
 				},
@@ -96,7 +96,7 @@ func TestClassifyTellsTheKindsApart(t *testing.T) {
 		{
 			name: "marketplace split",
 			flow: flowWith(
-				[]flowEntity.Table{
+				[]fact.Table{
 					table("orders", "id", "amount", "seller_id", "platform_fee"),
 					table("seller_transfers", "id", "amount"),
 				},

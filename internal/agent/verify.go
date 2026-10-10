@@ -1,12 +1,15 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"github.com/katayunak/testigo/internal/agent/domain"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/katayunak/gofacts/gocmd"
+	"github.com/katayunak/gofacts/goenv"
 )
 
 type Written struct {
@@ -56,14 +59,14 @@ func WriteTest(root string, t *domain.CaseAnswer) (*Written, error) {
 	pkgDir := "./" + filepath.ToSlash(filepath.Dir(rel)) + "/"
 
 	var log strings.Builder
-	if out, err := run(root, "go", "build", pkgDir); err != nil {
+	if out, ok := runGo(root, "build", pkgDir); !ok {
 		fmt.Fprintf(&log, "go build failed:\n%s\n", out)
 		w.Output = log.String()
 		return w, nil
 	}
 	w.Compiles = true
 
-	if out, err := run(root, "go", "vet", pkgDir); err != nil {
+	if out, ok := runGo(root, "vet", pkgDir); !ok {
 		fmt.Fprintf(&log, "go vet failed:\n%s\n", out)
 		w.Output = log.String()
 		return w, nil
@@ -79,15 +82,15 @@ func RunTests(root, rel string, names []string) (string, bool) {
 	}
 	pkgDir := "./" + filepath.ToSlash(filepath.Dir(rel)) + "/"
 	pattern := "^(" + strings.Join(names, "|") + ")$"
-	out, err := run(root, "go", "test", "-race", "-count=1", "-run", pattern, pkgDir)
-	return out, err == nil
+	return runGo(root, "test", "-race", "-count=1", "-run", pattern, pkgDir)
 }
 
-func run(dir, name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
-	cmd.Dir = dir
+var raceNeedsCgo = gocmd.Options{Env: goenv.Options{CGO: true}}
 
-	cmd.Env = append(os.Environ(), "GOWORK=off")
-	out, err := cmd.CombinedOutput()
-	return string(out), err
+func runGo(dir string, args ...string) (string, bool) {
+	res, err := gocmd.Run(context.Background(), dir, raceNeedsCgo, args...)
+	if err != nil {
+		return res.Output + err.Error() + "\n", false
+	}
+	return res.Output, res.OK()
 }

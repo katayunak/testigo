@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/katayunak/gofacts/fact"
 	"github.com/katayunak/testigo/internal/agent/domain"
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
 func TestBatchingCutsTurnsNotJustBytes(t *testing.T) {
@@ -155,18 +155,18 @@ func TestMigrationsReachTheAgentOnce(t *testing.T) {
 	f := fixtureFlow()
 	f.Infra.MigrationDirs = []string{"db/migrations"}
 	f.Infra.MigrationFiles = 1
-	f.Infra.Tables = []flowEntity.Table{{
+	f.Infra.Tables = []fact.Table{{
 		Name: "payments", File: "db/migrations/1.sql", Line: 3,
-		Columns: []flowEntity.Column{
+		Columns: []fact.Column{
 			{Name: "id", Type: "bigserial", PrimaryKey: true},
 			{Name: "idempotency_key", Type: "text", NotNull: true},
 		},
 	}}
-	f.Infra.Constraints = []flowEntity.Constraint{{
+	f.Infra.Constraints = []fact.Constraint{{
 		Table: "payments", Columns: []string{"idempotency_key"},
 		Kind: "unique_index", File: "db/migrations/1.sql", Line: 9,
 	}}
-	f.Infra.Checks = []flowEntity.Check{{
+	f.Infra.Checks = []fact.Check{{
 		Table: "payments", Expr: "amount > 0", File: "db/migrations/1.sql", Line: 6,
 	}}
 

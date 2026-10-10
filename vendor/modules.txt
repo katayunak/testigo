@@ -1,6 +1,19 @@
 # github.com/google/jsonschema-go v0.4.3
 ## explicit; go 1.23.0
 github.com/google/jsonschema-go/jsonschema
+# github.com/katayunak/gofacts v0.1.0
+## explicit; go 1.25.0
+github.com/katayunak/gofacts/cite
+github.com/katayunak/gofacts/fact
+github.com/katayunak/gofacts/gocmd
+github.com/katayunak/gofacts/goenv
+github.com/katayunak/gofacts/internal/sqltext
+github.com/katayunak/gofacts/llmout
+github.com/katayunak/gofacts/load
+github.com/katayunak/gofacts/naming
+github.com/katayunak/gofacts/scan
+github.com/katayunak/gofacts/sqlschema
+github.com/katayunak/gofacts/sqlstmt
 # github.com/modelcontextprotocol/go-sdk v1.8.0
 ## explicit; go 1.25.0
 github.com/modelcontextprotocol/go-sdk/auth
@@ -58,6 +71,8 @@ golang.org/x/tools/go/buildutil
 golang.org/x/tools/go/callgraph
 golang.org/x/tools/go/callgraph/cha
 golang.org/x/tools/go/callgraph/internal/chautil
+golang.org/x/tools/go/callgraph/vta
+golang.org/x/tools/go/callgraph/vta/internal/trie
 golang.org/x/tools/go/gcexportdata
 golang.org/x/tools/go/internal/cgo
 golang.org/x/tools/go/loader

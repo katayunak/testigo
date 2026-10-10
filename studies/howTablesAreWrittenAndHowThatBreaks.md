@@ -235,6 +235,10 @@ than by asking a model.
 
 ## Measured on two real services
 
+These counts come from testigo's own scanner, before it moved to gofacts. gofacts
+reads SQL from any argument of a call, not only the first, so a re-run may find
+more writes. They have not been re-measured.
+
 | | wallet | payment |
 |---|---|---|
 | `insert_only` tables | 5 | 5 |

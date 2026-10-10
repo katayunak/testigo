@@ -4,12 +4,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
-func Select(f *flowEntity.Flow, b Facts) []TestCase {
-	seamsByKind := map[flowEntity.SeamKind][]flowEntity.Seam{}
-	var injectable []flowEntity.Seam
+func Select(f *fact.Flow, b Facts) []TestCase {
+	seamsByKind := map[fact.SeamKind][]fact.Seam{}
+	var injectable []fact.Seam
 	for _, s := range f.Seams {
 		seamsByKind[s.Kind] = append(seamsByKind[s.Kind], s)
 		if s.Injectable {
@@ -45,7 +45,7 @@ func Select(f *flowEntity.Flow, b Facts) []TestCase {
 			c.Size = SizeMedium
 		}
 
-		var candidates []flowEntity.Seam
+		var candidates []fact.Seam
 		if len(sc.Requires.SeamKinds) > 0 {
 			for _, k := range sc.Requires.SeamKinds {
 				candidates = append(candidates, seamsByKind[k]...)
@@ -84,13 +84,13 @@ func Select(f *flowEntity.Flow, b Facts) []TestCase {
 	return cases
 }
 
-func severityRank(s flowEntity.Severity) int {
+func severityRank(s fact.Severity) int {
 	switch s {
-	case flowEntity.SevCritical:
+	case fact.SevCritical:
 		return 0
-	case flowEntity.SevHigh:
+	case fact.SevHigh:
 		return 1
-	case flowEntity.SevMedium:
+	case fact.SevMedium:
 		return 2
 	}
 	return 3
@@ -109,7 +109,7 @@ func funcName(s Scenario) string {
 	return b.String()
 }
 
-func target(f *flowEntity.Flow, s Scenario, size Size) (pkg, file string) {
+func target(f *fact.Flow, s Scenario, size Size) (pkg, file string) {
 	dir := "."
 	pkgPath := ""
 	if len(f.Entries) > 0 {
@@ -127,8 +127,8 @@ func target(f *flowEntity.Flow, s Scenario, size Size) (pkg, file string) {
 	return pkgPath, dir + "/" + strings.ToLower(string(s.Family)) + suffix
 }
 
-func bestStateMachine(f *flowEntity.Flow, roles map[string]flowEntity.StateRoles) *flowEntity.StateMachine {
-	var best *flowEntity.StateMachine
+func bestStateMachine(f *fact.Flow, roles map[string]fact.StateRoles) *fact.StateMachine {
+	var best *fact.StateMachine
 	bestScore := -1
 	for i := range f.States {
 		m := &f.States[i]
@@ -143,7 +143,7 @@ func bestStateMachine(f *flowEntity.Flow, roles map[string]flowEntity.StateRoles
 	return best
 }
 
-func lifecycleScore(rs flowEntity.StateRoles) int {
+func lifecycleScore(rs fact.StateRoles) int {
 	if len(rs) == 0 {
 		return 0
 	}
@@ -157,7 +157,7 @@ func lifecycleScore(rs flowEntity.StateRoles) int {
 	return score
 }
 
-func reachableFrom(f *flowEntity.Flow) map[string]bool {
+func reachableFrom(f *fact.Flow) map[string]bool {
 	seen := map[string]bool{}
 	if len(f.Entries) == 0 {
 		for id := range f.Nodes {
@@ -185,9 +185,9 @@ func reachableFrom(f *flowEntity.Flow) map[string]bool {
 	return seen
 }
 
-func scopeSeams(in []flowEntity.Seam, reachable map[string]bool) []flowEntity.Seam {
+func scopeSeams(in []fact.Seam, reachable map[string]bool) []fact.Seam {
 	seen := map[string]bool{}
-	var out []flowEntity.Seam
+	var out []fact.Seam
 	for _, s := range in {
 		if !reachable[s.In.ID()] || seen[s.Target] {
 			continue
