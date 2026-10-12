@@ -26,6 +26,9 @@ go install ./cmd/testigo
 Go 1.25+. No API key, no network, no vendor lock — the prompts are markdown you can
 read before you spend anything.
 
+Phase 2 runs two ways: as markdown files any agent can read, or as an
+[MCP server](#phase-2-as-mcp-tools) (`testigo mcp`) that an agent calls directly.
+
 ---
 
 ## Two phases, and why they are separate
@@ -33,7 +36,7 @@ read before you spend anything.
 | Phase | Name | What it does | Cost |
 |---|---|---|---|
 | 1 | `ScanningTheFlow` | the Go type checker and SSA prove what is provable: reachable functions, seams, state machines, money fields, findings | **free**, no network |
-| 2 | `AskingTheAgent` | an agent answers only the residue, as bounded questions whose answers can be checked back against the code | tokens |
+| 2 | `AskingTheAgent` | an agent answers only the residue, as bounded questions whose answers can be checked back against the code — through files, or through MCP tools | tokens |
 
 The split is the whole design. A compiler is free, exact and has no opinion; a model
 is expensive, fallible and will answer anything you ask. So the compiler goes first
@@ -94,7 +97,7 @@ Writes `testigo/flow.json`. Your source files are never touched.
 
 ```
 $ testigo ask --explain --round 1 .
-ask plan   27 scenario(s) runnable, 1 blocked
+ask plan   28 scenario(s) runnable, 6 blocked
 budget     none; output counted 5x
 
 ASKED
@@ -143,6 +146,44 @@ testigo report --ask .   # a prompt; the agent writes testigo/REPORT.md
 Every claim must cite `file:line`, and every proposed fix must be safe for money:
 nothing that could charge twice, drop a payment or lose the audit trail. A database
 constraint beats a check in Go, and the cost of the fix has to be stated.
+
+---
+
+## Phase 2 as MCP tools
+
+Steps 3 and 4 pass files back and forth: testigo writes prompts, the agent writes
+JSON, and someone runs `collect`. `testigo mcp` removes the files. It serves the same
+two rounds as five [MCP](https://modelcontextprotocol.io) tools over stdio, so the
+agent asks for work and gets its answers checked in the same conversation.
+
+```sh
+claude mcp add testigo -- testigo mcp /path/to/your/repo
+```
+
+Any other MCP client works the same way:
+
+```json
+{ "mcpServers": { "testigo": { "command": "testigo", "args": ["mcp", "/path/to/your/repo"] } } }
+```
+
+Run `testigo scan` first. The server reads `testigo/flow.json`; it does not scan.
+
+| Tool | What it does |
+|---|---|
+| `testigo_status` | which round is next, why round 2 might be blocked, and what the next round will cost |
+| `testigo_round1_get_pack` | the shared preamble once, then every unanswered batch of round-1 questions |
+| `testigo_round1_submit_answers` | checks one batch right away: good answers are applied, bad ones come back with what is wrong, missing ones are named |
+| `testigo_round2_next_case` | the brief for the next test to write, or all of them with `all: true` |
+| `testigo_round2_submit_test` | writes the test, builds it, vets it, runs it with `-race`, and returns the result with failure output trimmed |
+
+Every tool is a thin layer over the functions the CLI already uses, so the files and
+MCP give the same answers, the same checks and the same tests. Only the transport is
+new.
+
+One lesson from building it: the Go MCP SDK builds each tool's JSON schema from the
+Go type. A field typed `json.RawMessage` turns into "an array of bytes", so every real
+call failed validation before reaching the handler. `go build` and `go vet` passed. Only
+a real call over stdio caught it.
 
 ---
 
@@ -251,7 +292,7 @@ argument and the measurements.
 | Term | Meaning |
 |---|---|
 | **Seam** | a call that leaves the process; injectable if it goes through an interface your repo defines |
-| **Scenario** | one of 31 catalogued ways a payment system breaks, in 7 families; declares what it `Requires` — see [CATALOG.md](CATALOG.md) |
+| **Scenario** | one of 34 catalogued ways a payment system breaks, in 7 families; declares what it `Requires` — see [CATALOG.md](CATALOG.md) |
 | **Technique** | how a scenario is expressed: fault injection, concurrency, property, table, fuzz, metamorphic, state machine, narrow integration… |
 | **Question** | one thing testigo cannot prove, with the problem it guards against and where the answer lives |
 | **Payment kind** | spine (double-entry, wallet, stateless), motions (top-up, payout, escrow…) and overlays (refund, reconciliation, FX) |
@@ -264,7 +305,7 @@ argument and the measurements.
 
 | Package | Owns | Docs |
 |---|---|---|
-| `cmd/testigo` | the CLI: one function per command | [README](cmd/testigo/README.md) |
+| `cmd/testigo` | the CLI: one function per command, plus the MCP server | [README](cmd/testigo/README.md) |
 | `internal/scanningFlow` | phase 1 — SSA, the call graph, seams, state machines, money, findings | [README](internal/scanningFlow/README.md) |
 | `internal/scanningFlow/patterns` | name matching, word-boundary aware, so `Current` is not a currency | [README](internal/scanningFlow/patterns/README.md) |
 | `internal/scanningFlow/flowEntity` | the flow's types, and what gets persisted | [README](internal/scanningFlow/flowEntity/README.md) |
@@ -276,7 +317,7 @@ argument and the measurements.
 | `internal/config` | everything under `testigo/`: config, rules and `flow.json` | [README](internal/config/README.md) |
 | `internal/report` | the printed summary and the Mermaid diagrams | [README](internal/report/README.md) |
 
-11 packages, ~14.5k lines of Go.
+11 packages, ~14k lines of Go and ~3k lines of tests.
 
 ---
 
@@ -305,6 +346,7 @@ directory is stale, run the scan with `GOFLAGS=-mod=mod`.
 - The seam filter over-approximates. A VTA call graph would be more precise than CHA.
 - True/false verdicts are collected per question, but nothing yet rolls them up into per-area conclusions.
 - Recheck questions — where the agent re-confirms a fact phase 1 proved, with the proof attached — are built and tested, but nothing currently produces one.
+- Phase 1 is moving out of `internal/scanningFlow` into [gofacts](https://github.com/katayunak/gofacts), a standalone library that started as this package. That work is on the [`feat/gofacts`](https://github.com/katayunak/testigo/tree/feat/gofacts) branch and is not merged yet.
 
 ---
 
