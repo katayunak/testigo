@@ -69,9 +69,22 @@ func TestADiscoveredFalseNeedsNoExplanation(t *testing.T) {
 
 func TestAMissingVerdictIsNotASilentFalse(t *testing.T) {
 	q := *Discover("q", "is it?", "why").Bool()
-	a := &QuestionAnswer{Info: "I could not tell"}
+	a := &QuestionAnswer{}
 	if err := a.Validate(q); err == nil || !strings.Contains(err.Error(), "verdict") {
 		t.Fatalf("a missing verdict must be reported, not defaulted, got %v", err)
+	}
+}
+
+func TestAMissingVerdictWithAReasonIsAnHonestUnknown(t *testing.T) {
+	q := *Discover("q", "is it?", "why").Bool()
+	for _, info := range []string{"unknown — nothing reachable decides it", "not applicable — there is no balance"} {
+		a := &QuestionAnswer{Info: info}
+		if err := a.Validate(q); err != nil {
+			t.Fatalf("the prompt tells the agent to omit the verdict and say why; refusing that forces a guessed false: %v", err)
+		}
+		if a.True() || a.False() {
+			t.Fatalf("an explained unknown must read as neither true nor false")
+		}
 	}
 }
 

@@ -98,8 +98,9 @@ func (a *QuestionAnswer) False() bool { return a.Verdict != nil && !*a.Verdict }
 
 func (a *QuestionAnswer) Validate(q Question) error {
 	switch {
-	case q.TrueOrFalse && a.Verdict == nil:
-		return fmt.Errorf("%s is a true/false question and `verdict` is missing", q.ID)
+	case q.TrueOrFalse && a.Verdict == nil && strings.TrimSpace(a.Info) == "":
+		return fmt.Errorf("%s is a true/false question and `verdict` is missing: "+
+			"if you cannot tell, or it does not apply here, say so in `info`", q.ID)
 	case q.Rechecking() && a.False() && strings.TrimSpace(a.Info) == "":
 		return fmt.Errorf("%s came back false, which overturns something testigo proved from the source: "+
 			"say in one line what is true instead", q.ID)

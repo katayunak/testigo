@@ -60,7 +60,7 @@ var registry = []Field{
 	{"externalEffect.accepts_dedup_key", Live, "prompts.TestCase via Deduplicated"},
 	{"externalEffect.moves_money", Live, "prompts.TestCase via IsTrue(MovesMoney)"},
 
-	{"questions.verdict", Live, "prompts.TestCase per scenario and technique; report prompt"},
+	{"questions.verdict", Live, "prompts.TestCase per scenario and technique; domain.RollUp into prompts.TestCase and the report prompt"},
 	{"questions.info", Live, "prompts.TestCase per scenario and technique; report prompt"},
 }
 

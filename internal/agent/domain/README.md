@@ -81,12 +81,50 @@ Anything else is read the unsafe way. Assuming a charge is repeatable when it is
 bills someone twice; the reverse costs one extra test.
 `TestUnknownExternalEffectIsTreatedAsIrreversible` keeps the defaults pointing there.
 
+## Features — what the answers add up to
+
+One answer is a fact about one question. A **feature** is a claim about the system that
+several answers can speak to, filed under one of four areas: Money, Seams, Flow, Main entity.
+
+```go
+Feature{
+    ID:    "money.balance_guard_is_atomic",
+    Claim: "Every balance check and the write it guards happen in one statement or under a row lock.",
+    Evidence: []Evidence{
+        holdsIfTrue("BALANCE-NEVER-NEGATIVE.guard_is_atomic"),
+        holdsIfFalse("LOST-UPDATE.locking"),
+    },
+    Informs: []string{"BALANCE-NEVER-NEGATIVE", "LOST-UPDATE"},
+}
+```
+
+Each piece of evidence says which answer supports the claim, because the safe answer is
+sometimes `false`. `RollUp` marks each answered question `+` (supports), `-` (contradicts)
+or `?` (no verdict), and gives each feature one standing:
+
+| marks | standing |
+|---|---|
+| any `-` | does not hold |
+| any `?`, no `-` | unsettled |
+| only `+` | holds |
+
+A known break is never hidden behind an unknown. An unknown never counts as holding,
+which is the same unsafe default the rest of phase 2 uses. A feature nobody answered is
+left out.
+
+`Informs` names the scenarios whose round-two case should see the claim. Every
+true/false question is either counted by a feature or listed in `NotRolledUp` with the
+reason; `TestEveryTrueOrFalseQuestionIsRolledUpOrSaysWhyNot` keeps that true as
+questions are added.
+
 ## Validation
 
 Nothing here can tell whether an answer is *correct*. It can tell whether it is about
 this repository at all: every state named must exist, every declared state needs a
 role, a claim needs a `file:line`, the prompt's own placeholder coming back is
-rejected, and a true/false question with no verdict is refused rather than defaulted.
+rejected, and a true/false question with no verdict and no reason is refused rather
+than defaulted. With a reason ("unknown", "not applicable") it is kept as neither
+true nor false, because a forced `false` would read as a real no.
 
 ## Files
 
@@ -97,5 +135,7 @@ rejected, and a true/false question with no verdict is refused rather than defau
 | `paymentKind.go` | the three axes and their combinations |
 | `paymentKindDetect.go` | classifying a repository, with reasons |
 | `paymentKindQuestions.go` | the per-kind question registry |
+| `features.go` | `Feature`, `Evidence`, `RollUp` and the standing rules |
+| `featureCatalog.go` | every feature, and the true/false questions left out, with why |
 | `answer.go` | every answer shape, its validation, and `Proof` |
 | `ask.go` | `Ask`, `Kind`, `Round`, and answer-file naming |

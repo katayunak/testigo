@@ -35,6 +35,9 @@ func Report(f *flowEntity.Flow, k *domain.AgentResponse, cases []testPlan.TestCa
 	if s := runsBlock(k); s != "" {
 		p.Fact(Proof, "Test results", s)
 	}
+	if s := reportConclusions(k); s != "" {
+		p.Fact(Supporting, "What the answers add up to, by area", s)
+	}
 	if s := answersBlock(k); s != "" {
 		p.Fact(Supporting, "What the agent was told about this repository", s)
 	}
@@ -243,6 +246,19 @@ func runsBlock(k *domain.AgentResponse) string {
 		}
 	}
 	return b.String()
+}
+
+func reportConclusions(k *domain.AgentResponse) string {
+	if k == nil {
+		return ""
+	}
+	s := conclusionsBlock(domain.RollUp(k.PaymentKind), func(string) bool { return true })
+	if s == "" {
+		return ""
+	}
+	return s + "The reason behind each - and ? is in the answers block below.\n" +
+		"A claim that does not hold is a weakness to report, with its file:line.\n" +
+		"A claim that holds is a strength only where the code shows it.\n"
 }
 
 func answersBlock(k *domain.AgentResponse) string {

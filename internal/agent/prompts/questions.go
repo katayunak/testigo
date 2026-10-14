@@ -81,7 +81,9 @@ A ` + "`true`" + ` verdict is the whole answer. Add ` + "`info`" + ` only where 
 for a sentence, or where a verdict is ` + "`false`" + ` on something testigo already found.
 
 Every question ID above must appear exactly once. If you genuinely cannot tell,
-omit ` + "`verdict`" + ` and say in ` + "`info`" + ` what would settle it.`)
+omit ` + "`verdict`" + ` and say in ` + "`info`" + ` what would settle it. If the question does
+not apply to this repository, omit ` + "`verdict`" + ` and say so in ` + "`info`" + `. Never
+answer ` + "`false`" + ` to mean "unknown" or "not applicable": a false is read as a real no.`)
 	return b.String()
 }
 

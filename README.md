@@ -209,7 +209,9 @@ questions they cannot be written without. Nothing else is asked, ever.
 Round-one answers feed round two, **scoped per case**: a state test receives the
 states it must refuse, a fault-injection test receives the verdicts for the seams it
 fakes, an idempotency test receives the key facts. No case sees another scenario's
-answers.
+raw answers. It can see what they add up to: the true/false verdicts roll up into
+claims about money, seams, flow and the main entity, and a case gets a claim only
+when the claim names its scenario.
 
 Round 2 is gated on round 1 for a reason. If the agent names the wrong money-moving
 call, a test written in the same breath would encode that mistake and pass forever.
@@ -303,7 +305,8 @@ directory is stale, run the scan with `GOFLAGS=-mod=mod`.
 ## Limits, stated plainly
 
 - The seam filter over-approximates. A VTA call graph would be more precise than CHA.
-- True/false verdicts are collected per question, but nothing yet rolls them up into per-area conclusions.
+- The roll-up into per-area claims counts only true/false verdicts. The per-seam verdicts and the money model reach cases directly, but they are not part of it.
+- Seven true/false questions are not rolled up, because a `true` or `false` alone does not say which way the system leans. `NotRolledUp` in `internal/agent/domain/featureCatalog.go` gives the reason for each.
 - Recheck questions — where the agent re-confirms a fact phase 1 proved, with the proof attached — are built and tested, but nothing currently produces one.
 
 ---

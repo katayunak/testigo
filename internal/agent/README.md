@@ -57,7 +57,8 @@ this repository at all:
 - a claim without a `file:line` is rejected;
 - the placeholder from the prompt's own example coming back is rejected;
 - an answer to a question that was not asked is rejected; an unanswered one is reported by ID;
-- a true/false question with no verdict is rejected, never read as `false`;
+- a true/false question with no verdict and no reason is rejected, never read as `false`;
+  with a reason ("unknown", "not applicable") it is kept as neither true nor false;
 - a generated test that sleeps, opens a socket, or cannot prove it reached its situation is rejected;
 - a test marked blocked with no reason is rejected.
 

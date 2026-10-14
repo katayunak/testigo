@@ -48,11 +48,16 @@ answers:
 ```
 FACTS — proved by the compiler, do not re-derive
 ANSWERED IN ROUND ONE — about this case only, do not re-ask
+WHAT OTHER ANSWERS ADD UP TO — claims this scenario depends on
 ```
 
 A state test gets the states it must refuse and the illegal pairs. A fault-injection
 test gets the five verdicts for the seams it fakes. An idempotency test gets the key
-facts. No case sees a neighbouring scenario's answers.
+facts. No case sees a neighbouring scenario's raw answers.
+
+The third block comes from `domain.RollUp`. A case gets a claim only when the claim
+names its scenario, and only when at least one answer behind it is one the case does
+not already see. A claim built only from the case's own answers would repeat them.
 
 This is cheaper, and it is better: irrelevant context is not neutral. It invites the
 model to use it, and a test that drifts toward a neighbouring scenario is worse than
@@ -84,5 +89,6 @@ if fake.CallCount() == 0 {
 | `stateRoles.go` | one machine's states and their roles |
 | `externalEffect.go` | five verdicts about one seam |
 | `testCase.go` | round two: one test per runnable scenario |
+| `conclusions.go` | the roll-up, as a case block and as a report block |
 | `report.go` | the prompt that produces `REPORT.md` |
 | `flowSteps.go`, `migrations.go` | the flow and schema, rendered once for the preamble |
