@@ -247,8 +247,12 @@ func BlockedReason(f *flowEntity.Flow, k *domain.AgentResponse) string {
 			missing = append(missing, "transitions for "+shortType(m.Type))
 		}
 	}
+	askable := map[string]bool{}
+	for _, target := range prompts.SeamTargets(f) {
+		askable[target] = true
+	}
 	for target := range d.Seams {
-		if k.ExternalEffects[target] == nil {
+		if askable[target] && k.ExternalEffects[target] == nil {
 			missing = append(missing, "retry safety of "+target)
 		}
 	}

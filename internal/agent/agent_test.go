@@ -315,6 +315,44 @@ func TestRoundTwoIsUnblockedByOnlyTheSeamsAnyRunnableScenarioNeeds(t *testing.T)
 	}
 }
 
+func TestAnsweringEveryRoundOneSeamQuestionUnblocksRoundTwo(t *testing.T) {
+	f := fixtureFlow()
+	k := domain.NewAgentResponse()
+	k.MoneyModel = &domain.MoneyModelAnswer{
+		Money:       domain.Money{Type: "example.com/paysvc/domain.Amount"},
+		BalanceFunc: domain.Proof{Symbol: "example.com/paysvc/ledger.Balance"},
+	}
+	for _, m := range f.States {
+		k.Transitions[m.Type] = &domain.TransitionsAnswer{}
+	}
+	process := f.Seams[0].In
+	f.Seams = append(f.Seams, flowEntity.Seam{
+		In:         process,
+		Kind:       flowEntity.SeamRandom,
+		Target:     "(example.com/paysvc/ids.Source).New",
+		Line:       30,
+		Injectable: true,
+		Iface:      "example.com/paysvc/ids.Source",
+	})
+
+	d := planner.Demanded(f, factsOf(k))
+	if _, ok := d.Seams["(*database/sql.DB).BeginTx"]; !ok {
+		t.Fatal("fixture setup: expected a runnable scenario to demand a DB seam not named Commit, or this test proves nothing")
+	}
+	if _, ok := d.Seams["(example.com/paysvc/ids.Source).New"]; !ok {
+		t.Fatal("fixture setup: expected a runnable scenario to demand the injectable random seam, or this test proves nothing")
+	}
+
+	for _, a := range Plan(f, k, domain.RoundUnderstand) {
+		if a.Kind == domain.KindExternalEffect {
+			k.ExternalEffects[a.Subject] = &domain.ExternalEffectAnswer{}
+		}
+	}
+	if r := BlockedReason(f, k); r != "" {
+		t.Fatalf("every retry-safety question round 1 asked is answered, yet round 2 is still blocked: %q", r)
+	}
+}
+
 func TestWriteTestRefusesDangerousPaths(t *testing.T) {
 	dir := t.TempDir()
 	for _, path := range []string{
