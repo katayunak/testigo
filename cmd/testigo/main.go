@@ -339,9 +339,7 @@ func cmdCollect(root string) error {
 		return fmt.Errorf("%w — run 'testigo ask' first", err)
 	}
 
-	_ = rules
-
-	got, err := agent.Collect(config.Dir(root), flow, answers, pack.Asks)
+	got, err := agent.Collect(config.Dir(root), flow, answers, rules, pack.Asks)
 	if err != nil {
 		return err
 	}
@@ -549,7 +547,7 @@ func cmdCases(root string) error {
 		}
 	}
 
-	asks := agent.Plan(flow, answers, domain.RoundGenerate)
+	asks, _ := agent.PlanWith(flow, answers, domain.RoundGenerate, rules, 0)
 	cost := agent.Estimate(domain.RoundGenerate, asks, agent.Preamble(flow, domain.RoundGenerate))
 	fmt.Printf("\ngenerating these would cost roughly %s tokens of input\n", thousands(cost.EstTokens))
 	return nil

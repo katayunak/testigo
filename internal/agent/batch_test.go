@@ -96,7 +96,7 @@ func TestOneBadEntryFailsOnlyItself(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := Collect(dir, f, domain.NewAgentResponse(), batch.Asks)
+	got, err := Collect(dir, f, domain.NewAgentResponse(), nil, batch.Asks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestWrongShapeIsAnErrorNotSixtyMissingAnswers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := Collect(dir, f, domain.NewAgentResponse(), batch.Asks)
+	got, err := Collect(dir, f, domain.NewAgentResponse(), nil, batch.Asks)
 	if err != nil {
 		t.Fatal(err)
 	}
