@@ -116,7 +116,7 @@ func (s *testigoMCP) status(_ context.Context, _ *mcp.CallToolRequest, _ StatusI
 		return nil, out, nil
 	}
 
-	if reason := agent.BlockedReason(flow, answers); reason != "" {
+	if reason := agent.BlockedReason(flow, answers, rules); reason != "" {
 		out.Round, out.RoundName, out.Blocked = 2, domain.RoundGenerate.String(), reason
 		return nil, out, nil
 	}
@@ -210,7 +210,7 @@ type Round1SubmitOut struct {
 }
 
 func (s *testigoMCP) round1SubmitAnswers(_ context.Context, _ *mcp.CallToolRequest, in Round1SubmitIn) (*mcp.CallToolResult, Round1SubmitOut, error) {
-	flow, answers, _, err := s.load()
+	flow, answers, rules, err := s.load()
 	if err != nil {
 		return nil, Round1SubmitOut{}, err
 	}
@@ -258,7 +258,7 @@ func (s *testigoMCP) round1SubmitAnswers(_ context.Context, _ *mcp.CallToolReque
 			out.Invalid[k] = e.Error()
 		}
 	}
-	if reason := agent.BlockedReason(flow, answers); reason != "" {
+	if reason := agent.BlockedReason(flow, answers, rules); reason != "" {
 		out.Round2Blocked = reason
 	} else {
 		out.Round2Ready = true
@@ -285,11 +285,11 @@ type Round2NextOut struct {
 }
 
 func (s *testigoMCP) round2NextCase(_ context.Context, _ *mcp.CallToolRequest, in Round2NextIn) (*mcp.CallToolResult, Round2NextOut, error) {
-	flow, answers, _, err := s.load()
+	flow, answers, rules, err := s.load()
 	if err != nil {
 		return nil, Round2NextOut{}, err
 	}
-	if reason := agent.BlockedReason(flow, answers); reason != "" {
+	if reason := agent.BlockedReason(flow, answers, rules); reason != "" {
 		return nil, Round2NextOut{Blocked: reason}, nil
 	}
 
