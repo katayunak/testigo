@@ -262,7 +262,7 @@ func cmdAsk(root string, roundNum int, budget int, explain bool) error {
 
 	round := domain.Round(roundNum)
 	if round == domain.RoundGenerate {
-		if reason := agent.BlockedReason(flow, answers); reason != "" {
+		if reason := agent.BlockedReason(flow, answers, rules); reason != "" {
 			return fmt.Errorf("round 2 needs round 1 first: %s\n\n"+
 				"Generating tests from half-collected context produces tests that look\n"+
 				"complete and check the wrong thing, which is the whole reason the rounds\n"+
@@ -352,8 +352,6 @@ func cmdCollect(root string) error {
 		return fmt.Errorf("%w — run 'testigo ask' first", err)
 	}
 
-	_ = rules
-
 	got, err := agent.Collect(config.Dir(root), flow, answers, pack.Asks)
 	if err != nil {
 		return err
@@ -383,7 +381,7 @@ func cmdCollect(root string) error {
 	if len(got.Cases) > 0 {
 		return applyGeneratedTests(root, config.Dir(root), answers, got.Cases)
 	}
-	if reason := agent.BlockedReason(flow, answers); reason != "" {
+	if reason := agent.BlockedReason(flow, answers, rules); reason != "" {
 		fmt.Printf("round 2 not ready: %s\n", reason)
 	} else {
 		fmt.Println("round 1 complete — run 'testigo ask --round 2' to generate tests")

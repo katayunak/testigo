@@ -5,6 +5,7 @@ import (
 	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/agent/planner"
 	"github.com/katayunak/testigo/internal/agent/prompts"
+	"github.com/katayunak/testigo/internal/config"
 	"os"
 	"path/filepath"
 	"strings"
@@ -281,21 +282,21 @@ func TestRoundTwoIsBlockedUntilRoundOneIsAnswered(t *testing.T) {
 	f := fixtureFlow()
 	k := domain.NewAgentResponse()
 
-	if BlockedReason(f, k) == "" {
+	if BlockedReason(f, k, nil) == "" {
 		t.Fatal("round 2 should be blocked with no answers at all")
 	}
 	k.MoneyModel = &domain.MoneyModelAnswer{}
-	if r := BlockedReason(f, k); r == "" || !strings.Contains(r, "transitions") {
+	if r := BlockedReason(f, k, nil); r == "" || !strings.Contains(r, "transitions") {
 		t.Fatalf("should still be blocked on transitions, got %q", r)
 	}
 	k.Transitions["example.com/paysvc/domain.PaymentStatus"] = &domain.TransitionsAnswer{}
-	if r := BlockedReason(f, k); r == "" {
+	if r := BlockedReason(f, k, nil); r == "" {
 		t.Fatal("should still be blocked on retry safety of the seams")
 	}
 	for _, target := range prompts.SeamTargets(f) {
 		k.ExternalEffects[target] = &domain.ExternalEffectAnswer{}
 	}
-	if r := BlockedReason(f, k); r != "" {
+	if r := BlockedReason(f, k, nil); r != "" {
 		t.Fatalf("should be unblocked now, got %q", r)
 	}
 }
@@ -326,8 +327,47 @@ func TestRoundTwoIsUnblockedByOnlyTheSeamsAnyRunnableScenarioNeeds(t *testing.T)
 	for target := range d.Seams {
 		k.ExternalEffects[target] = &domain.ExternalEffectAnswer{}
 	}
-	if r := BlockedReason(f, k); r != "" {
+	if r := BlockedReason(f, k, nil); r != "" {
 		t.Fatalf("round 2 must not stay blocked on a seam nothing runnable touches — the planner never asks about those, so this gate could never be satisfied: %q", r)
+	}
+}
+
+func TestScenarioTurnedOffInRulesDoesNotBlockRoundTwo(t *testing.T) {
+	f := fixtureFlow()
+	const bus = "(*example.com/paysvc/events.Bus).Publish"
+	f.Seams = append(f.Seams, fact.Seam{
+		In:     f.Seams[0].In,
+		Kind:   fact.SeamQueue,
+		Target: bus,
+		Line:   70,
+	})
+	k := domain.NewAgentResponse()
+	k.MoneyModel = &domain.MoneyModelAnswer{}
+	for _, m := range f.States {
+		k.Transitions[m.Type] = &domain.TransitionsAnswer{}
+	}
+
+	needBus := planner.Demanded(f, FactsFrom(k, nil)).Seams[bus]
+	if len(needBus) == 0 {
+		t.Fatal("fixture setup: expected a runnable scenario to demand the queue seam, or this test proves nothing")
+	}
+	rules := &config.Rules{}
+	for _, id := range needBus {
+		rules.Skip = append(rules.Skip, config.SkipRule{Scenario: id, Why: "no queue consumer in this service"})
+	}
+
+	asks, _ := PlanWith(f, k, domain.RoundUnderstand, rules, 0)
+	for _, a := range asks {
+		if a.Kind != domain.KindExternalEffect {
+			continue
+		}
+		if a.Subject == bus {
+			t.Fatal("fixture setup: round 1 still asks about the queue seam, so answering it would hide the bug")
+		}
+		k.ExternalEffects[a.Subject] = &domain.ExternalEffectAnswer{}
+	}
+	if r := BlockedReason(f, k, rules); r != "" {
+		t.Fatalf("every retry-safety question round 1 asked is answered, but round 2 still waits on a seam only turned-off scenarios need: %q", r)
 	}
 }
 
@@ -364,7 +404,7 @@ func TestAnsweringEveryRoundOneSeamQuestionUnblocksRoundTwo(t *testing.T) {
 			k.ExternalEffects[a.Subject] = &domain.ExternalEffectAnswer{}
 		}
 	}
-	if r := BlockedReason(f, k); r != "" {
+	if r := BlockedReason(f, k, nil); r != "" {
 		t.Fatalf("every retry-safety question round 1 asked is answered, yet round 2 is still blocked: %q", r)
 	}
 }

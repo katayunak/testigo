@@ -233,11 +233,11 @@ func FactsFrom(k *domain.AgentResponse, rules *config.Rules) testPlan.Facts {
 	return b
 }
 
-func BlockedReason(f *fact.Flow, k *domain.AgentResponse) string {
+func BlockedReason(f *fact.Flow, k *domain.AgentResponse, rules *config.Rules) string {
 	if k == nil || k.MoneyModel == nil {
 		return "the money model has not been named yet — answer moneyModel.json first"
 	}
-	d := planner.Demanded(f, factsOf(k))
+	d := planner.Demanded(f, FactsFrom(k, rules))
 	var missing []string
 	for _, m := range f.States {
 		if len(d.States[m.Type]) == 0 {
