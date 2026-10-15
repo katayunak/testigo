@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/katayunak/gofacts/fact"
 	"github.com/katayunak/testigo/internal/agent/domain"
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
 type Ledger struct {
@@ -20,7 +20,7 @@ type Ledger struct {
 	Missing      int
 }
 
-func Report(f *flowEntity.Flow, k *domain.AgentResponse, l Ledger, asksDir string) string {
+func Report(f *fact.Flow, k *domain.AgentResponse, l Ledger, asksDir string) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "testigo report — %s\n", f.Module)
@@ -58,7 +58,7 @@ func Report(f *flowEntity.Flow, k *domain.AgentResponse, l Ledger, asksDir strin
 	}
 
 	if len(f.Findings) > 0 {
-		bySeverity := map[flowEntity.Severity]int{}
+		bySeverity := map[fact.Severity]int{}
 		byID := map[string]int{}
 		title := map[string]string{}
 		for _, x := range f.Findings {
@@ -69,8 +69,8 @@ func Report(f *flowEntity.Flow, k *domain.AgentResponse, l Ledger, asksDir strin
 			}
 		}
 		fmt.Fprintf(&b, "\nFINDINGS — %d critical, %d high, %d medium, %d info\n",
-			bySeverity[flowEntity.SevCritical], bySeverity[flowEntity.SevHigh],
-			bySeverity[flowEntity.SevMedium], bySeverity[flowEntity.SevInfo])
+			bySeverity[fact.SevCritical], bySeverity[fact.SevHigh],
+			bySeverity[fact.SevMedium], bySeverity[fact.SevInfo])
 
 		ids := make([]string, 0, len(byID))
 		for id := range byID {

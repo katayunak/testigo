@@ -77,14 +77,14 @@ seams       4 injectable, 11 on concrete types
 states      example.com/paysvc/domain.PaymentStatus: 6 states, 4 write sites
 states      example.com/paysvc/domain.SettlementMode: 3 states, 2 write sites
 
-findings    5 critical, 9 high, 4 medium, 0 info
+findings    4 critical, 9 high, 5 medium, 0 info
 
-  [critical] IDEM-KEY-NOT-UNIQUE  Payment.OrderID is an idempotency key with no unique constraint behind it
-             domain/payment.go:22
+  [critical] IDEM-KEY-NOT-UNIQUE  Payment.IdempotencyKey is an idempotency key with no unique constraint behind it
+             domain/payment.go:23
   [critical] MONEY-FLOAT          Payment.Amount stores money in a float
              domain/payment.go:24
   [critical] TX-NET-CALL          network call inside a database transaction
-             api/server.go:40
+             api/server.go:64
 
 still unknown (phase 2 asks an agent):
   - which state transitions are legal
@@ -97,19 +97,19 @@ Writes `testigo/flow.json`. Your source files are never touched.
 
 ```
 $ testigo ask --explain --round 1 .
-ask plan   28 scenario(s) runnable, 6 blocked
+ask plan   30 scenario(s) runnable, 4 blocked
 budget     none; output counted 5x
 
 ASKED
   questions                free text    5.9k in + 1.5k out = 13.6k
-  mainEntity               free text    1.8k in +  512 out =  4.4k
-  stateRoles x2            free text     471 in +  524 out =  3.1k
-  moneyModel               free text    1.1k in +  308 out =  2.6k
-  externalEffect x4        true/false   1.1k in +  100 out =  1.6k
+  mainEntity               free text    1.7k in + 512 out = 4.3k
+  stateRoles x2            free text    473 in + 524 out = 3.1k
+  moneyModel               free text    1.1k in + 308 out = 2.6k
+  externalEffect x4        true/false   1.1k in + 100 out = 1.6k
 
-cost       10.3k in + 3.0k out = 25.3k
+cost       10.2k in + 3.0k out = 25.1k
 
-est. cost   ~14.7k tokens across 9 prompt(s)
+est. cost   ~14.5k tokens across 9 prompt(s)
             ~34.8k saved by hoisting the shared rules into PREAMBLE.md
 ```
 
@@ -194,16 +194,25 @@ a real call over stdio caught it.
 | `MONEY-FLOAT` | critical | An amount in a float. Binary floating point cannot hold `0.10` exactly, so sums drift and equal amounts compare unequal. Critical because it corrupts the amount itself, everywhere it flows. |
 | `IDEM-KEY-NOT-UNIQUE` | critical | A key meant to stop repeats, with no unique index behind it. Two identical requests both pass "have I seen this?" before either writes. That is the classic double charge. |
 | `TX-NET-CALL` | critical | A network call inside an open transaction. Locks are held for the provider's timeout, so a slow provider becomes a database outage — and a rollback cannot undo what the provider already did. |
+| `SCHEMA-NOT-FOUND` | critical | The code talks to a database, but no schema was found. Every uniqueness claim is then held back instead of guessed. Critical because without the schema, nothing above can say whether the database refuses a duplicate. |
 | `MONEY-DIV` | high | Money divided with no rounding rule. Integer division drops the remainder, and a few lost minor units per operation become books that will not balance. |
 | `TX-NO-ROLLBACK` | high | A transaction with no rollback on its early-return paths. Leaks a connection and holds locks — an outage shape rather than a wrong amount. |
+| `TX-UNUSED` | high | A transaction is opened and committed, but no statement runs on it. Everything between begin and commit runs outside it, so nothing it was meant to protect is atomic. |
+| `TX-BYPASS` | high or medium | Database work runs beside the open transaction instead of in it. That work commits on its own: a rollback leaves it in place. High when the call is proved to be database work, medium when that is guessed from names. |
 | `SEAM-CONCRETE` | high | I/O on a concrete type, so no test can make it fail or time out. Most payment bugs only appear when something downstream fails, so those paths go untested. |
 | `MONEY-NO-CURRENCY` | medium | A bare integer amount with no currency beside it. Nothing stops adding EUR to USD. Cheap with one currency; expensive the day there are two. |
 | `STATE-NEVER-SET` | medium | A declared status nothing produces. Either it is dead, or something outside Go sets it — and either way nobody tests that transition. |
+| `MIGRATION-NO-DOWN` | medium | Migrations with no down step, under a tool that expects one. A test that builds the database from migrations cannot tear it down between cases, and a bad migration has no rehearsed way back. |
 | `LOAD-ERROR` | info | A package did not type-check. Everything behind it is invisible: its findings are **missing, not absent**. |
 
 A finding is evidence of a risk, not proof of a bug. `STATE-NEVER-SET` cannot know
 whether another service writes that state. It reports the fact and leaves the
 judgement to you.
+
+Each finding also says how it was reached. `proved` means the type checker, SSA or
+the schema showed it. `heuristic` means it depends on names — that a field called
+`Amount` is money, or that `PSP.Authorize` is an HTTP call. A heuristic finding is
+wrong when the code is named unusually.
 
 ---
 
@@ -227,7 +236,8 @@ kept by name, because their socket write is not on any static path at all.
 On a real service this took seams from **165 to 69**, and effect-seam targets from 35
 to 15. Every real seam survived — NATS publish, go-pg insert and select, the order
 repository. The false ones did not: `grpc/status.New`, `metadata.MD.Get`, go-pg's
-query builders, `(error).Error`.
+query builders, `(error).Error`. These numbers were measured with testigo's own
+scanner, before it moved to gofacts, and have not been re-measured.
 
 It is a filter, not a proof. CHA still over-approximates.
 
@@ -306,9 +316,7 @@ argument and the measurements.
 | Package | Owns | Docs |
 |---|---|---|
 | `cmd/testigo` | the CLI: one function per command, plus the MCP server | [README](cmd/testigo/README.md) |
-| `internal/scanningFlow` | phase 1 — SSA, the call graph, seams, state machines, money, findings | [README](internal/scanningFlow/README.md) |
-| `internal/scanningFlow/patterns` | name matching, word-boundary aware, so `Current` is not a currency | [README](internal/scanningFlow/patterns/README.md) |
-| `internal/scanningFlow/flowEntity` | the flow's types, and what gets persisted | [README](internal/scanningFlow/flowEntity/README.md) |
+| `internal/docs` | finds the repository's own markdown docs and ranks them for the round-one prompt | [README](internal/docs/README.md) |
 | `internal/testPlan` | the scenario catalogue, the plan types, and the selector | [README](internal/testPlan/README.md) |
 | `internal/agent` | phase 2 — plans asks, writes the pack, collects and validates answers | [README](internal/agent/README.md) |
 | `internal/agent/domain` | the agent's vocabulary: questions, asks, answers, payment kinds | [README](internal/agent/domain/README.md) |
@@ -317,7 +325,12 @@ argument and the measurements.
 | `internal/config` | everything under `testigo/`: config, rules and `flow.json` | [README](internal/config/README.md) |
 | `internal/report` | the printed summary and the Mermaid diagrams | [README](internal/report/README.md) |
 
-11 packages, ~14k lines of Go and ~3k lines of tests.
+9 packages, ~9.4k lines of Go and ~2.2k lines of tests.
+
+Phase 1 itself — SSA, the call graph, seams, transactions, state machines, the
+schema, money and the findings — is not in this repository. It is
+[gofacts](https://github.com/katayunak/gofacts), a library testigo shares with the
+1819 reviewer. `cmd/testigo` calls it, and `flow.json` is its `fact.Flow` type.
 
 ---
 
@@ -336,17 +349,26 @@ argument and the measurements.
 
 Phase 1 needs every package to type-check. Generated protobuf packages from a git
 submodule have to exist first: `git submodule update --init`, then the repository's
-own `protoc` step. If `go env GOFLAGS` forces `-mod=vendor` on a module whose vendor
-directory is stale, run the scan with `GOFLAGS=-mod=mod`.
+own `protoc` step.
+
+testigo does not use your `GOFLAGS`. gofacts sets the go command's environment
+itself: it uses the repository's `vendor/` directory when there is one, and
+otherwise refuses to change `go.mod` (`-mod=readonly`). So `GOFLAGS=-mod=mod` no
+longer helps. If the vendor directory is stale, the scan fails with `inconsistent
+vendoring`, and the fix is to bring it up to date with `go mod vendor` in that
+repository. There is no switch yet to make testigo skip a stale vendor directory.
+
+The same rules apply when testigo builds and runs a generated test after round two.
+Those runs also turn cgo on, because `go test -race` needs it, and each one is
+stopped after five minutes.
 
 ---
 
 ## Limits, stated plainly
 
-- The seam filter over-approximates. A VTA call graph would be more precise than CHA.
+- The seam filter over-approximates: it walks the CHA call graph. gofacts also builds a VTA graph, but uses it only to decide which functions call which, not which calls reach I/O.
 - True/false verdicts are collected per question, but nothing yet rolls them up into per-area conclusions.
 - Recheck questions — where the agent re-confirms a fact phase 1 proved, with the proof attached — are built and tested, but nothing currently produces one.
-- Phase 1 is moving out of `internal/scanningFlow` into [gofacts](https://github.com/katayunak/gofacts), a standalone library that started as this package. That work is on the [`feat/gofacts`](https://github.com/katayunak/testigo/tree/feat/gofacts) branch and is not merged yet.
 
 ---
 

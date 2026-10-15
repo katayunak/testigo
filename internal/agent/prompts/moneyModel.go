@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/katayunak/gofacts/fact"
 	"github.com/katayunak/testigo/internal/agent/domain"
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-func MoneyModel(f *flowEntity.Flow, paths []Path, unresolved []string) *Prompt {
+func MoneyModel(f *fact.Flow, paths []Path, unresolved []string) *Prompt {
 	p := New("testigo — the money model").
 		Goal("Answer the OPEN QUESTIONS at the end. Everything else here is settled and only needs a true or false.").
 		Rule("**A null answer is useful.** Where the repository has no such thing — no balance function, no local transfer — null is the correct answer and it stops round two generating a test for something that does not exist. A guess here produces a test asserting behaviour nobody wrote.")

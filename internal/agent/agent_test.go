@@ -5,43 +5,45 @@ import (
 	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/agent/planner"
 	"github.com/katayunak/testigo/internal/agent/prompts"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 	"github.com/katayunak/testigo/internal/testPlan"
 )
 
-func fixtureFlow() *flowEntity.Flow {
-	f := flowEntity.NewFlow("example.com/paysvc")
-	f.Entries = []flowEntity.EntryPoint{
+func fixtureFlow() *fact.Flow {
+	f := fact.NewFlow("example.com/paysvc")
+	f.Entries = []fact.EntryPoint{
 		{Pkg: "example.com/paysvc/api", Symbol: "(*Server).CreatePayment", Label: "API create"},
 	}
-	entry := &flowEntity.Node{
-		Ref: flowEntity.CodeRef{Pkg: "example.com/paysvc/api", Symbol: "(*Server).CreatePayment",
+	entry := &fact.Node{
+		Ref: fact.CodeRef{Pkg: "example.com/paysvc/api", Symbol: "(*Server).CreatePayment",
 			File: "api/server.go", Line: 21},
-		Position: flowEntity.NodePositionEntry,
+		Position: fact.NodePositionEntry,
 		Calls:    []string{"example.com/paysvc/api#(*Server).process"},
 	}
-	process := &flowEntity.Node{
-		Ref: flowEntity.CodeRef{Pkg: "example.com/paysvc/api", Symbol: "(*Server).process",
+	process := &fact.Node{
+		Ref: fact.CodeRef{Pkg: "example.com/paysvc/api", Symbol: "(*Server).process",
 			File: "api/server.go", Line: 35},
-		Position: flowEntity.NodePositionInternal,
-		Facts:    flowEntity.Facts{OpensTx: true, TouchesNet: true, WritesStatus: []string{"StatusPending"}},
+		Position: fact.NodePositionInternal,
+		Facts:    fact.Facts{OpensTx: true, TouchesNet: true, WritesStatus: []string{"StatusPending"}},
 	}
 	f.Nodes[entry.Ref.ID()] = entry
 	f.Nodes[process.Ref.ID()] = process
-	f.Seams = []flowEntity.Seam{
-		{In: process.Ref, Kind: flowEntity.SeamHTTP, Target: "(example.com/paysvc/psp.Gateway).Authorize",
+	f.Seams = []fact.Seam{
+		{In: process.Ref, Kind: fact.SeamHTTP, Target: "(example.com/paysvc/psp.Gateway).Authorize",
 			Line: 61, Injectable: true, Iface: "example.com/paysvc/psp.Gateway"},
-		{In: process.Ref, Kind: flowEntity.SeamDB, Target: "(*database/sql.DB).BeginTx", Line: 47},
-		{In: process.Ref, Kind: flowEntity.SeamClock, Target: "time.Now", Line: 26},
+		{In: process.Ref, Kind: fact.SeamDB, Target: "(*database/sql.DB).BeginTx", Line: 47},
+		{In: process.Ref, Kind: fact.SeamClock, Target: "time.Now", Line: 26},
 	}
-	f.States = []flowEntity.StateMachine{{
+	f.States = []fact.StateMachine{{
 		Type:   "example.com/paysvc/domain.PaymentStatus",
 		Field:  "Status",
 		States: []string{"StatusAuthorized", "StatusCaptured", "StatusFailed", "StatusPending"},
-		Writes: []flowEntity.StateWrite{{In: process.Ref, To: "StatusPending", Line: 44, InTx: true}},
+		Writes: []fact.StateWrite{{In: process.Ref, To: "StatusPending", Line: 44, InTx: true}},
 	}}
 	return f
 }
@@ -247,16 +249,30 @@ func TestBlockedCaseMustSayWhy(t *testing.T) {
 	}
 }
 
-func TestStripFenceTolerates(t *testing.T) {
-	want := `{"step":"reserve funds"}`
-	for _, in := range []string{
-		want,
-		"```json\n" + want + "\n```",
-		"```\n" + want + "\n```\n",
-		"   " + want + "  ",
+func TestCollectToleratesFencedAnswers(t *testing.T) {
+	body := `{"LOST-UPDATE.locking": {"verdict": true}}`
+	for _, raw := range []string{
+		body,
+		"```json\n" + body + "\n```",
+		"```\n" + body + "\n```\n",
+		"   " + body + "  ",
 	} {
-		if got := string(stripFence([]byte(in))); got != want {
-			t.Errorf("stripFence(%q) = %q", in, got)
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, answersDir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, answersDir, "questions-x.json"), []byte(raw), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		k := domain.NewAgentResponse()
+		ask := domain.Ask{Kind: domain.KindQuestions, Subject: "x", Questions: []string{"LOST-UPDATE.locking"}}
+		got, err := Collect(dir, fixtureFlow(), k, []domain.Ask{ask})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Invalid) > 0 || k.PaymentKind["LOST-UPDATE.locking"] == nil {
+			t.Errorf("%q was not accepted: %v", raw, got.Invalid)
 		}
 	}
 }
@@ -292,9 +308,9 @@ func TestRoundTwoIsUnblockedByOnlyTheSeamsAnyRunnableScenarioNeeds(t *testing.T)
 		k.Transitions[m.Type] = &domain.TransitionsAnswer{}
 	}
 
-	f.Seams = append(f.Seams, flowEntity.Seam{
-		In:         flowEntity.CodeRef{Pkg: "example.com/paysvc/unreached", Symbol: "(*Ghost).Call"},
-		Kind:       flowEntity.SeamHTTP,
+	f.Seams = append(f.Seams, fact.Seam{
+		In:         fact.CodeRef{Pkg: "example.com/paysvc/unreached", Symbol: "(*Ghost).Call"},
+		Kind:       fact.SeamHTTP,
 		Target:     "example.com/paysvc/unreached#(*Ghost).Call",
 		Injectable: true,
 	})
@@ -367,7 +383,7 @@ func TestPromptsCarryTheirLoadBearingRules(t *testing.T) {
 	}
 }
 
-func UnderstandPreambleFor(f *flowEntity.Flow) string {
+func UnderstandPreambleFor(f *fact.Flow) string {
 	return Preamble(f, domain.RoundUnderstand)
 }
 
@@ -437,7 +453,7 @@ func TestSharedPreambleIsCheaperThanRepeatingIt(t *testing.T) {
 	}
 }
 
-func fullKnowledge(f *flowEntity.Flow) *domain.AgentResponse {
+func fullKnowledge(f *fact.Flow) *domain.AgentResponse {
 	k := domain.NewAgentResponse()
 	k.MoneyModel = &domain.MoneyModelAnswer{}
 	for _, m := range f.States {
@@ -450,7 +466,7 @@ func fullKnowledge(f *flowEntity.Flow) *domain.AgentResponse {
 }
 
 func TestEvidenceDecidesInsteadOfAsking(t *testing.T) {
-	clear := flowEntity.Candidates{
+	clear := fact.Candidates{
 		{Name: "IdempotencyKey", Owner: "Payment", Score: 7, Declarative: true},
 		{Name: "OrderID", Owner: "Payment", Score: 4, Declarative: true},
 	}
@@ -458,7 +474,7 @@ func TestEvidenceDecidesInsteadOfAsking(t *testing.T) {
 		t.Error("a 7 against a 4 should be decided without asking")
 	}
 
-	close := flowEntity.Candidates{
+	close := fact.Candidates{
 		{Name: "ReferenceID", Owner: "Order", Score: 5, Declarative: true},
 		{Name: "IdempotencyKey", Owner: "Order", Score: 4, Declarative: true},
 	}
@@ -466,12 +482,12 @@ func TestEvidenceDecidesInsteadOfAsking(t *testing.T) {
 		t.Error("a one-point gap is a real question, not a decision")
 	}
 
-	nameOnly := flowEntity.Candidates{{Name: "ReferenceID", Owner: "Order", Score: 1, Declarative: true}}
+	nameOnly := fact.Candidates{{Name: "ReferenceID", Owner: "Order", Score: 1, Declarative: true}}
 	if _, ok := nameOnly.Decided(); ok {
 		t.Error("a name match with no behavioural proof decided the question")
 	}
 
-	behaviourOnly := flowEntity.Candidates{{Name: "Phone", Owner: "Order", Score: 6}}
+	behaviourOnly := fact.Candidates{{Name: "Phone", Owner: "Order", Score: 6}}
 	if _, ok := behaviourOnly.Decided(); ok {
 		t.Error("behavioural proof with nothing declaring the field a key decided the question")
 	}
@@ -479,7 +495,7 @@ func TestEvidenceDecidesInsteadOfAsking(t *testing.T) {
 		t.Error("Phone is not credible enough to raise a finding on its own")
 	}
 
-	if _, ok := (flowEntity.Candidates{}).Decided(); ok {
+	if _, ok := (fact.Candidates{}).Decided(); ok {
 		t.Error("an empty list cannot decide anything")
 	}
 }
@@ -558,5 +574,61 @@ func TestTheSameFieldCannotBeKeyAndNotKey(t *testing.T) {
 
 	if err := c.Validate(); err != nil {
 		t.Errorf("a cited, non-conflicting identifier must be accepted: %v", err)
+	}
+}
+
+func addWebhookReachingTheLedger(f *fact.Flow) (ledgerCredit string) {
+	webhook := fact.CodeRef{Pkg: "example.com/paysvc/webhook", Symbol: "(*Handler).PSPCallback",
+		File: "webhook/handler.go", Line: 18}
+	credit := fact.CodeRef{Pkg: "example.com/paysvc/webhook", Symbol: "(*Handler).credit",
+		File: "webhook/handler.go", Line: 52}
+	f.Entries = append(f.Entries, fact.EntryPoint{Pkg: webhook.Pkg, Symbol: webhook.Symbol, Label: "PSP webhook"})
+	f.Nodes[webhook.ID()] = &fact.Node{Ref: webhook, Position: fact.NodePositionEntry, Calls: []string{credit.ID()}}
+	f.Nodes[credit.ID()] = &fact.Node{Ref: credit, Position: fact.NodePositionInternal}
+	ledgerCredit = "(example.com/paysvc/ledger.Store).Credit"
+	f.Seams = append(f.Seams, fact.Seam{In: credit, Kind: fact.SeamDB, Target: ledgerCredit,
+		Line: 57, Injectable: true, Iface: "example.com/paysvc/ledger.Store"})
+	return ledgerCredit
+}
+
+func TestASeamReachableOnlyFromTheSecondEntryIsAskedInRoundOne(t *testing.T) {
+	f := fixtureFlow()
+	ledgerCredit := addWebhookReachingTheLedger(f)
+
+	if by, ok := planner.Demanded(f, factsOf(domain.NewAgentResponse())).NeedsSeam(ledgerCredit); !ok || len(by) == 0 {
+		t.Fatalf("%s is reached only from the second entry point, the webhook, and no runnable scenario demanded it", ledgerCredit)
+	}
+
+	for _, a := range Plan(f, domain.NewAgentResponse(), domain.RoundUnderstand) {
+		if a.Kind == domain.KindExternalEffect && a.Subject == ledgerCredit {
+			return
+		}
+	}
+	t.Fatalf("round one never asks whether retrying %s moves money twice, because only the first entry point was walked", ledgerCredit)
+}
+
+func TestCasePromptNamesEveryEntryThatReachesItsBoundaries(t *testing.T) {
+	f := fixtureFlow()
+	addWebhookReachingTheLedger(f)
+
+	var c testPlan.TestCase
+	for _, sc := range testPlan.Select(f, testPlan.Facts{}) {
+		if sc.Scenario.ID == "UNCLASSIFIED-ERROR-NOT-RETRIED" {
+			c = sc
+		}
+	}
+	if c.Scenario.ID == "" {
+		t.Fatal("UNCLASSIFIED-ERROR-NOT-RETRIED was not selected for the fixture")
+	}
+
+	p := prompts.TestCase(c, f, nil).Render()
+	for _, want := range []string{
+		"Entry points under test",
+		"example.com/paysvc/api#(*Server).CreatePayment   (API create)",
+		"example.com/paysvc/webhook#(*Handler).PSPCallback   (PSP webhook)",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("a case faking a seam only the webhook reaches must name the webhook as an entry under test; prompt is missing %q", want)
+		}
 	}
 }

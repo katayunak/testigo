@@ -5,11 +5,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/katayunak/gofacts/fact"
 	"github.com/katayunak/testigo/internal/agent/domain"
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 )
 
-func Needed(f *flowEntity.Flow, c domain.Classification, needs []domain.Need) *Prompt {
+func Needed(f *fact.Flow, c domain.Classification, needs []domain.Need) *Prompt {
 	p := New("testigo — the questions this repository actually needs answered").
 		Goal("Every question below was picked because a test testigo intends to generate cannot be written without it. Nothing here is asked out of curiosity.").
 		Rule("Answer from THIS repository. The facts block came from the type checker and SSA and cannot be contradicted.",

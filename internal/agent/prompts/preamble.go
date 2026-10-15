@@ -3,10 +3,10 @@ package prompts
 import (
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
-func UnderstandPreamble(f *flowEntity.Flow, paths []Path) string {
+func UnderstandPreamble(f *fact.Flow, paths []Path) string {
 	var b strings.Builder
 
 	b.WriteString(`# testigo — the flow, once
