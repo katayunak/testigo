@@ -3,7 +3,7 @@ module github.com/katayunak/testigo
 go 1.25.0
 
 require (
-	github.com/katayunak/gofacts v0.1.0
+	github.com/katayunak/gofacts v0.1.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 )
 

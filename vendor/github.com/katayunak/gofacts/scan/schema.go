@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"fmt"
 	"go/ast"
 	"go/constant"
 	"go/token"
@@ -9,10 +10,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
+	"golang.org/x/tools/go/types/typeutil"
 
 	"github.com/katayunak/gofacts/fact"
 	"github.com/katayunak/gofacts/sqlschema"
@@ -40,14 +44,25 @@ func (p *Program) schema(skip []string) fact.Infra {
 	}
 	sqlTool, sqlTotal, sqlDown := sqlschema.DownCoverage(migrations)
 
+	// DDL in a Go package that registers migrations is a migration. DDL
+	// anywhere else is a test reset, a teardown or a fixture when the module
+	// has migrations, and is ignored: a test/setup.go that drops every table
+	// before migrating is not the schema. Without migrations it is the schema
+	// the code creates at startup, and only what it adds counts.
 	goMig := p.goMigrations()
-	if len(goMig.chunks) > 0 {
-		for _, c := range goMig.chunks {
-			s.ApplySQL(c.sql, c.file)
-			dirs[filepath.ToSlash(filepath.Dir(c.file))] = true
+	migrated := goMig.total > 0 || sqlTotal > 0
+	goFiles := map[string]bool{}
+	for _, c := range goMig.chunks {
+		onlyAdd := !c.registered
+		if onlyAdd && migrated || !applyDDL(&s, c.sql, c.file, onlyAdd) {
+			continue
 		}
+		goFiles[c.file] = true
+		dirs[filepath.ToSlash(filepath.Dir(c.file))] = true
+	}
+	if len(goFiles) > 0 {
 		infra.SchemaSources = append(infra.SchemaSources, "sql inside go files")
-		infra.MigrationFiles += len(goMig.chunks)
+		infra.MigrationFiles += len(goFiles)
 	}
 	s.Fill(&infra)
 
@@ -55,6 +70,13 @@ func (p *Program) schema(skip []string) fact.Infra {
 	infra.MigrationsTotal = sqlTotal + goMig.total
 	infra.MigrationsWithDown = sqlDown + goMig.withDown
 
+	// A tag describes a table only when no migration does: go-pg's unique or
+	// gorm's uniqueIndex shapes the table CreateTable or AutoMigrate builds,
+	// not one a migration built.
+	migrationTables := map[string]bool{}
+	for _, t := range infra.Tables {
+		migrationTables[t.Name] = true
+	}
 	tagTables, tagCons := p.schemaFromTags()
 	added := false
 	for _, t := range tagTables {
@@ -65,6 +87,9 @@ func (p *Program) schema(skip []string) fact.Infra {
 		added = true
 	}
 	for _, c := range tagCons {
+		if migrationTables[c.Table] {
+			continue
+		}
 		if _, dup := infra.UniqueOn(c.Table, c.Columns[0]); dup && len(c.Columns) == 1 {
 			continue
 		}
@@ -118,7 +143,7 @@ func (p *Program) sqlFiles(skip []string) []sqlschema.Migration {
 	return out
 }
 
-var reDDL = regexp.MustCompile(`(?is)\b(create\s+table|alter\s+table|create\s+(unique\s+)?index|create\s+type|drop\s+table|drop\s+index)\b`)
+var reDDL = regexp.MustCompile(`(?is)\b(create\s+table|alter\s+table|alter\s+index|create\s+(unique\s+)?index|create\s+type|drop\s+table|drop\s+index)\b`)
 
 type goMigrations struct {
 	chunks          []sqlChunk
@@ -129,6 +154,58 @@ type goMigrations struct {
 type sqlChunk struct {
 	sql, file string
 	line      int
+	// registered: the chunk's package registers migrations.
+	registered bool
+}
+
+// applyDDL applies the statements of sql it recognises and reports whether
+// there were any; a fragment such as "ALTER TABLE " + name is not one. With
+// onlyAdd, only what a statement adds is applied.
+func applyDDL(s *sqlschema.Schema, sql, file string, onlyAdd bool) bool {
+	applied := false
+	for _, st := range sqlschema.Parse(sql, file) {
+		if st.Kind == sqlschema.KindOther {
+			continue
+		}
+		if onlyAdd {
+			var ok bool
+			if st, ok = additive(st); !ok {
+				continue
+			}
+		}
+		s.Apply(st)
+		applied = true
+	}
+	return applied
+}
+
+// additive is st without what removes schema: drops, and recreating a table
+// that exists. It reports false when nothing is left.
+func additive(st sqlschema.Statement) (sqlschema.Statement, bool) {
+	switch st.Kind {
+	case sqlschema.KindDropTable, sqlschema.KindDropIndex:
+		return st, false
+	case sqlschema.KindCreateTable:
+		st.IfNotExists = true
+	case sqlschema.KindAlterTable:
+		st.Actions = slices.DeleteFunc(slices.Clone(st.Actions), func(a sqlschema.Action) bool {
+			return a.Op == sqlschema.DropColumn || a.Op == sqlschema.DropConstraint
+		})
+	}
+	return st, st.Kind != sqlschema.KindAlterTable || len(st.Actions) > 0
+}
+
+// migrationVersion is the number a Go migration's file name starts with.
+// go-pg/migrations and goose order Go migrations by it, so 10_x runs after
+// 2_x although it sorts before it as a string.
+func migrationVersion(file string) (uint64, bool) {
+	base := filepath.Base(file)
+	end := strings.IndexFunc(base, func(r rune) bool { return r < '0' || r > '9' })
+	if end <= 0 {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(base[:end], 10, 64)
+	return n, err == nil
 }
 
 // registration lists the calls that register a Go migration and the argument
@@ -146,13 +223,16 @@ var registration = map[string]struct {
 
 // goMigrations reads DDL from string constants in Go files, skipping any that
 // sit inside a registered down function: a down migration undoes the schema,
-// it does not describe it.
+// it does not describe it. Chunks come back in the order the migration tools
+// run them: by the version a file name starts with, then by position.
 func (p *Program) goMigrations() goMigrations {
 	var out goMigrations
 	tools := map[string]bool{}
+	ev := p.newEvaluator()
 	for _, pkg := range p.prod {
+		registers := false
+		var downs [][2]token.Pos
 		for _, f := range pkg.Syntax {
-			var downs [][2]token.Pos
 			ast.Inspect(f, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
 				if !ok {
@@ -163,6 +243,7 @@ func (p *Program) goMigrations() goMigrations {
 					return true
 				}
 				tools[reg.tool] = true
+				registers = true
 				out.total++
 				if reg.down < len(call.Args) {
 					down := call.Args[reg.down]
@@ -173,34 +254,60 @@ func (p *Program) goMigrations() goMigrations {
 				}
 				return true
 			})
+		}
+		inDown := func(n ast.Node) bool {
+			for _, s := range downs {
+				if n.Pos() >= s[0] && n.End() <= s[1] {
+					return true
+				}
+			}
+			return false
+		}
+		templates := map[ast.Expr]bool{}
+		for _, f := range pkg.Syntax {
 			ast.Inspect(f, func(n ast.Node) bool {
-				lit, ok := n.(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
-					return true
-				}
-				tv, ok := pkg.TypesInfo.Types[lit]
-				if !ok || tv.Value == nil || tv.Value.Kind() != constant.String {
-					return true
-				}
-				text := constant.StringVal(tv.Value)
-				if !reDDL.MatchString(text) {
-					return true
-				}
-				for _, s := range downs {
-					if lit.Pos() >= s[0] && lit.End() <= s[1] {
+				var text string
+				switch x := n.(type) {
+				case *ast.CallExpr:
+					if isSprintf(pkg.TypesInfo, x) {
+						templates[x.Args[0]] = true
+					}
+					v, ok := ev.eval(pkg.TypesInfo, x, nil, 0)
+					if text, _ = v.(string); !ok || !reDDL.MatchString(text) {
 						return true
 					}
+				case *ast.BasicLit:
+					tv, ok := pkg.TypesInfo.Types[x]
+					if x.Kind != token.STRING || templates[x] || !ok || tv.Value == nil || tv.Value.Kind() != constant.String {
+						return true
+					}
+					if text = constant.StringVal(tv.Value); !reDDL.MatchString(text) {
+						return true
+					}
+				default:
+					return true
 				}
-				out.chunks = append(out.chunks, sqlChunk{sql: text, file: p.rel(lit.Pos()), line: p.line(lit.Pos())})
-				return true
+				if !inDown(n) {
+					out.chunks = append(out.chunks, sqlChunk{sql: text, file: p.rel(n.Pos()), line: p.line(n.Pos()), registered: registers})
+				}
+				return false
 			})
 		}
 	}
 	sort.SliceStable(out.chunks, func(i, j int) bool {
-		if out.chunks[i].file != out.chunks[j].file {
-			return out.chunks[i].file < out.chunks[j].file
+		a, b := out.chunks[i], out.chunks[j]
+		va, aok := migrationVersion(a.file)
+		vb, bok := migrationVersion(b.file)
+		if aok != bok {
+			return aok
 		}
-		return out.chunks[i].line < out.chunks[j].line
+		if aok && va != vb {
+			return va < vb
+		}
+		if a.file != b.file {
+			return a.file < b.file
+		}
+		return a.line < b.line
 	})
 	var names []string
 	for t := range tools {
@@ -209,6 +316,106 @@ func (p *Program) goMigrations() goMigrations {
 	sort.Strings(names)
 	out.tool = strings.Join(names, ", ")
 	return out
+}
+
+// evaluator works out the string a Go expression produces when that needs no
+// running: a constant, a concatenation or fmt.Sprintf of known values, or a
+// call with known arguments to one of the module's functions whose body is a
+// single return. Most go-pg migrations are written with such helpers:
+// db.Exec(addColumn("transactions", "rrn", "varchar(64)")).
+type evaluator struct {
+	decls map[*types.Func]*ast.FuncDecl
+	infos map[*ast.FuncDecl]*types.Info
+}
+
+func (p *Program) newEvaluator() *evaluator {
+	ev := &evaluator{decls: map[*types.Func]*ast.FuncDecl{}, infos: map[*ast.FuncDecl]*types.Info{}}
+	for _, pkg := range p.prod {
+		for _, f := range pkg.Syntax {
+			for _, d := range f.Decls {
+				fd, ok := d.(*ast.FuncDecl)
+				if !ok || fd.Body == nil || len(fd.Body.List) != 1 {
+					continue
+				}
+				if fn, ok := pkg.TypesInfo.Defs[fd.Name].(*types.Func); ok {
+					ev.decls[fn] = fd
+					ev.infos[fd] = pkg.TypesInfo
+				}
+			}
+		}
+	}
+	return ev
+}
+
+const maxEvalDepth = 4
+
+// eval returns the Go value of e — a string, an integer, a float or a bool —
+// with env binding the parameters of the helper being evaluated.
+func (ev *evaluator) eval(info *types.Info, e ast.Expr, env map[*types.Var]any, depth int) (any, bool) {
+	if tv, ok := info.Types[e]; ok && tv.Value != nil {
+		return constant.Val(tv.Value), true
+	}
+	switch x := ast.Unparen(e).(type) {
+	case *ast.Ident:
+		v, ok := env[asVar(info.Uses[x])]
+		return v, ok
+	case *ast.BinaryExpr:
+		if x.Op != token.ADD {
+			return nil, false
+		}
+		l, lok := ev.eval(info, x.X, env, depth)
+		r, rok := ev.eval(info, x.Y, env, depth)
+		ls, lstr := l.(string)
+		rs, rstr := r.(string)
+		return ls + rs, lok && rok && lstr && rstr
+	case *ast.CallExpr:
+		return ev.call(info, x, env, depth)
+	}
+	return nil, false
+}
+
+func (ev *evaluator) call(info *types.Info, c *ast.CallExpr, env map[*types.Var]any, depth int) (any, bool) {
+	fn, _ := typeutil.Callee(info, c).(*types.Func)
+	if fn == nil || depth >= maxEvalDepth || c.Ellipsis.IsValid() {
+		return nil, false
+	}
+	sprintf := isSprintf(info, c)
+	decl := ev.decls[fn.Origin()]
+	if !sprintf && decl == nil {
+		return nil, false
+	}
+	args := make([]any, len(c.Args))
+	for i, a := range c.Args {
+		v, ok := ev.eval(info, a, env, depth)
+		if !ok {
+			return nil, false
+		}
+		args[i] = v
+	}
+	if sprintf {
+		format, ok := args[0].(string)
+		return fmt.Sprintf(format, args[1:]...), ok
+	}
+	ret, ok := decl.Body.List[0].(*ast.ReturnStmt)
+	sig, _ := fn.Origin().Type().(*types.Signature)
+	if !ok || len(ret.Results) != 1 || sig == nil || sig.Variadic() || sig.Params().Len() != len(args) {
+		return nil, false
+	}
+	bound := map[*types.Var]any{}
+	for i := range args {
+		bound[sig.Params().At(i)] = args[i]
+	}
+	return ev.eval(ev.infos[decl], ret.Results[0], bound, depth+1)
+}
+
+func isSprintf(info *types.Info, c *ast.CallExpr) bool {
+	fn, _ := typeutil.Callee(info, c).(*types.Func)
+	return fn != nil && fn.FullName() == "fmt.Sprintf" && len(c.Args) > 0
+}
+
+func asVar(obj types.Object) *types.Var {
+	v, _ := obj.(*types.Var)
+	return v
 }
 
 func importsMigrationTool(pkg *packages.Package, call *ast.CallExpr, tool string) bool {

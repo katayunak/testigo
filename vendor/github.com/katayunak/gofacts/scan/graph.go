@@ -3,6 +3,7 @@ package scan
 import (
 	"go/ast"
 	"go/types"
+	"slices"
 	"sort"
 	"strings"
 
@@ -70,6 +71,15 @@ func sitesOf(g *callgraph.Graph) map[ssa.CallInstruction][]*ssa.Function {
 }
 
 // resolve returns the callees of a call site and how sure that is.
+//
+// A site VTA cannot resolve falls back to CHA, except where CHA's answer is
+// every function of a shape and the shape says nothing: a call through a
+// plumbing interface, an anonymous one, or a function value of a generic
+// signature. The common case is `defer cancel()` on the CancelFunc
+// context.WithTimeout returned: nothing in the module feeds it, and CHA links
+// it to every func() in the module — main, init, every goroutine closure, the
+// gRPC gateway's registration — which testigo's import-closure filter used to
+// hide. The sink walk refuses the same edges (plumbingEdge).
 func (p *Program) resolve(site ssa.CallInstruction) ([]*ssa.Function, fact.Certainty, fact.CallKind) {
 	common := site.Common()
 	if callee := common.StaticCallee(); callee != nil {
@@ -85,7 +95,21 @@ func (p *Program) resolve(site ssa.CallInstruction) ([]*ssa.Function, fact.Certa
 	if targets := p.vtaSites[site]; len(targets) > 0 {
 		return targets, fact.Likely, kind
 	}
+	if plumbingEdge(common) {
+		return nil, fact.Possible, kind
+	}
 	return p.chaSites[site], fact.Possible, kind
+}
+
+// follows applies resolve's rule to a CHA edge, for the walks that run on the
+// CHA graph: what a function can reach, and what an implementation behind an
+// interface can cause. Without it every function that defers a cancel reaches
+// whatever main reaches.
+func (p *Program) follows(e *callgraph.Edge) bool {
+	if e.Site == nil || !plumbingEdge(e.Site.Common()) {
+		return true
+	}
+	return slices.Contains(p.vtaSites[e.Site], e.Callee.Func)
 }
 
 func genericOrigin(fn *ssa.Function) *ssa.Function {

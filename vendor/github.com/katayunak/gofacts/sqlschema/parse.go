@@ -24,6 +24,7 @@ const (
 	KindDropIndex   Kind = "drop_index"
 	KindDropTable   Kind = "drop_table"
 	KindCreateEnum  Kind = "create_enum"
+	KindRenameIndex Kind = "rename_index"
 	KindOther       Kind = "other"
 )
 
@@ -42,6 +43,8 @@ type Statement struct {
 	Where        string
 	Values       []string
 	Names        []string
+	// To is the new name of a renamed index.
+	To string
 
 	Def     *TableDef
 	Actions []Action
@@ -90,6 +93,7 @@ var (
 	reDropIndex   = regexp.MustCompile(`(?is)^drop\s+index\s+(?:concurrently\s+)?(?:if\s+exists\s+)?(.*)$`)
 	reDropTable   = regexp.MustCompile(`(?is)^drop\s+table\s+(?:if\s+exists\s+)?(.*)$`)
 	reCreateEnum  = regexp.MustCompile(`(?is)^create\s+type\s+(` + ident + `)\s+as\s+enum\s*\(`)
+	reRenameIndex = regexp.MustCompile(`(?is)^alter\s+index\s+(?:if\s+exists\s+)?(` + ident + `)\s+rename\s+to\s+(` + ident + `)\s*$`)
 
 	reWhere      = regexp.MustCompile(`(?is)\bwhere\b(.*)$`)
 	reQuotedItem = regexp.MustCompile(`'([^']*)'`)
@@ -155,6 +159,9 @@ func parseStatement(s string) Statement {
 			}
 		}
 		return Statement{Kind: KindAlterTable, Table: table, Actions: actions}
+	}
+	if m := reRenameIndex.FindStringSubmatch(s); m != nil {
+		return Statement{Kind: KindRenameIndex, Name: sqltext.CleanIdent(m[1]), To: sqltext.CleanIdent(m[2])}
 	}
 	if m := reDropIndex.FindStringSubmatch(s); m != nil {
 		rest := reOnTable.ReplaceAllString(reTrailing.ReplaceAllString(m[1], ""), "")

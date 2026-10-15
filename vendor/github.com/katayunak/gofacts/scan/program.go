@@ -42,8 +42,8 @@ type Options struct {
 	// .git, vendor, node_modules, testdata and dot-directories.
 	SkipDirs []string
 
-	// NoVTA keeps every dynamic call at CHA precision. VTA is the expensive
-	// step on a large module.
+	// NoVTA keeps every dynamic call at CHA precision, except those resolve
+	// gives no edge to. VTA is the expensive step on a large module.
 	NoVTA bool
 }
 

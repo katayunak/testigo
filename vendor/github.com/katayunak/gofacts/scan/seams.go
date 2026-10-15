@@ -112,8 +112,8 @@ func isCursorNoise(name, fullName string) bool {
 
 // computeReach propagates boundary kinds backwards through module code to a
 // fixed point, so a function with no I/O of its own still knows what it can
-// eventually cause.
-func computeReach(cg *callgraph.Graph, isLocal func(*ssa.Function) bool, kind func(*ssa.Function) kindSet) map[*ssa.Function]kindSet {
+// eventually cause. Only edges follow accepts are walked.
+func computeReach(cg *callgraph.Graph, isLocal func(*ssa.Function) bool, kind func(*ssa.Function) kindSet, follow func(*callgraph.Edge) bool) map[*ssa.Function]kindSet {
 	reach := make(map[*ssa.Function]kindSet, len(cg.Nodes))
 	callers := make(map[*ssa.Function][]*ssa.Function, len(cg.Nodes))
 	var work []*ssa.Function
@@ -123,7 +123,9 @@ func computeReach(cg *callgraph.Graph, isLocal func(*ssa.Function) bool, kind fu
 			work = append(work, fn)
 		}
 		for _, e := range n.Out {
-			callers[e.Callee.Func] = append(callers[e.Callee.Func], fn)
+			if follow(e) {
+				callers[e.Callee.Func] = append(callers[e.Callee.Func], fn)
+			}
 		}
 	}
 	for len(work) > 0 {
@@ -349,7 +351,7 @@ func (p *Program) nearestKind(fn *ssa.Function) kindSet {
 		}
 		for _, e := range node.Out {
 			callee := e.Callee.Func
-			if callee == nil || seen[callee] {
+			if callee == nil || seen[callee] || !p.follows(e) {
 				continue
 			}
 			seen[callee] = true
@@ -549,7 +551,7 @@ func (p *Program) analyzeFunctions() {
 	isLocal := p.isLocal
 	p.directImports = directImportsOf(p.ld.Packages)
 	p.sink = computeSinks(p.cha, isLocal)
-	p.reach = computeReach(p.cha, isLocal, p.effectKind)
+	p.reach = computeReach(p.cha, isLocal, p.effectKind, p.follows)
 
 	ids := make([]string, 0, len(p.canon))
 	for id := range p.canon {

@@ -92,12 +92,20 @@ func (p *Program) scoreKey(pkg *packages.Package, owner *types.TypeName, ownerNa
 	if col == "" {
 		col = columnOf(fld, nm.Name)
 	}
+	nameMatch := naming.IsIdempotencyName(nm.Name)
 	cov, unique := p.uniqueness(table, col)
-	if !ev.queried && where[[2]string{table, col}] {
-		ev.queried, ev.via = true, "a WHERE clause on "+table+"."+col
+	// Every table is unique on its primary key and looks rows up by it, so
+	// neither says anything about a retry unless the name says the primary key
+	// is one: a wallet's id is its identity, not its idempotency key.
+	identity := unique && !nameMatch && cov.Constraint.Kind == fact.KindPrimaryKey && len(cov.Constraint.Columns) == 1
+	queried, via := ev.queried, ev.via
+	if !queried && where[[2]string{table, col}] {
+		queried, via = true, "a WHERE clause on "+table+"."+col
+	}
+	if identity {
+		unique, queried = false, false
 	}
 
-	nameMatch := naming.IsIdempotencyName(nm.Name)
 	if !nameMatch && ev.origin != originExternal && !unique {
 		return fact.Candidate{}, false
 	}
@@ -134,9 +142,12 @@ func (p *Program) scoreKey(pkg *packages.Package, owner *types.TypeName, ownerNa
 		c.Score -= 4
 		c.Against = append(c.Against, "the value is generated in this process by a UUID or random source, so a retry produces a different value and it cannot deduplicate anything")
 	}
-	if ev.queried {
+	if queried {
 		c.Score += 3
-		c.Proof = append(c.Proof, "the code looks rows up by it ("+ev.via+")")
+		c.Proof = append(c.Proof, "the code looks rows up by it ("+via+")")
+	}
+	if identity {
+		c.Against = append(c.Against, "\""+col+"\" is the primary key of "+cov.Constraint.Table+": every row is unique by it and looked up by it, which says nothing about a retry")
 	}
 	switch {
 	case unique && cov.Partial:

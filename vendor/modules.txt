@@ -1,7 +1,7 @@
 # github.com/google/jsonschema-go v0.4.3
 ## explicit; go 1.23.0
 github.com/google/jsonschema-go/jsonschema
-# github.com/katayunak/gofacts v0.1.0
+# github.com/katayunak/gofacts v0.1.1
 ## explicit; go 1.25.0
 github.com/katayunak/gofacts/cite
 github.com/katayunak/gofacts/fact

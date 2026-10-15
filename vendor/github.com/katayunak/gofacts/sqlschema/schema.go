@@ -68,6 +68,14 @@ func (s *Schema) Apply(st Statement) {
 			s.applyAction(st, a)
 		}
 
+	case KindRenameIndex:
+		// Postgres renames the constraint an index backs along with it.
+		for i := range s.constraints {
+			if s.constraints[i].Name == st.Name {
+				s.constraints[i].Name = st.To
+			}
+		}
+
 	case KindDropIndex:
 		drop := set(st.Names)
 		s.constraints = filter(s.constraints, func(c fact.Constraint) bool {
