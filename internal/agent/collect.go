@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/agent/planner"
+	"github.com/katayunak/testigo/internal/config"
 	"os"
 	"path/filepath"
 	"sort"
@@ -37,7 +38,7 @@ func (c Collected) String() string {
 	return b.String()
 }
 
-func Collect(sidecarDir string, f *fact.Flow, k *domain.AgentResponse, asks []domain.Ask) (*Collected, error) {
+func Collect(sidecarDir string, f *fact.Flow, k *domain.AgentResponse, rules *config.Rules, asks []domain.Ask) (*Collected, error) {
 	dir := filepath.Join(sidecarDir, answersDir)
 	out := &Collected{Invalid: map[string]error{}}
 
@@ -60,7 +61,7 @@ func Collect(sidecarDir string, f *fact.Flow, k *domain.AgentResponse, asks []do
 		}
 		if batch.Single() {
 			ask := batch.Asks[0]
-			if err := apply(ask, raw, f, k, machineByType, out); err != nil {
+			if err := apply(ask, raw, f, k, rules, machineByType, out); err != nil {
 				out.Invalid[ask.ID()] = err
 				continue
 			}
@@ -82,7 +83,7 @@ func Collect(sidecarDir string, f *fact.Flow, k *domain.AgentResponse, asks []do
 				continue
 			}
 			matched++
-			if err := apply(ask, part, f, k, machineByType, out); err != nil {
+			if err := apply(ask, part, f, k, rules, machineByType, out); err != nil {
 				out.Invalid[ask.ID()] = err
 				continue
 			}
@@ -111,7 +112,7 @@ func shapeError(b Batch, got map[string]json.RawMessage) error {
 		b.ID(), strings.Join(keys, ", "), b.Asks[0].ID(), len(b.Asks)-1, b.Asks[0].ID())
 }
 
-func apply(ask domain.Ask, raw []byte, f *fact.Flow, k *domain.AgentResponse,
+func apply(ask domain.Ask, raw []byte, f *fact.Flow, k *domain.AgentResponse, rules *config.Rules,
 	machines map[string]fact.StateMachine, out *Collected) error {
 
 	switch ask.Kind {
@@ -152,7 +153,7 @@ func apply(ask domain.Ask, raw []byte, f *fact.Flow, k *domain.AgentResponse,
 
 		asked := ask.Questions
 		if len(asked) == 0 {
-			d := planner.Demanded(f, FactsFrom(k, nil))
+			d := planner.Demanded(f, FactsFrom(k, rules))
 			for _, n := range domain.Needed(class, d.Scenarios, d.Techniques, nil) {
 				asked = append(asked, n.Question.ID)
 			}
@@ -225,7 +226,7 @@ func apply(ask domain.Ask, raw []byte, f *fact.Flow, k *domain.AgentResponse,
 		}
 		a.CaseID = ask.Subject
 		size := testPlan.SizeSmall
-		for _, c := range testPlan.Select(f, factsOf(k)) {
+		for _, c := range Cases(f, k, rules) {
 			if c.Scenario.ID == ask.Subject {
 				size = c.Size
 				break

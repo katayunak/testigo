@@ -121,7 +121,7 @@ func (s *testigoMCP) status(_ context.Context, _ *mcp.CallToolRequest, _ StatusI
 		return nil, out, nil
 	}
 
-	asks2 := agent.Plan(flow, answers, domain.RoundGenerate)
+	asks2, _ := agent.PlanWith(flow, answers, domain.RoundGenerate, rules, 0)
 	if len(asks2) > 0 {
 		out.Round, out.RoundName = 2, domain.RoundGenerate.String()
 		out.EstTokens = agent.Estimate(domain.RoundGenerate, asks2, agent.Preamble(flow, domain.RoundGenerate)).EstTokens
@@ -240,7 +240,7 @@ func (s *testigoMCP) round1SubmitAnswers(_ context.Context, _ *mcp.CallToolReque
 		return nil, Round1SubmitOut{}, err
 	}
 
-	got, err := agent.Collect(config.Dir(s.root), flow, answers, pack.Asks)
+	got, err := agent.Collect(config.Dir(s.root), flow, answers, rules, pack.Asks)
 	if err != nil {
 		return nil, Round1SubmitOut{}, err
 	}
@@ -299,7 +299,8 @@ func (s *testigoMCP) round2NextCase(_ context.Context, _ *mcp.CallToolRequest, i
 	}
 
 	var pending []domain.Ask
-	for _, a := range agent.Plan(flow, answers, domain.RoundGenerate) {
+	asks, _ := agent.PlanWith(flow, answers, domain.RoundGenerate, rules, 0)
+	for _, a := range asks {
 		if !done[a.Subject] {
 			pending = append(pending, a)
 		}
