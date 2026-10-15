@@ -3,7 +3,7 @@ package planner
 import (
 	"sort"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 	"github.com/katayunak/testigo/internal/testPlan"
 )
 
@@ -30,7 +30,7 @@ func (d Demand) NeedsState(machine string) ([]string, bool) {
 	return by, ok
 }
 
-func Demanded(f *flowEntity.Flow, facts testPlan.Facts) Demand {
+func Demanded(f *fact.Flow, facts testPlan.Facts) Demand {
 	d := Demand{
 		States: map[string][]string{},
 		Seams:  map[string][]string{},

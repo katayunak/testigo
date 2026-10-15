@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
 const (
@@ -105,10 +105,10 @@ func (c *Config) RequireEntries() error {
 	return nil
 }
 
-func (c *Config) EntryPoints() []flowEntity.EntryPoint {
-	out := make([]flowEntity.EntryPoint, 0, len(c.Entries))
+func (c *Config) EntryPoints() []fact.EntryPoint {
+	out := make([]fact.EntryPoint, 0, len(c.Entries))
 	for _, e := range c.Entries {
-		out = append(out, flowEntity.EntryPoint{Pkg: e.Pkg, Symbol: e.Symbol, Label: e.Label})
+		out = append(out, fact.EntryPoint{Pkg: e.Pkg, Symbol: e.Symbol, Label: e.Label})
 	}
 	return out
 }

@@ -3,19 +3,19 @@ package testPlan
 import (
 	"testing"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
 func TestSelectPicksTheLifecycleStateMachineNotTheFirstOne(t *testing.T) {
-	f := &flowEntity.Flow{
-		States: []flowEntity.StateMachine{
+	f := &fact.Flow{
+		States: []fact.StateMachine{
 			{Type: "example.com/x.EType", States: []string{"CARD", "PSP", "TIMEOUT"}},
 			{Type: "example.com/x.Status", States: []string{"INITIAL", "PENDING", "SUCCESS", "FAILED"}},
 		},
 	}
 	facts := Facts{
 		Known: true,
-		StateMachines: map[string]flowEntity.StateRoles{
+		StateMachines: map[string]fact.StateRoles{
 			"example.com/x.EType": {
 				{State: "CARD", Foreign: true, Proof: "x.go:1"},
 				{State: "PSP", Foreign: true, Proof: "x.go:2"},
@@ -31,7 +31,7 @@ func TestSelectPicksTheLifecycleStateMachineNotTheFirstOne(t *testing.T) {
 	}
 
 	cases := Select(f, facts)
-	var got *flowEntity.StateMachine
+	var got *fact.StateMachine
 	for _, c := range cases {
 		if c.Scenario.ID == "ILLEGAL-TRANSITION-REFUSED" {
 			got = c.States
@@ -47,9 +47,9 @@ func TestSelectPicksTheLifecycleStateMachineNotTheFirstOne(t *testing.T) {
 }
 
 func TestDeadlockIsRecoveredNeedsAnOpenTransactionAndATransferFunc(t *testing.T) {
-	f := &flowEntity.Flow{
-		Nodes: map[string]*flowEntity.Node{
-			"example.com/x#Transfer": {Facts: flowEntity.Facts{OpensTx: true}},
+	f := &fact.Flow{
+		Nodes: map[string]*fact.Node{
+			"example.com/x#Transfer": {Facts: fact.Facts{OpensTx: true}},
 		},
 	}
 	facts := Facts{Known: true, TransferFunc: "example.com/x#Transfer"}
@@ -73,9 +73,9 @@ func TestDeadlockIsRecoveredNeedsAnOpenTransactionAndATransferFunc(t *testing.T)
 }
 
 func TestDeadlockIsRecoveredBlockedWithoutAnOpenTransaction(t *testing.T) {
-	f := &flowEntity.Flow{
-		Nodes: map[string]*flowEntity.Node{
-			"example.com/x#Transfer": {Facts: flowEntity.Facts{}},
+	f := &fact.Flow{
+		Nodes: map[string]*fact.Node{
+			"example.com/x#Transfer": {Facts: fact.Facts{}},
 		},
 	}
 	facts := Facts{Known: true, TransferFunc: "example.com/x#Transfer"}
@@ -92,8 +92,8 @@ func TestDeadlockIsRecoveredBlockedWithoutAnOpenTransaction(t *testing.T) {
 }
 
 func TestTenantRowsDontLeakNeedsASharedDiscriminatorColumn(t *testing.T) {
-	f := &flowEntity.Flow{
-		Infra: flowEntity.Infra{Constraints: []flowEntity.Constraint{
+	f := &fact.Flow{
+		Infra: fact.Infra{Constraints: []fact.Constraint{
 			{Table: "logs", Columns: []string{"ledger", "idempotency_key"}, Kind: "unique_index"},
 			{Table: "transactions", Columns: []string{"ledger", "id"}, Kind: "unique_index"},
 		}},
@@ -118,8 +118,8 @@ func TestTenantRowsDontLeakNeedsASharedDiscriminatorColumn(t *testing.T) {
 }
 
 func TestTenantRowsDontLeakBlockedWithoutASharedDiscriminatorColumn(t *testing.T) {
-	f := &flowEntity.Flow{
-		Infra: flowEntity.Infra{Constraints: []flowEntity.Constraint{
+	f := &fact.Flow{
+		Infra: fact.Infra{Constraints: []fact.Constraint{
 			{Table: "users", Columns: []string{"email"}, Kind: "unique_index"},
 		}},
 	}
@@ -139,9 +139,9 @@ func TestTenantRowsDontLeakBlockedWithoutASharedDiscriminatorColumn(t *testing.T
 }
 
 func TestHashChainCatchesTamperingNeedsASelfTypedHashingMethod(t *testing.T) {
-	f := &flowEntity.Flow{
-		HashChains: []flowEntity.HashChain{
-			{Type: "example.com/x.Log", Method: flowEntity.CodeRef{Symbol: "Log.ChainLog", File: "x.go", Line: 10}},
+	f := &fact.Flow{
+		HashChains: []fact.HashChain{
+			{Type: "example.com/x.Log", Method: fact.CodeRef{Symbol: "Log.ChainLog", File: "x.go", Line: 10}},
 		},
 	}
 
@@ -164,7 +164,7 @@ func TestHashChainCatchesTamperingNeedsASelfTypedHashingMethod(t *testing.T) {
 }
 
 func TestHashChainCatchesTamperingBlockedWithoutOne(t *testing.T) {
-	f := &flowEntity.Flow{}
+	f := &fact.Flow{}
 
 	for _, c := range Select(f, Facts{}) {
 		if c.Scenario.ID == "HASH-CHAIN-CATCHES-TAMPERING" {
@@ -181,15 +181,15 @@ func TestHashChainCatchesTamperingBlockedWithoutOne(t *testing.T) {
 }
 
 func TestSelectFallsBackToFirstMachineBeforeRolesAreAnswered(t *testing.T) {
-	f := &flowEntity.Flow{
-		States: []flowEntity.StateMachine{
+	f := &fact.Flow{
+		States: []fact.StateMachine{
 			{Type: "example.com/x.EType", States: []string{"CARD", "PSP"}},
 			{Type: "example.com/x.Status", States: []string{"INITIAL", "SUCCESS"}},
 		},
 	}
 
 	cases := Select(f, Facts{Known: true})
-	var got *flowEntity.StateMachine
+	var got *fact.StateMachine
 	for _, c := range cases {
 		if c.Scenario.ID == "ILLEGAL-TRANSITION-REFUSED" {
 			got = c.States

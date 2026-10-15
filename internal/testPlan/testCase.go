@@ -1,7 +1,7 @@
 package testPlan
 
 import (
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
 type TestCase struct {
@@ -14,15 +14,15 @@ type TestCase struct {
 	TargetPkg  string
 	TargetFile string
 
-	Entry *flowEntity.EntryPoint
+	Entry *fact.EntryPoint
 
-	Seams []flowEntity.Seam
+	Seams []fact.Seam
 
-	States *flowEntity.StateMachine
+	States *fact.StateMachine
 
-	Tenancy *flowEntity.TenantScheme
+	Tenancy *fact.TenantScheme
 
-	HashChain *flowEntity.HashChain
+	HashChain *fact.HashChain
 
 	Blocked string
 }

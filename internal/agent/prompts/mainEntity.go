@@ -5,10 +5,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
-func MainEntity(f *flowEntity.Flow, entities []Entity) *Prompt {
+func MainEntity(f *fact.Flow, entities []Entity) *Prompt {
 	p := New("testigo — which entity does this flow move, and what identifies a repeat?").
 		Goal("Two questions about the same struct. Both are contract questions: the analyser can see every field and still not know which one two systems agreed on.").
 		Rule("Answer only from this repository. Read the files and lines named below.",
@@ -135,12 +135,12 @@ type Entity struct {
 	File         string
 	CarriesState string
 	Money        []string
-	IDs          flowEntity.Candidates
+	IDs          fact.Candidates
 
 	weight int
 }
 
-func Entities(f *flowEntity.Flow, carriers map[string]string) []Entity {
+func Entities(f *fact.Flow, carriers map[string]string) []Entity {
 
 	weight := map[string]int{}
 	for _, m := range f.States {
@@ -205,8 +205,8 @@ const (
 	maxOtherIDs = 3
 )
 
-func trimIDs(ids flowEntity.Candidates) flowEntity.Candidates {
-	var kept flowEntity.Candidates
+func trimIDs(ids fact.Candidates) fact.Candidates {
+	var kept fact.Candidates
 	others := 0
 	for _, c := range ids {
 		if c.Declarative {
