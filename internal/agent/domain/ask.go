@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
 type Round int
@@ -86,7 +86,7 @@ func Slug(s string) string {
 	return out
 }
 
-func (a Ask) Ref(refs map[string]flowEntity.CodeRef) (flowEntity.CodeRef, bool) {
+func (a Ask) Ref(refs map[string]fact.CodeRef) (fact.CodeRef, bool) {
 	ref, ok := refs[a.Subject]
 	return ref, ok
 }

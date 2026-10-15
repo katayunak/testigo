@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
 const flowFile = "flow.json"
@@ -16,7 +16,7 @@ func FlowPath(root string) string { return filepath.Join(Dir(root), flowFile) }
 
 var ErrNoSidecar = errors.New("no sidecar found")
 
-func LoadFlow(root string) (*flowEntity.Flow, error) {
+func LoadFlow(root string) (*fact.Flow, error) {
 	b, err := os.ReadFile(FlowPath(root))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrNoSidecar
@@ -25,24 +25,24 @@ func LoadFlow(root string) (*flowEntity.Flow, error) {
 		return nil, err
 	}
 
-	var f flowEntity.Flow
+	var f fact.Flow
 	if err := json.Unmarshal(b, &f); err != nil {
 		return nil, fmt.Errorf("sidecar is corrupt: %w", err)
 	}
 
-	if f.SchemaVersion != flowEntity.SchemaVersion {
+	if f.SchemaVersion != fact.SchemaVersion {
 		return nil, fmt.Errorf("sidecar schema v%d, this binary speaks v%d: delete %s and rescan",
-			f.SchemaVersion, flowEntity.SchemaVersion, FlowPath(root))
+			f.SchemaVersion, fact.SchemaVersion, FlowPath(root))
 	}
 
 	if f.Nodes == nil {
-		f.Nodes = map[string]*flowEntity.Node{}
+		f.Nodes = map[string]*fact.Node{}
 	}
 
 	return &f, nil
 }
 
-func SaveFlow(root string, f *flowEntity.Flow) error {
+func SaveFlow(root string, f *fact.Flow) error {
 	dir := Dir(root)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err

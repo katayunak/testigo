@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/katayunak/gofacts/fact"
 	"github.com/katayunak/testigo/internal/agent/domain"
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 	"github.com/katayunak/testigo/internal/testPlan"
 )
 
@@ -17,7 +17,7 @@ type Tokens struct {
 	Saved        int
 }
 
-func Report(f *flowEntity.Flow, k *domain.AgentResponse, cases []testPlan.TestCase, tok Tokens) *Prompt {
+func Report(f *fact.Flow, k *domain.AgentResponse, cases []testPlan.TestCase, tok Tokens) *Prompt {
 	p := New("testigo — write the report").
 		Standalone().
 		Goal("Write ONE markdown file. Everything you need is below; do not open the repository to re-derive it.").
@@ -85,7 +85,7 @@ const reportShape = "Write the file as markdown, in this order. Nothing before t
 	"\n" +
 	"Return the markdown only. No JSON, no fence around the whole document."
 
-func systemBlock(f *flowEntity.Flow, k *domain.AgentResponse) string {
+func systemBlock(f *fact.Flow, k *domain.AgentResponse) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "module   %s\n", f.Module)
 	for _, e := range f.Entries {
@@ -128,7 +128,7 @@ func systemBlock(f *flowEntity.Flow, k *domain.AgentResponse) string {
 	return b.String()
 }
 
-func provedBlock(f *flowEntity.Flow) string {
+func provedBlock(f *fact.Flow) string {
 	var b strings.Builder
 	inj, con := 0, 0
 	for _, s := range f.Seams {
@@ -155,11 +155,11 @@ func provedBlock(f *flowEntity.Flow) string {
 	return b.String()
 }
 
-func findingsBlock(f *flowEntity.Flow) string {
+func findingsBlock(f *fact.Flow) string {
 	if len(f.Findings) == 0 {
 		return ""
 	}
-	byID := map[string][]flowEntity.Finding{}
+	byID := map[string][]fact.Finding{}
 	var order []string
 	for _, x := range f.Findings {
 		if _, seen := byID[x.ID]; !seen {

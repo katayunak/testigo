@@ -5,10 +5,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
-func ExternalEffect(f *flowEntity.Flow, target string, seams []flowEntity.Seam, paths []Path) *Prompt {
+func ExternalEffect(f *fact.Flow, target string, seams []fact.Seam, paths []Path) *Prompt {
 
 	p := New("testigo — what does this call do to the world?")
 
@@ -35,28 +35,17 @@ func ExternalEffect(f *flowEntity.Flow, target string, seams []flowEntity.Seam, 
 	return p.Answers("Five verdicts. The questions and the JSON shape are in PREAMBLE.md,\nunder \"externalEffect\". Send no prose.").Where("testigo/asks/PREAMBLE.md")
 }
 
-func ExternalEffectVerify(f *flowEntity.Flow, target string, seams []flowEntity.Seam, paths []Path) *Prompt {
+func ExternalEffectVerify(f *fact.Flow, target string, seams []fact.Seam, paths []Path) *Prompt {
 	return ExternalEffect(f, target, seams, paths)
 }
 
-func SeamTargets(f *flowEntity.Flow) []string {
+func SeamTargets(f *fact.Flow) []string {
 	seen := map[string]bool{}
 	for _, s := range f.Seams {
-		switch {
-		case s.Kind == flowEntity.SeamClock, s.Kind == flowEntity.SeamRandom:
-
+		if s.Kind == fact.SeamClock || s.Kind == fact.SeamRandom {
 			continue
-		case s.Injectable:
-
-			seen[s.Target] = true
-		case s.Kind == flowEntity.SeamDB:
-			if isCommit(s.Target) {
-				seen[s.Target] = true
-			}
-		default:
-
-			seen[s.Target] = true
 		}
+		seen[s.Target] = true
 	}
 	out := make([]string, 0, len(seen))
 	for t := range seen {
@@ -64,12 +53,4 @@ func SeamTargets(f *flowEntity.Flow) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func isCommit(target string) bool {
-	name := target
-	if i := strings.LastIndex(name, "."); i >= 0 {
-		name = name[i+1:]
-	}
-	return name == "Commit"
 }
