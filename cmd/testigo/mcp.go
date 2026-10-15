@@ -16,6 +16,10 @@ import (
 )
 
 func cmdMCP(root string) error {
+	return newMCPServer(root).Run(context.Background(), &mcp.StdioTransport{})
+}
+
+func newMCPServer(root string) *mcp.Server {
 	srv := &testigoMCP{root: root}
 
 	s := mcp.NewServer(&mcp.Implementation{
@@ -64,7 +68,7 @@ func cmdMCP(root string) error {
 			"it and resubmit the same case_id.",
 	}, srv.round2SubmitTest)
 
-	return s.Run(context.Background(), &mcp.StdioTransport{})
+	return s
 }
 
 type testigoMCP struct {

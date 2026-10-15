@@ -59,7 +59,7 @@ func WriteTest(root string, t *domain.CaseAnswer) (*Written, error) {
 	pkgDir := "./" + filepath.ToSlash(filepath.Dir(rel)) + "/"
 
 	var log strings.Builder
-	if out, ok := runGo(root, "build", pkgDir); !ok {
+	if out, ok := runGo(root, "test", "-c", "-o", os.DevNull, pkgDir); !ok {
 		fmt.Fprintf(&log, "go build failed:\n%s\n", out)
 		w.Output = log.String()
 		return w, nil

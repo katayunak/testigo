@@ -130,6 +130,33 @@ func TestBindingRejectsThePlaceholderExample(t *testing.T) {
 	}
 }
 
+func TestBindingRejectsTheExampleTheMoneyModelPromptShows(t *testing.T) {
+	prompt := Plan(fixtureFlow(), domain.NewAgentResponse(), domain.RoundUnderstand)[0]
+	if prompt.Kind != domain.KindMoneyModel {
+		t.Fatalf("fixture setup: first round 1 ask is %s, want the money model", prompt.Kind)
+	}
+	for _, placeholder := range domain.MoneyModelPlaceholders {
+		if !strings.Contains(prompt.Prompt, `"`+placeholder+`"`) {
+			t.Errorf("the money model prompt no longer shows %q, so the placeholder check guards an example nobody sees", placeholder)
+		}
+	}
+
+	a := &domain.MoneyModelAnswer{}
+	a.Money.Type = "pkg.Money"
+	a.Money.Proof = domain.Proof{Symbol: "pkg.Money", At: "money.go:14"}
+	a.TransferFunc = domain.Proof{Symbol: "pkg#(*Ledger).Post", At: "ledger.go:41"}
+	a.BalanceFunc = domain.Proof{Symbol: "pkg#(*Ledger).Balance", At: "ledger.go:88"}
+	err := a.Validate()
+	if err == nil {
+		t.Fatal("the prompt's own example was accepted as a money model")
+	}
+	for _, field := range []string{"money.type", "transfer_func.symbol", "balance_func.symbol"} {
+		if !strings.Contains(err.Error(), field) {
+			t.Errorf("%s is the prompt's placeholder but was not named in %v", field, err)
+		}
+	}
+}
+
 func TestBindingRequiresEvidenceForEveryClaim(t *testing.T) {
 	a := &domain.MoneyModelAnswer{}
 	a.TransferFunc.Symbol = "pay#(*Ledger).Post"
@@ -406,6 +433,39 @@ func TestAnsweringEveryRoundOneSeamQuestionUnblocksRoundTwo(t *testing.T) {
 	}
 	if r := BlockedReason(f, k, nil); r != "" {
 		t.Fatalf("every retry-safety question round 1 asked is answered, yet round 2 is still blocked: %q", r)
+	}
+}
+
+func TestAnsweredRoundOneAsksAreNotAskedAgain(t *testing.T) {
+	f := fixtureFlow()
+	k := domain.NewAgentResponse()
+	first := Plan(f, k, domain.RoundUnderstand)
+	if len(first) == 0 {
+		t.Fatal("fixture setup: round 1 asks nothing on a fresh flow, so this test proves nothing")
+	}
+
+	for _, a := range first {
+		switch a.Kind {
+		case domain.KindMoneyModel:
+			k.MoneyModel = &domain.MoneyModelAnswer{}
+		case domain.KindMainEntity:
+			k.MainEntity = &domain.MainEntityAnswer{}
+		case domain.KindStateRoles:
+			k.StateRoles[a.Subject] = &domain.StateRolesAnswer{}
+		case domain.KindExternalEffect:
+			k.ExternalEffects[a.Subject] = &domain.ExternalEffectAnswer{}
+		}
+	}
+
+	for _, a := range Plan(f, k, domain.RoundUnderstand) {
+		switch a.Kind {
+		case domain.KindMoneyModel, domain.KindMainEntity, domain.KindStateRoles:
+			t.Errorf("%s %s was answered and is asked again", a.Kind, a.Subject)
+		case domain.KindExternalEffect:
+			if k.ExternalEffects[a.Subject] != nil {
+				t.Errorf("retry safety of %s was answered and is asked again", a.Subject)
+			}
+		}
 	}
 }
 

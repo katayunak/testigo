@@ -66,14 +66,20 @@ func planUnderstand(f *fact.Flow, k *domain.AgentResponse, paths []prompts.Path,
 		keepCost(a, fields, 0, settled)
 	}
 
-	_, unresolved := domain.FromScan(f)
-	keep(domain.Ask{
-		Kind:   domain.KindMoneyModel,
-		Title:  moneyModelTitle(unresolved),
-		Prompt: render(prompts.MoneyModel(f, paths, unresolved)),
-	}, 4, len(unresolved) == 0)
+	if k == nil {
+		k = &domain.AgentResponse{}
+	}
 
-	if entities := prompts.Entities(f, f.Entities); needsEntityQuestion(entities) {
+	_, unresolved := domain.FromScan(f)
+	if k.MoneyModel == nil {
+		keep(domain.Ask{
+			Kind:   domain.KindMoneyModel,
+			Title:  moneyModelTitle(unresolved),
+			Prompt: render(prompts.MoneyModel(f, paths, unresolved)),
+		}, 4, len(unresolved) == 0)
+	}
+
+	if entities := prompts.Entities(f, f.Entities); k.MainEntity == nil && needsEntityQuestion(entities) {
 		keep(domain.Ask{
 			Kind:   domain.KindMainEntity,
 			Title:  entityTitle(entities),
@@ -83,10 +89,8 @@ func planUnderstand(f *fact.Flow, k *domain.AgentResponse, paths []prompts.Path,
 
 	class := domain.Classify(f)
 	answered := map[string]bool{}
-	if k != nil {
-		for id := range k.PaymentKind {
-			answered[id] = true
-		}
+	for id := range k.PaymentKind {
+		answered[id] = true
 	}
 	if needs := domain.Needed(class, d.Scenarios, d.Techniques, answered); len(needs) > 0 {
 		est := 0
@@ -109,6 +113,9 @@ func planUnderstand(f *fact.Flow, k *domain.AgentResponse, paths []prompts.Path,
 	}
 
 	for _, m := range f.States {
+		if k.StateRoles[m.Type] != nil {
+			continue
+		}
 		keep(domain.Ask{
 			Kind: domain.KindStateRoles,
 
@@ -123,6 +130,9 @@ func planUnderstand(f *fact.Flow, k *domain.AgentResponse, paths []prompts.Path,
 		seamsByTarget[s.Target] = append(seamsByTarget[s.Target], s)
 	}
 	for _, target := range prompts.SeamTargets(f) {
+		if k.ExternalEffects[target] != nil {
+			continue
+		}
 		keep(domain.Ask{
 			Kind:    domain.KindExternalEffect,
 			Title:   "Is a retry of " + target + " free, or does it move money twice?",

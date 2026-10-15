@@ -75,7 +75,8 @@ func run(args []string) error {
 	}
 
 	dir := "."
-	if fs.NArg() > 0 {
+	entryWithoutDir := cmd == "entry" && fs.Arg(0) == "add"
+	if fs.NArg() > 0 && !entryWithoutDir {
 		dir = fs.Arg(0)
 	}
 

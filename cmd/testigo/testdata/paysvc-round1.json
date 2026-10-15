@@ -1,0 +1,45 @@
+{
+  "moneyModel": {
+    "money": { "type": "example.com/paysvc/domain.Payment", "amount_field": "Amount", "proof": { "symbol": "Payment.Amount", "at": "domain/payment.go:24" } },
+    "transfer_func": { "symbol": "example.com/paysvc/ledger#(*SQLLedger).Post", "at": "ledger/ledger.go:14" },
+    "balance_func": { "symbol": null, "at": null }
+  },
+  "mainEntity": {
+    "main_entity": { "struct": "Payment", "proof": { "symbol": "Payment", "at": "domain/payment.go:18" } },
+    "idempotency_key": { "field": "IdempotencyKey", "proof": { "symbol": "Payment.IdempotencyKey", "at": "api/server.go:27" }, "supplied_by": "client", "read_before_acting": true },
+    "other_identifiers": [
+      { "field": "ID", "purpose": "surrogate primary key, generated here", "proof": { "symbol": "Payment.ID", "at": "domain/payment.go:19" }, "could_be_key": false },
+      { "field": "ReferenceID", "purpose": "generated per request", "proof": { "symbol": "Payment.ReferenceID", "at": "domain/payment.go:20" }, "could_be_key": false },
+      { "field": "TraceID", "purpose": "tracing id, generated per request", "proof": { "symbol": "Payment.TraceID", "at": "domain/payment.go:21" }, "could_be_key": false },
+      { "field": "OrderID", "purpose": "caller's order reference, never read before acting", "proof": { "symbol": "Payment.OrderID", "at": "domain/payment.go:22" }, "could_be_key": false }
+    ]
+  },
+  "stateRoles-example-com-paysvc-domain-PaymentStatus": {
+    "roles": [
+      { "state": "StatusPending", "initializing": true, "proof": "api/server.go:49" },
+      { "state": "StatusAuthorized", "in_progress": true, "proof": "api/server.go:72" },
+      { "state": "StatusCaptured", "final": true, "proof": "domain/payment.go:32" },
+      { "state": "StatusFailed", "final": true, "proof": "domain/payment.go:32" },
+      { "state": "StatusRefunded", "final": true, "compensating": true, "proof": "domain/payment.go:32" },
+      { "state": "StatusAbandoned", "unclear": true }
+    ],
+    "exceptions": []
+  },
+  "stateRoles-example-com-paysvc-domain-SettlementMode": {
+    "roles": [
+      { "state": "ModeQueued", "initializing": true, "proof": "api/server.go:50" },
+      { "state": "ModeSent", "unclear": true },
+      { "state": "ModeAccepted", "final": true, "proof": "webhook/webhook.go:27" }
+    ],
+    "exceptions": []
+  },
+  "externalEffect-database-sql-DB-BeginTx": { "changes_external_state": false, "reversible_by_rollback": true, "outcome_observable": true, "accepts_dedup_key": false, "moves_money": false },
+  "externalEffect-database-sql-DB-ExecContext": { "changes_external_state": true, "reversible_by_rollback": false, "outcome_observable": true, "accepts_dedup_key": false, "moves_money": true },
+  "externalEffect-database-sql-DB-QueryContext": { "changes_external_state": false, "reversible_by_rollback": true, "outcome_observable": true, "accepts_dedup_key": false, "moves_money": false },
+  "externalEffect-database-sql-DB-QueryRowContext": { "changes_external_state": false, "reversible_by_rollback": true, "outcome_observable": true, "accepts_dedup_key": false, "moves_money": false },
+  "externalEffect-database-sql-Tx-Commit": { "changes_external_state": true, "reversible_by_rollback": false, "outcome_observable": true, "accepts_dedup_key": false, "moves_money": true },
+  "externalEffect-database-sql-Tx-ExecContext": { "changes_external_state": true, "reversible_by_rollback": true, "outcome_observable": true, "accepts_dedup_key": false, "moves_money": false },
+  "externalEffect-net-http-Client-Do": { "changes_external_state": true, "reversible_by_rollback": false, "outcome_observable": false, "accepts_dedup_key": false, "moves_money": true },
+  "externalEffect-example-com-paysvc-ledger-Ledger-Post": { "changes_external_state": true, "reversible_by_rollback": false, "outcome_observable": true, "accepts_dedup_key": false, "moves_money": true },
+  "externalEffect-example-com-paysvc-psp-Gateway-Authorize": { "changes_external_state": true, "reversible_by_rollback": false, "outcome_observable": false, "accepts_dedup_key": false, "moves_money": true }
+}

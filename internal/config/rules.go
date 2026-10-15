@@ -61,17 +61,18 @@ const RulesExample = `{
   // What does moving money MEAN in this repository?
   //
   // testigo cannot work this out from code, and guessing wrong makes every
-  // generated test confidently wrong. Both fields are optional.
+  // generated test confidently wrong. Both fields are optional and start empty:
+  // whatever you put here is believed over round 1's answers.
 
   "money_movement": {
     // The function(s) that actually commit money. testigo uses the first one
-    // as the transfer function when it cannot find one itself.
-    "symbols": ["example.com/pay/ledger#(*Ledger).Post"]
+    // as the transfer function. For example:
+    //   "symbols": ["example.com/pay/ledger#(*Ledger).Post"]
+    "symbols": []
   },
 
-  // Catalog scenarios that do not apply here, with the reason.
-  "skip": [
-    { "scenario": "MINOR-UNIT-CONVERSION", "why": "single currency, IRR, no conversion anywhere" }
-  ]
+  // Catalog scenarios that do not apply here, with the reason. For example:
+  //   { "scenario": "MINOR-UNIT-CONVERSION", "why": "single currency, IRR, no conversion anywhere" }
+  "skip": []
 }
 `
