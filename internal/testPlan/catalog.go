@@ -1,7 +1,7 @@
 package testPlan
 
 import (
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
 var Catalog = []Scenario{
@@ -36,7 +36,7 @@ it.`,
 		Techniques: []Technique{TechniqueFaultInjection, TechniqueUnit},
 		Oracle:     OracleSpecification,
 		Requires:   Requires{IdempotencyKey: true, InjectableSeam: true},
-		Severity:   flowEntity.SevCritical,
+		Severity:   fact.SevCritical,
 	},
 
 	{
@@ -65,7 +65,7 @@ money twice under one key, which defeats the entire mechanism.`,
 		Techniques: []Technique{TechniqueFaultInjection, TechniqueUnit},
 		Oracle:     OracleSpecification,
 		Requires:   Requires{IdempotencyKey: true, InjectableSeam: true},
-		Severity:   flowEntity.SevHigh,
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -99,7 +99,7 @@ opens it.`,
 		Techniques: []Technique{TechniqueConcurrency, TechniqueNarrowIntegration},
 		Oracle:     OracleSpecification,
 		Requires:   Requires{IdempotencyKey: true, InjectableSeam: true},
-		Severity:   flowEntity.SevCritical,
+		Severity:   fact.SevCritical,
 	},
 
 	{
@@ -131,7 +131,7 @@ exhaustive over the real failure surface rather than a sample of it.`,
 		Techniques: []Technique{TechniqueFaultInjection},
 		Oracle:     OracleSpecification,
 		Requires:   Requires{IdempotencyKey: true, InjectableSeam: true},
-		Severity:   flowEntity.SevCritical,
+		Severity:   fact.SevCritical,
 	},
 
 	{
@@ -162,8 +162,8 @@ timeout onto failure and retries is moving the money twice for one purchase.`,
 		},
 		Techniques: []Technique{TechniqueFaultInjection},
 		Oracle:     OracleSpecification,
-		Requires:   Requires{InjectableSeam: true, SeamKinds: []flowEntity.SeamKind{flowEntity.SeamHTTP, flowEntity.SeamQueue}},
-		Severity:   flowEntity.SevCritical,
+		Requires:   Requires{InjectableSeam: true, SeamKinds: []fact.SeamKind{fact.SeamHTTP, fact.SeamQueue}},
+		Severity:   fact.SevCritical,
 	},
 
 	{
@@ -193,7 +193,7 @@ reconciler can find.`,
 		Techniques: []Technique{TechniqueFaultInjection},
 		Oracle:     OracleInvariant,
 		Requires:   Requires{InjectableSeam: true, OpensTx: true},
-		Severity:   flowEntity.SevCritical,
+		Severity:   fact.SevCritical,
 	},
 
 	{
@@ -221,7 +221,7 @@ manual investigation; the unsafe default costs a customer's money.`,
 		Techniques: []Technique{TechniqueTable, TechniqueFaultInjection},
 		Oracle:     OracleSpecification,
 		Requires:   Requires{InjectableSeam: true},
-		Severity:   flowEntity.SevHigh,
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -255,7 +255,7 @@ This is Jepsen's bank workload, which is the canonical implementation.`,
 		Techniques: []Technique{TechniqueNarrowIntegration, TechniqueProperty, TechniqueConcurrency},
 		Oracle:     OracleInvariant,
 		Requires:   Requires{BalanceFunc: true, MoneyFlows: true, RealDatabase: true},
-		Severity:   flowEntity.SevCritical,
+		Severity:   fact.SevCritical,
 	},
 
 	{
@@ -288,8 +288,8 @@ almost always pass.`,
 		},
 		Techniques: []Technique{TechniqueNarrowIntegration},
 		Oracle:     OracleInvariant,
-		Requires:   Requires{BalanceFunc: true, MoneyFlows: true, RealDatabase: true, SeamKinds: []flowEntity.SeamKind{flowEntity.SeamDB}},
-		Severity:   flowEntity.SevCritical,
+		Requires:   Requires{BalanceFunc: true, MoneyFlows: true, RealDatabase: true, SeamKinds: []fact.SeamKind{fact.SeamDB}},
+		Severity:   fact.SevCritical,
 	},
 
 	{
@@ -317,7 +317,7 @@ build an unbalanced movement.`,
 		Techniques: []Technique{TechniqueProperty, TechniqueTable},
 		Oracle:     OracleInvariant,
 		Requires:   Requires{TransferFunc: true, MoneyFlows: true},
-		Severity:   flowEntity.SevCritical,
+		Severity:   fact.SevCritical,
 	},
 
 	{
@@ -345,7 +345,7 @@ opened.`,
 		Techniques: []Technique{TechniqueNarrowIntegration},
 		Oracle:     OracleInvariant,
 		Requires:   Requires{TransferFunc: true, OpensTx: true, RealDatabase: true},
-		Severity:   flowEntity.SevCritical,
+		Severity:   fact.SevCritical,
 	},
 
 	{
@@ -374,8 +374,8 @@ the version that keeps being true as the code changes.`,
 		},
 		Techniques: []Technique{TechniqueFaultInjection, TechniqueUnit},
 		Oracle:     OracleSpecification,
-		Requires:   Requires{OpensTx: true, InjectableSeam: true, SeamKinds: []flowEntity.SeamKind{flowEntity.SeamHTTP, flowEntity.SeamQueue}},
-		Severity:   flowEntity.SevHigh,
+		Requires:   Requires{OpensTx: true, InjectableSeam: true, SeamKinds: []fact.SeamKind{fact.SeamHTTP, fact.SeamQueue}},
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -403,7 +403,7 @@ unsure are excluded — a guess must not become a failing test.`,
 		Techniques: []Technique{TechniqueStateMachine, TechniqueTable},
 		Oracle:     OracleSpecification,
 		Requires:   Requires{StateMachine: true},
-		Severity:   flowEntity.SevHigh,
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -436,7 +436,7 @@ forbids a chargeback and someone deletes it the first time a real one arrives.`,
 		Techniques: []Technique{TechniqueStateMachine, TechniqueTable},
 		Oracle:     OracleSpecification,
 		Requires:   Requires{StateMachine: true},
-		Severity:   flowEntity.SevCritical,
+		Severity:   fact.SevCritical,
 	},
 
 	{
@@ -463,7 +463,7 @@ a real customer's card is declined once and they can never pay.`,
 		Techniques: []Technique{TechniqueStateMachine, TechniqueFaultInjection},
 		Oracle:     OracleSpecification,
 		Requires:   Requires{StateMachine: true, InjectableSeam: true},
-		Severity:   flowEntity.SevHigh,
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -498,7 +498,7 @@ If this system has such a case, this scenario does not apply to it.`,
 		Techniques: []Technique{TechniqueMetamorphic, TechniqueProperty},
 		Oracle:     OracleMetamorphic,
 		Requires:   Requires{MultipleEntries: true, StateMachine: true},
-		Severity:   flowEntity.SevHigh,
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -523,8 +523,8 @@ only whether they are harmless when they do.`,
 		},
 		Techniques: []Technique{TechniqueMetamorphic, TechniqueFaultInjection},
 		Oracle:     OracleInvariant,
-		Requires:   Requires{SeamKinds: []flowEntity.SeamKind{flowEntity.SeamQueue}, InjectableSeam: true},
-		Severity:   flowEntity.SevHigh,
+		Requires:   Requires{SeamKinds: []fact.SeamKind{fact.SeamQueue}, InjectableSeam: true},
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -551,7 +551,7 @@ report someone argues with and one they fix.`,
 		Techniques: []Technique{TechniqueFuzz, TechniqueProperty},
 		Oracle:     OracleInvariant,
 		Requires:   Requires{MoneyFlows: true},
-		Severity:   flowEntity.SevCritical,
+		Severity:   fact.SevCritical,
 	},
 
 	{
@@ -583,7 +583,7 @@ for a generic ISO 4217 table and it is wrong for exactly these.`,
 		Techniques: []Technique{TechniqueTable},
 		Oracle:     OracleSpecification,
 		Requires:   Requires{MoneyFlows: true},
-		Severity:   flowEntity.SevHigh,
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -612,7 +612,7 @@ single transaction.`,
 		Techniques: []Technique{TechniqueProperty, TechniqueTable},
 		Oracle:     OracleInvariant,
 		Requires:   Requires{MoneyFlows: true},
-		Severity:   flowEntity.SevHigh,
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -635,7 +635,7 @@ the type system is not doing that work.`,
 		Techniques: []Technique{TechniqueTable, TechniqueProperty},
 		Oracle:     OracleInvariant,
 		Requires:   Requires{MoneyFlows: true},
-		Severity:   flowEntity.SevHigh,
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -661,7 +661,7 @@ second pass adds it again because it is looking at stale criteria.`,
 		Techniques: []Technique{TechniqueNarrowIntegration, TechniqueFaultInjection},
 		Oracle:     OracleInvariant,
 		Requires:   Requires{MultipleEntries: true},
-		Severity:   flowEntity.SevHigh,
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -688,7 +688,7 @@ crash leaves something for the catch-up job to find.`,
 		Techniques: []Technique{TechniqueFaultInjection, TechniqueConcurrency},
 		Oracle:     OracleInvariant,
 		Requires:   Requires{Goroutine: true, InjectableSeam: true},
-		Severity:   flowEntity.SevCritical,
+		Severity:   fact.SevCritical,
 	},
 
 	{
@@ -721,7 +721,7 @@ before either writes, and the customer spends money that was not there.`,
 		Techniques: []Technique{TechniqueConcurrency, TechniqueNarrowIntegration},
 		Oracle:     OracleInvariant,
 		Requires:   Requires{MoneyFlows: true, BalanceFunc: true, OpensTx: true, RealDatabase: true},
-		Severity:   flowEntity.SevCritical,
+		Severity:   fact.SevCritical,
 	},
 
 	{
@@ -751,7 +751,7 @@ destroyed and no error is reported to anyone.`,
 		Techniques: []Technique{TechniqueFaultInjection, TechniqueNarrowIntegration},
 		Oracle:     OracleInvariant,
 		Requires:   Requires{TransferFunc: true, OpensTx: true, InjectableSeam: true},
-		Severity:   flowEntity.SevCritical,
+		Severity:   fact.SevCritical,
 	},
 
 	{
@@ -790,7 +790,7 @@ applied and the other lost.`,
 		Techniques: []Technique{TechniqueConcurrency, TechniqueNarrowIntegration},
 		Oracle:     OracleInvariant,
 		Requires:   Requires{OpensTx: true, RealDatabase: true, TransferFunc: true},
-		Severity:   flowEntity.SevHigh,
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -829,7 +829,7 @@ copied from one that never had it, filtering on the business key alone.`,
 		Techniques: []Technique{TechniqueNarrowIntegration},
 		Oracle:     OracleInvariant,
 		Requires:   Requires{MultiTenant: true, RealDatabase: true},
-		Severity:   flowEntity.SevCritical,
+		Severity:   fact.SevCritical,
 	},
 
 	{
@@ -858,7 +858,7 @@ order, it deadlocks against itself.`,
 		Techniques: []Technique{TechniqueTable, TechniqueUnit},
 		Oracle:     OracleInvariant,
 		Requires:   Requires{TransferFunc: true},
-		Severity:   flowEntity.SevHigh,
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -887,7 +887,7 @@ is exactly when a regulatory balance cap matters.`,
 		Techniques: []Technique{TechniqueConcurrency, TechniqueNarrowIntegration},
 		Oracle:     OracleSpecification,
 		Requires:   Requires{MoneyFlows: true, BalanceFunc: true, RealDatabase: true},
-		Severity:   flowEntity.SevHigh,
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -917,7 +917,7 @@ account for.`,
 		Techniques: []Technique{TechniqueTable, TechniqueStateMachine},
 		Oracle:     OracleSpecification,
 		Requires:   Requires{StateMachine: true, MoneyFlows: true},
-		Severity:   flowEntity.SevHigh,
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -948,8 +948,8 @@ happened.`,
 		Techniques: []Technique{TechniqueConcurrency, TechniqueNarrowIntegration},
 		Oracle:     OracleInvariant,
 		Requires: Requires{RealDatabase: true, OpensTx: true,
-			WritePatterns: []flowEntity.WritePattern{flowEntity.WriteUpdateInPlace}},
-		Severity: flowEntity.SevCritical,
+			WritePatterns: []fact.WritePattern{fact.WriteUpdateInPlace}},
+		Severity: fact.SevCritical,
 	},
 
 	{
@@ -979,8 +979,8 @@ read still returns something sensible.`,
 		Techniques: []Technique{TechniqueNarrowIntegration, TechniqueProperty},
 		Oracle:     OracleInvariant,
 		Requires: Requires{RealDatabase: true,
-			WritePatterns: []flowEntity.WritePattern{flowEntity.WriteInsertOnly}},
-		Severity: flowEntity.SevHigh,
+			WritePatterns: []fact.WritePattern{fact.WriteInsertOnly}},
+		Severity: fact.SevHigh,
 	},
 
 	{
@@ -1018,7 +1018,7 @@ with — the chain is decoration, not evidence.`,
 		Techniques: []Technique{TechniqueMetamorphic, TechniqueUnit},
 		Oracle:     OracleMetamorphic,
 		Requires:   Requires{HashChain: true},
-		Severity:   flowEntity.SevHigh,
+		Severity:   fact.SevHigh,
 	},
 
 	{
@@ -1048,7 +1048,7 @@ passes, while the second call already sent the second charge.`,
 		Techniques: []Technique{TechniqueFaultInjection, TechniqueNarrowIntegration},
 		Oracle:     OracleSpecification,
 		Requires: Requires{RealDatabase: true, InjectableSeam: true,
-			WritePatterns: []flowEntity.WritePattern{flowEntity.WriteUpsert}},
-		Severity: flowEntity.SevCritical,
+			WritePatterns: []fact.WritePattern{fact.WriteUpsert}},
+		Severity: fact.SevCritical,
 	},
 }

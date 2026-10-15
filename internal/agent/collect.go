@@ -12,7 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
+	"github.com/katayunak/gofacts/llmout"
 	"github.com/katayunak/testigo/internal/testPlan"
 )
 
@@ -37,11 +38,11 @@ func (c Collected) String() string {
 	return b.String()
 }
 
-func Collect(sidecarDir string, f *flowEntity.Flow, k *domain.AgentResponse, rules *config.Rules, asks []domain.Ask) (*Collected, error) {
+func Collect(sidecarDir string, f *fact.Flow, k *domain.AgentResponse, rules *config.Rules, asks []domain.Ask) (*Collected, error) {
 	dir := filepath.Join(sidecarDir, answersDir)
 	out := &Collected{Invalid: map[string]error{}}
 
-	machineByType := map[string]flowEntity.StateMachine{}
+	machineByType := map[string]fact.StateMachine{}
 	for _, m := range f.States {
 		machineByType[m.Type] = m
 	}
@@ -58,8 +59,6 @@ func Collect(sidecarDir string, f *flowEntity.Flow, k *domain.AgentResponse, rul
 		if err != nil {
 			return nil, err
 		}
-		raw = stripFence(raw)
-
 		if batch.Single() {
 			ask := batch.Asks[0]
 			if err := apply(ask, raw, f, k, rules, machineByType, out); err != nil {
@@ -71,7 +70,7 @@ func Collect(sidecarDir string, f *flowEntity.Flow, k *domain.AgentResponse, rul
 		}
 
 		var byKey map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &byKey); err != nil {
+		if err := llmout.Decode(raw, &byKey); err != nil {
 			out.Invalid[batch.ID()] = fmt.Errorf("%s.json is not one JSON object keyed by answer key: %w", batch.ID(), err)
 			continue
 		}
@@ -113,14 +112,14 @@ func shapeError(b Batch, got map[string]json.RawMessage) error {
 		b.ID(), strings.Join(keys, ", "), b.Asks[0].ID(), len(b.Asks)-1, b.Asks[0].ID())
 }
 
-func apply(ask domain.Ask, raw []byte, f *flowEntity.Flow, k *domain.AgentResponse, rules *config.Rules,
-	machines map[string]flowEntity.StateMachine, out *Collected) error {
+func apply(ask domain.Ask, raw []byte, f *fact.Flow, k *domain.AgentResponse, rules *config.Rules,
+	machines map[string]fact.StateMachine, out *Collected) error {
 
 	switch ask.Kind {
 	case domain.KindMoneyModel:
 		var a domain.MoneyModelAnswer
-		if err := json.Unmarshal(raw, &a); err != nil {
-			return fmt.Errorf("not valid JSON: %w", err)
+		if err := llmout.Decode(raw, &a); err != nil {
+			return err
 		}
 		if err := a.Validate(); err != nil {
 			return err
@@ -129,8 +128,8 @@ func apply(ask domain.Ask, raw []byte, f *flowEntity.Flow, k *domain.AgentRespon
 
 	case domain.KindMainEntity:
 		var a domain.MainEntityAnswer
-		if err := json.Unmarshal(raw, &a); err != nil {
-			return fmt.Errorf("not valid JSON: %w", err)
+		if err := llmout.Decode(raw, &a); err != nil {
+			return err
 		}
 		if err := a.Validate(); err != nil {
 			return err
@@ -144,8 +143,8 @@ func apply(ask domain.Ask, raw []byte, f *flowEntity.Flow, k *domain.AgentRespon
 
 	case domain.KindQuestions:
 		var answers map[string]*domain.QuestionAnswer
-		if err := json.Unmarshal(raw, &answers); err != nil {
-			return fmt.Errorf("not valid JSON: %w", err)
+		if err := llmout.Decode(raw, &answers); err != nil {
+			return err
 		}
 		class := domain.Classify(f)
 		if k.PaymentKind == nil {
@@ -198,8 +197,8 @@ func apply(ask domain.Ask, raw []byte, f *flowEntity.Flow, k *domain.AgentRespon
 
 	case domain.KindStateRoles:
 		var a domain.StateRolesAnswer
-		if err := json.Unmarshal(raw, &a); err != nil {
-			return fmt.Errorf("not valid JSON: %w", err)
+		if err := llmout.Decode(raw, &a); err != nil {
+			return err
 		}
 		m, ok := machines[ask.Subject]
 		if !ok {
@@ -214,16 +213,16 @@ func apply(ask domain.Ask, raw []byte, f *flowEntity.Flow, k *domain.AgentRespon
 
 	case domain.KindExternalEffect:
 		var a domain.ExternalEffectAnswer
-		if err := json.Unmarshal(raw, &a); err != nil {
-			return fmt.Errorf("not valid JSON: %w", err)
+		if err := llmout.Decode(raw, &a); err != nil {
+			return err
 		}
 		a.Target = ask.Subject
 		k.ExternalEffects[ask.Subject] = &a
 
 	case domain.KindTestCase:
 		var a domain.CaseAnswer
-		if err := json.Unmarshal(raw, &a); err != nil {
-			return fmt.Errorf("not valid JSON: %w", err)
+		if err := llmout.Decode(raw, &a); err != nil {
+			return err
 		}
 		a.CaseID = ask.Subject
 		size := testPlan.SizeSmall
@@ -239,20 +238,6 @@ func apply(ask domain.Ask, raw []byte, f *flowEntity.Flow, k *domain.AgentRespon
 		out.Cases = append(out.Cases, &a)
 	}
 	return nil
-}
-
-func stripFence(b []byte) []byte {
-	s := strings.TrimSpace(string(b))
-	if !strings.HasPrefix(s, "```") {
-		return []byte(s)
-	}
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[i+1:]
-	}
-	if i := strings.LastIndex(s, "```"); i >= 0 {
-		s = s[:i]
-	}
-	return []byte(strings.TrimSpace(s))
 }
 
 func LoadAgentResponse(sidecarDir string) (*domain.AgentResponse, error) {

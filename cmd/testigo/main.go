@@ -1,20 +1,23 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/katayunak/gofacts/fact"
+	"github.com/katayunak/gofacts/scan"
 	"github.com/katayunak/testigo/internal/agent"
 	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/agent/prompts"
 	"github.com/katayunak/testigo/internal/config"
+	"github.com/katayunak/testigo/internal/docs"
 	"github.com/katayunak/testigo/internal/report"
-	"github.com/katayunak/testigo/internal/scanningFlow"
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 	"github.com/katayunak/testigo/internal/testPlan"
 )
 
@@ -142,15 +145,25 @@ func cmdScan(root string) error {
 		return err
 	}
 
-	res, err := scanningFlow.Scan(scanningFlow.Options{Root: root, Entries: cfg.EntryPoints()})
+	prog, err := scan.Load(context.Background(), scan.Options{
+		Dir:      root,
+		SkipDirs: []string{config.DirName, "_to_delete"},
+	})
 	if err != nil {
 		return err
 	}
 
-	if err := config.SaveFlow(root, res.Flow); err != nil {
+	flow, err := prog.Flow(cfg.EntryPoints())
+	if err != nil {
 		return err
 	}
-	printSummary(res.Flow, config.FlowPath(root))
+	flow.GeneratedAt = time.Now().Local().Format(time.RFC3339)
+	flow.Docs = docs.Find(root)
+
+	if err := config.SaveFlow(root, flow); err != nil {
+		return err
+	}
+	printSummary(flow, config.FlowPath(root))
 	return nil
 }
 
@@ -168,7 +181,7 @@ func cmdFlow(root string) error {
 	return nil
 }
 
-func printSummary(f *flowEntity.Flow, path string) {
+func printSummary(f *fact.Flow, path string) {
 	fmt.Printf("phase       1 · %s\n", phaseScanningTheFlow)
 	fmt.Printf("module      %s\n", f.Module)
 	fmt.Printf("entries     %d\n", len(f.Entries))
@@ -193,12 +206,12 @@ func printSummary(f *flowEntity.Flow, path string) {
 	}
 
 	if len(f.Findings) > 0 {
-		counts := map[flowEntity.Severity]int{}
+		counts := map[fact.Severity]int{}
 		for _, x := range f.Findings {
 			counts[x.Severity]++
 		}
 		fmt.Printf("\nfindings    %d critical, %d high, %d medium, %d info\n\n",
-			counts[flowEntity.SevCritical], counts[flowEntity.SevHigh], counts[flowEntity.SevMedium], counts[flowEntity.SevInfo])
+			counts[fact.SevCritical], counts[fact.SevHigh], counts[fact.SevMedium], counts[fact.SevInfo])
 		shown := f.Findings
 		if len(shown) > 12 {
 			shown = shown[:12]
@@ -249,7 +262,7 @@ func cmdAsk(root string, roundNum int, budget int, explain bool) error {
 
 	round := domain.Round(roundNum)
 	if round == domain.RoundGenerate {
-		if reason := agent.BlockedReason(flow, answers); reason != "" {
+		if reason := agent.BlockedReason(flow, answers, rules); reason != "" {
 			return fmt.Errorf("round 2 needs round 1 first: %s\n\n"+
 				"Generating tests from half-collected context produces tests that look\n"+
 				"complete and check the wrong thing, which is the whole reason the rounds\n"+
@@ -368,7 +381,7 @@ func cmdCollect(root string) error {
 	if len(got.Cases) > 0 {
 		return applyGeneratedTests(root, config.Dir(root), answers, got.Cases)
 	}
-	if reason := agent.BlockedReason(flow, answers); reason != "" {
+	if reason := agent.BlockedReason(flow, answers, rules); reason != "" {
 		fmt.Printf("round 2 not ready: %s\n", reason)
 	} else {
 		fmt.Println("round 1 complete — run 'testigo ask --round 2' to generate tests")

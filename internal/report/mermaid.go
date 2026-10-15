@@ -5,10 +5,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
-func Flowchart(f *flowEntity.Flow) string {
+func Flowchart(f *fact.Flow) string {
 	var b strings.Builder
 	b.WriteString("flowchart TD\n")
 
@@ -18,7 +18,7 @@ func Flowchart(f *flowEntity.Flow) string {
 	}
 	sort.Strings(ids)
 
-	seamsBy := map[string][]flowEntity.Seam{}
+	seamsBy := map[string][]fact.Seam{}
 	for _, s := range f.Seams {
 		seamsBy[s.In.ID()] = append(seamsBy[s.In.ID()], s)
 	}
@@ -44,7 +44,7 @@ func Flowchart(f *flowEntity.Flow) string {
 		}
 		shape := "[\"%s\"]"
 		switch {
-		case n.Position == flowEntity.NodePositionEntry:
+		case n.Position == fact.NodePositionEntry:
 			shape = "([\"%s\"])"
 		case n.Facts.TouchesDB:
 			shape = "[(\"%s\")]"
@@ -77,14 +77,14 @@ func Flowchart(f *flowEntity.Flow) string {
 
 	b.WriteString("  classDef entry stroke-width:2px\n")
 	for _, id := range ids {
-		if f.Nodes[id].Position == flowEntity.NodePositionEntry {
+		if f.Nodes[id].Position == fact.NodePositionEntry {
 			fmt.Fprintf(&b, "  class %s entry\n", mid(id))
 		}
 	}
 	return b.String()
 }
 
-func StateDiagram(m flowEntity.StateMachine) string {
+func StateDiagram(m fact.StateMachine) string {
 	var b strings.Builder
 	b.WriteString("stateDiagram-v2\n")
 	written := map[string]bool{}

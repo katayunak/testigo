@@ -5,10 +5,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
-func Migrations(f *flowEntity.Flow) string {
+func Migrations(f *fact.Flow) string {
 	in := f.Infra
 	if in.Empty() {
 		if len(in.MigrationDirs) > 0 {
@@ -118,7 +118,7 @@ knowing.
 	return b.String()
 }
 
-func columnNote(c flowEntity.Column) string {
+func columnNote(c fact.Column) string {
 	var parts []string
 	if c.PrimaryKey {
 		parts = append(parts, "primary key")
@@ -135,7 +135,7 @@ func columnNote(c flowEntity.Column) string {
 	return strings.Join(parts, ", ")
 }
 
-func relevantTables(f *flowEntity.Flow) (keep, rest []flowEntity.Table) {
+func relevantTables(f *fact.Flow) (keep, rest []fact.Table) {
 	want := map[string]bool{}
 
 	for _, c := range f.Infra.Constraints {
@@ -218,7 +218,7 @@ func snake(s string) string {
 	return b.String()
 }
 
-func stateMismatch(f *flowEntity.Flow) string {
+func stateMismatch(f *fact.Flow) string {
 	var out strings.Builder
 
 	said := map[string]bool{}

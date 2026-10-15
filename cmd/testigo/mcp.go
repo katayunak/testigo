@@ -8,10 +8,10 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/katayunak/gofacts/fact"
 	"github.com/katayunak/testigo/internal/agent"
 	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/config"
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 	"github.com/katayunak/testigo/internal/testPlan"
 )
 
@@ -74,7 +74,7 @@ type testigoMCP struct {
 	round2PreambleAt int
 }
 
-func (s *testigoMCP) load() (*flowEntity.Flow, *domain.AgentResponse, *config.Rules, error) {
+func (s *testigoMCP) load() (*fact.Flow, *domain.AgentResponse, *config.Rules, error) {
 	flow, err := config.LoadFlow(s.root)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("%w — run 'testigo scan' first", err)
@@ -116,7 +116,7 @@ func (s *testigoMCP) status(_ context.Context, _ *mcp.CallToolRequest, _ StatusI
 		return nil, out, nil
 	}
 
-	if reason := agent.BlockedReason(flow, answers); reason != "" {
+	if reason := agent.BlockedReason(flow, answers, rules); reason != "" {
 		out.Round, out.RoundName, out.Blocked = 2, domain.RoundGenerate.String(), reason
 		return nil, out, nil
 	}
@@ -258,7 +258,7 @@ func (s *testigoMCP) round1SubmitAnswers(_ context.Context, _ *mcp.CallToolReque
 			out.Invalid[k] = e.Error()
 		}
 	}
-	if reason := agent.BlockedReason(flow, answers); reason != "" {
+	if reason := agent.BlockedReason(flow, answers, rules); reason != "" {
 		out.Round2Blocked = reason
 	} else {
 		out.Round2Ready = true
@@ -289,7 +289,7 @@ func (s *testigoMCP) round2NextCase(_ context.Context, _ *mcp.CallToolRequest, i
 	if err != nil {
 		return nil, Round2NextOut{}, err
 	}
-	if reason := agent.BlockedReason(flow, answers); reason != "" {
+	if reason := agent.BlockedReason(flow, answers, rules); reason != "" {
 		return nil, Round2NextOut{Blocked: reason}, nil
 	}
 
