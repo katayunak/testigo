@@ -107,9 +107,9 @@ ASKED
   stateRoles x2            free text    473 in + 524 out = 3.1k
   moneyModel               free text    1.1k in + 308 out = 2.6k
 
-cost       11.5k in + 3.1k out = 27.0k
+cost       11.5k in + 3.1k out = 27.1k
 
-est. cost   ~15.8k tokens across 14 prompt(s)
+est. cost   ~15.9k tokens across 14 prompt(s)
             ~56.6k saved by hoisting the shared rules into PREAMBLE.md
 ```
 
@@ -285,7 +285,7 @@ weighted tokens**, without dropping a single test:
    what consumes it. A field with no reader should not exist — and 35 of them did.
 3. **Hoist everything repeated into one preamble.** Shared rules and the rendered
    flow are written once into `PREAMBLE.md`; each ask cites step numbers instead of
-   reprinting them. On the fixture that is ~56.6k saved against ~15.8k actually sent.
+   reprinting them. On the fixture that is ~56.6k saved against ~15.9k actually sent.
    A test fails the build if any text is identical across the asks of one kind.
 4. **Prefer a boolean to a paragraph.** A true/false question costs about 5 output
    tokens; an open one costs 40 to 130. Most things worth knowing are decidable.
@@ -327,7 +327,7 @@ argument and the measurements.
 | `internal/config` | everything under `testigo/`: config, rules and `flow.json` | [README](internal/config/README.md) |
 | `internal/report` | the printed summary and the Mermaid diagrams | [README](internal/report/README.md) |
 
-9 packages, ~9.4k lines of Go and ~2.2k lines of tests.
+9 packages, ~9.9k lines of Go and ~2.6k lines of tests.
 
 Phase 1 itself — SSA, the call graph, seams, transactions, state machines, the
 schema, money and the findings — is not in this repository. It is
