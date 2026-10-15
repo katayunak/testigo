@@ -15,7 +15,7 @@ testigo/
 |---|---|---|
 | `config.json` | `Config` | `scan`, to know where the flow starts |
 | `rules.json` | `Rules` | the planner, to skip scenarios and to name the transfer function |
-| `flow.json` | `flowEntity.Flow` | every phase-2 command |
+| `flow.json` | `fact.Flow`, from [gofacts](https://github.com/katayunak/gofacts) | every phase-2 command |
 
 ## Three functions worth knowing
 
@@ -26,11 +26,14 @@ testigo/
 ## Schema versions are refused, not guessed
 
 ```
-sidecar schema v3, this binary speaks v4: delete testigo/flow.json and rescan
+sidecar schema v4, this binary speaks v5: delete testigo/flow.json and rescan
 ```
 
 A flow written by an older binary is not silently reinterpreted. Misreading a stale
 field is worse than asking for a rescan that costs nothing.
+
+The version is gofacts' `fact.SchemaVersion`. It moved from 4 to 5 when the scanner
+moved to gofacts, so every `flow.json` written before that needs one rescan.
 
 ## What `rules.json` still holds, and what it lost
 

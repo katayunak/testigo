@@ -4,10 +4,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
-func Classify(f *flowEntity.Flow) Classification {
+func Classify(f *fact.Flow) Classification {
 	e := gather(f)
 	c := Classification{Why: map[PaymentType][]string{}}
 
@@ -174,7 +174,7 @@ type evidence struct {
 	currencies map[string]bool
 }
 
-func gather(f *flowEntity.Flow) evidence {
+func gather(f *fact.Flow) evidence {
 	e := evidence{
 		tables: map[string]bool{}, columns: map[string]bool{}, fields: map[string]bool{},
 		states: map[string]bool{}, currencies: map[string]bool{},

@@ -4,12 +4,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
-func Select(f *flowEntity.Flow, b Facts) []TestCase {
-	seamsByKind := map[flowEntity.SeamKind][]flowEntity.Seam{}
-	var injectable []flowEntity.Seam
+func Select(f *fact.Flow, b Facts) []TestCase {
+	seamsByKind := map[fact.SeamKind][]fact.Seam{}
+	var injectable []fact.Seam
 	for _, s := range f.Seams {
 		seamsByKind[s.Kind] = append(seamsByKind[s.Kind], s)
 		if s.Injectable {
@@ -17,7 +17,8 @@ func Select(f *flowEntity.Flow, b Facts) []TestCase {
 		}
 	}
 
-	reachable := reachableFrom(f)
+	reachByEntry := reachableFromEachEntry(f)
+	reachInEntryOrder := reachSetsInEntryOrder(f, reachByEntry)
 
 	var cases []TestCase
 	for _, sc := range Catalog {
@@ -45,7 +46,7 @@ func Select(f *flowEntity.Flow, b Facts) []TestCase {
 			c.Size = SizeMedium
 		}
 
-		var candidates []flowEntity.Seam
+		var candidates []fact.Seam
 		if len(sc.Requires.SeamKinds) > 0 {
 			for _, k := range sc.Requires.SeamKinds {
 				candidates = append(candidates, seamsByKind[k]...)
@@ -53,11 +54,8 @@ func Select(f *flowEntity.Flow, b Facts) []TestCase {
 		} else if sc.Requires.InjectableSeam {
 			candidates = injectable
 		}
-		if len(f.Entries) > 0 {
-			e := f.Entries[0]
-			c.Entry = &e
-		}
-		c.Seams = scopeSeams(candidates, reachable)
+		c.Seams = scopeSeams(candidates, reachInEntryOrder)
+		c.Entries = entriesUnderTest(reachByEntry, c.Seams)
 		if sc.Requires.StateMachine {
 			c.States = bestStateMachine(f, b.StateMachines)
 		}
@@ -71,7 +69,7 @@ func Select(f *flowEntity.Flow, b Facts) []TestCase {
 			c.HashChain = &chain
 		}
 
-		c.TargetPkg, c.TargetFile = target(f, sc, c.Size)
+		c.TargetPkg, c.TargetFile = target(f, c.Entries, sc, c.Size)
 		cases = append(cases, c)
 	}
 
@@ -84,13 +82,13 @@ func Select(f *flowEntity.Flow, b Facts) []TestCase {
 	return cases
 }
 
-func severityRank(s flowEntity.Severity) int {
+func severityRank(s fact.Severity) int {
 	switch s {
-	case flowEntity.SevCritical:
+	case fact.SevCritical:
 		return 0
-	case flowEntity.SevHigh:
+	case fact.SevHigh:
 		return 1
-	case flowEntity.SevMedium:
+	case fact.SevMedium:
 		return 2
 	}
 	return 3
@@ -109,12 +107,12 @@ func funcName(s Scenario) string {
 	return b.String()
 }
 
-func target(f *flowEntity.Flow, s Scenario, size Size) (pkg, file string) {
+func target(f *fact.Flow, entries []fact.EntryPoint, s Scenario, size Size) (pkg, file string) {
 	dir := "."
 	pkgPath := ""
-	if len(f.Entries) > 0 {
-		pkgPath = f.Entries[0].Pkg
-		if n, ok := f.Nodes[f.Entries[0].Pkg+"#"+f.Entries[0].Symbol]; ok {
+	if len(entries) > 0 {
+		pkgPath = entries[0].Pkg
+		if n, ok := f.Nodes[entries[0].ID()]; ok {
 			if i := strings.LastIndex(n.Ref.File, "/"); i >= 0 {
 				dir = n.Ref.File[:i]
 			}
@@ -127,8 +125,8 @@ func target(f *flowEntity.Flow, s Scenario, size Size) (pkg, file string) {
 	return pkgPath, dir + "/" + strings.ToLower(string(s.Family)) + suffix
 }
 
-func bestStateMachine(f *flowEntity.Flow, roles map[string]flowEntity.StateRoles) *flowEntity.StateMachine {
-	var best *flowEntity.StateMachine
+func bestStateMachine(f *fact.Flow, roles map[string]fact.StateRoles) *fact.StateMachine {
+	var best *fact.StateMachine
 	bestScore := -1
 	for i := range f.States {
 		m := &f.States[i]
@@ -143,7 +141,7 @@ func bestStateMachine(f *flowEntity.Flow, roles map[string]flowEntity.StateRoles
 	return best
 }
 
-func lifecycleScore(rs flowEntity.StateRoles) int {
+func lifecycleScore(rs fact.StateRoles) int {
 	if len(rs) == 0 {
 		return 0
 	}
@@ -157,17 +155,37 @@ func lifecycleScore(rs flowEntity.StateRoles) int {
 	return score
 }
 
-func reachableFrom(f *flowEntity.Flow) map[string]bool {
-	seen := map[string]bool{}
-	if len(f.Entries) == 0 {
-		for id := range f.Nodes {
-			seen[id] = true
-		}
-		return seen
+type entryReach struct {
+	entry fact.EntryPoint
+	nodes map[string]bool
+}
+
+func reachableFromEachEntry(f *fact.Flow) []entryReach {
+	out := make([]entryReach, 0, len(f.Entries))
+	for _, e := range f.Entries {
+		out = append(out, entryReach{entry: e, nodes: walkCalls(f, e.ID())})
 	}
-	start := f.Entries[0].Pkg + "#" + f.Entries[0].Symbol
+	return out
+}
+
+func reachSetsInEntryOrder(f *fact.Flow, reachByEntry []entryReach) []map[string]bool {
+	if len(reachByEntry) == 0 {
+		everyNode := map[string]bool{}
+		for id := range f.Nodes {
+			everyNode[id] = true
+		}
+		return []map[string]bool{everyNode}
+	}
+	out := make([]map[string]bool, 0, len(reachByEntry))
+	for _, r := range reachByEntry {
+		out = append(out, r.nodes)
+	}
+	return out
+}
+
+func walkCalls(f *fact.Flow, start string) map[string]bool {
+	seen := map[string]bool{start: true}
 	queue := []string{start}
-	seen[start] = true
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
@@ -185,15 +203,36 @@ func reachableFrom(f *flowEntity.Flow) map[string]bool {
 	return seen
 }
 
-func scopeSeams(in []flowEntity.Seam, reachable map[string]bool) []flowEntity.Seam {
-	seen := map[string]bool{}
-	var out []flowEntity.Seam
-	for _, s := range in {
-		if !reachable[s.In.ID()] || seen[s.Target] {
-			continue
+func entriesUnderTest(reachByEntry []entryReach, seams []fact.Seam) []fact.EntryPoint {
+	if len(reachByEntry) == 0 {
+		return nil
+	}
+	if len(seams) == 0 {
+		return []fact.EntryPoint{reachByEntry[0].entry}
+	}
+	var out []fact.EntryPoint
+	for _, r := range reachByEntry {
+		for _, s := range seams {
+			if r.nodes[s.In.ID()] {
+				out = append(out, r.entry)
+				break
+			}
 		}
-		seen[s.Target] = true
-		out = append(out, s)
+	}
+	return out
+}
+
+func scopeSeams(in []fact.Seam, reachInEntryOrder []map[string]bool) []fact.Seam {
+	seen := map[string]bool{}
+	var out []fact.Seam
+	for _, reachable := range reachInEntryOrder {
+		for _, s := range in {
+			if !reachable[s.In.ID()] || seen[s.Target] {
+				continue
+			}
+			seen[s.Target] = true
+			out = append(out, s)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Target < out[j].Target })
 	return out

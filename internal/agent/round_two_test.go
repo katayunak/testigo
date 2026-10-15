@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/katayunak/gofacts/fact"
 	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/agent/prompts"
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 	"github.com/katayunak/testigo/internal/testPlan"
 )
 
-func caseByID(t *testing.T, f *flowEntity.Flow, id string) testPlan.TestCase {
+func caseByID(t *testing.T, f *fact.Flow, id string) testPlan.TestCase {
 	t.Helper()
 	for _, c := range testPlan.Select(f, testPlan.Facts{}) {
 		if c.Scenario.ID == id {
@@ -85,11 +85,11 @@ func TestACaseCapsWriteSitesAndPointsAtFlowJSON(t *testing.T) {
 	f := fixtureFlow()
 	c := caseByID(t, f, "FINAL-STATE-IS-FINAL")
 
-	writes := make([]flowEntity.StateWrite, 20)
+	writes := make([]fact.StateWrite, 20)
 	for i := range writes {
-		writes[i] = flowEntity.StateWrite{
+		writes[i] = fact.StateWrite{
 			To:   "StatusPending",
-			In:   flowEntity.CodeRef{Symbol: fmt.Sprintf("Handler%d", i), File: "service/order.go"},
+			In:   fact.CodeRef{Symbol: fmt.Sprintf("Handler%d", i), File: "service/order.go"},
 			Line: 10 + i,
 		}
 	}

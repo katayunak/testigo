@@ -1,23 +1,23 @@
 package agent
 
-import "github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+import "github.com/katayunak/gofacts/fact"
 
-func batchedFixture() *flowEntity.Flow {
+func batchedFixture() *fact.Flow {
 	f := fixtureFlow()
 	process := f.Seams[0].In
 	f.Seams = append(f.Seams,
-		flowEntity.Seam{In: process, Kind: flowEntity.SeamHTTP,
+		fact.Seam{In: process, Kind: fact.SeamHTTP,
 			Target: "(example.com/paysvc/psp.Gateway).Capture", Line: 71,
 			Injectable: true, Iface: "example.com/paysvc/psp.Gateway"},
-		flowEntity.Seam{In: process, Kind: flowEntity.SeamQueue,
+		fact.Seam{In: process, Kind: fact.SeamQueue,
 			Target: "(example.com/paysvc/bus.Publisher).Publish", Line: 80,
 			Injectable: true, Iface: "example.com/paysvc/bus.Publisher"},
 	)
-	f.States = append(f.States, flowEntity.StateMachine{
+	f.States = append(f.States, fact.StateMachine{
 		Type:   "example.com/paysvc/domain.SettlementMode",
 		Field:  "Mode",
 		States: []string{"ModeAccepted", "ModeQueued", "ModeSent"},
-		Writes: []flowEntity.StateWrite{{In: process, To: "ModeQueued", Line: 45, InTx: true}},
+		Writes: []fact.StateWrite{{In: process, To: "ModeQueued", Line: 45, InTx: true}},
 	})
 	return f
 }

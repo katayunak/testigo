@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
 type Step struct {
@@ -16,23 +16,23 @@ type Step struct {
 	Symbol string
 	File   string
 	Line   int
-	Facts  flowEntity.Facts
-	Seams  []flowEntity.Seam
-	States []flowEntity.StateWrite
+	Facts  fact.Facts
+	Seams  []fact.Seam
+	States []fact.StateWrite
 }
 
 type Path struct {
-	Entry flowEntity.EntryPoint
+	Entry fact.EntryPoint
 	Label string
 	Steps []Step
 }
 
-func Paths(f *flowEntity.Flow) []Path {
-	seamsBy := map[string][]flowEntity.Seam{}
+func Paths(f *fact.Flow) []Path {
+	seamsBy := map[string][]fact.Seam{}
 	for _, s := range f.Seams {
 		seamsBy[s.In.ID()] = append(seamsBy[s.In.ID()], s)
 	}
-	statesBy := map[string][]flowEntity.StateWrite{}
+	statesBy := map[string][]fact.StateWrite{}
 	for _, m := range f.States {
 		for _, w := range m.Writes {
 			statesBy[w.In.ID()] = append(statesBy[w.In.ID()], w)
@@ -126,7 +126,7 @@ func (p Path) Render() string {
 	return b.String()
 }
 
-func factTags(f flowEntity.Facts) []string {
+func factTags(f fact.Facts) []string {
 	var tags []string
 	add := func(cond bool, tag string) {
 		if cond {
