@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/cite"
+	"github.com/katayunak/gofacts/fact"
 	"github.com/katayunak/testigo/internal/testPlan"
 )
 
@@ -46,7 +46,7 @@ func (t TestRun) Green() bool { return t.Passed != nil && *t.Passed }
 
 func (t TestRun) Red() bool { return t.Passed != nil && !*t.Passed }
 
-func FromScan(f *flowEntity.Flow) (*AgentResponse, []string) {
+func FromScan(f *fact.Flow) (*AgentResponse, []string) {
 	k := NewAgentResponse()
 	var unresolved []string
 
@@ -129,7 +129,7 @@ func (p Proof) String() string {
 	return p.Symbol + " (" + p.At + ")"
 }
 
-func proofOf(c flowEntity.Candidate) Proof {
+func proofOf(c fact.Candidate) Proof {
 	return Proof{
 		Symbol: c.Owner + "." + c.Name,
 		At:     fmt.Sprintf("%s:%d", c.File, c.Line),
@@ -448,7 +448,7 @@ func (a *MainEntityAnswer) Validate() error {
 		case o.Purpose == "":
 			bad = append(bad, fmt.Sprintf("%s: no purpose given — saying what it is FOR is how a "+
 				"key gets chosen rather than picked", o.Field))
-		case !hasCitation(o.Proof.At):
+		case !cite.Has(o.Proof.At):
 			bad = append(bad, fmt.Sprintf("%s: proof must name a file and line, got %q",
 				o.Field, o.Proof.At))
 		}
@@ -460,14 +460,10 @@ func (a *MainEntityAnswer) Validate() error {
 	return nil
 }
 
-var citation = regexp.MustCompile(`\.go:\d+`)
-
-func hasCitation(s string) bool { return citation.MatchString(s) }
-
 func sameField(a, b string) bool { return strings.EqualFold(a, b) }
 
 type StateRolesAnswer struct {
-	Roles      flowEntity.StateRoles `json:"roles"`
+	Roles      fact.StateRoles `json:"roles"`
 	Exceptions []struct {
 		From string `json:"from"`
 		To   string `json:"to"`

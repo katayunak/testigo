@@ -46,7 +46,7 @@ keyed the same business-key value, because the schema was built to allow it.
 
 That structural shape — a column that leads a *composite* uniqueness
 constraint on two or more different tables — is now something the scanner
-looks for directly (`flowEntity.Infra.TenantScheme()`), reading it straight
+looks for directly (`fact.Infra.TenantScheme()` in gofacts), reading it straight
 from the same schema facts the write-pattern classifier already collects. It
 deliberately does not guess from the column's name: an ordinary owner
 reference (a `user_id` on that user's own rows) is not the same shape and
@@ -65,15 +65,16 @@ policy someone follows.
 Detecting "this is a hash chain" turned out not to need guessing at field or
 method names at all. The one part of the shape that can't be a coincidence is
 structural: a method that takes *the previous instance of its own type* and,
-somewhere in its body, calls a real cryptographic hash function
-(`sha256`/`sha512`/`sha1`/`md5`/`blake2`, either the one-shot `Sum*` form or
-the streaming `New()` form). `ledger.Log.ChainLog(previous *Log) Log` is
+somewhere in its body, calls into a hash package (`crypto/sha256`, `sha512`,
+`sha1`, `md5`, `sha3`, `blake2b`/`blake2s`, or the non-cryptographic
+`hash/fnv`). The call is recognised by the package it resolves to, so an
+aliased import still counts. `ledger.Log.ChainLog(previous *Log) Log` is
 exactly that shape; an ordinary method that happens to take another instance
 of its own type for some unrelated reason (a `Merge`, a diff, a comparison)
 does not also hash anything, and a method that hashes something unrelated (a
 password, say) does not also take a previous instance of its own type. Both
 have to be true together, which is what `extractHashChains` checks
-(`internal/scanningFlow/hashChain.go`).
+(gofacts, `scan/hashchain.go`).
 
 What the implemented scenario checks is narrower than the original idea: it
 proves tampering with any one record breaks verification of everything after
@@ -101,7 +102,7 @@ Ledger's `moves` table is append-only, but each new row's balance snapshot is
 computed by reading the immediately-preceding row for that account and asset
 and adding to it (`insert_move` in the migrations). That's a lost-update
 window on an *insert-only* table — testigo's current write-pattern classifier
-(`internal/scanningFlow/writePattern.go`) only distinguishes insert-only from
+(gofacts, `scan/writes.go` and `fact.ClassifyWrites`) only distinguishes insert-only from
 update-in-place by counting `INSERT` vs `UPDATE` calls, so it would call this
 table safely insert-only and miss the race entirely. Detecting it needs
 recognizing a "select latest, then insert the next" shape inside one

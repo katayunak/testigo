@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
 const maxWriteSites = 3
 
-func StateRoles(f *flowEntity.Flow, m flowEntity.StateMachine) *Prompt {
+func StateRoles(f *fact.Flow, m fact.StateMachine) *Prompt {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "Type:  %s\n", m.Type)
@@ -18,7 +18,7 @@ func StateRoles(f *flowEntity.Flow, m flowEntity.StateMachine) *Prompt {
 	}
 
 	b.WriteString("\nDeclared states — this list is COMPLETE, the type system guarantees no\nother value can exist:\n\n")
-	written := map[string][]flowEntity.StateWrite{}
+	written := map[string][]fact.StateWrite{}
 	for _, w := range m.Writes {
 		written[w.To] = append(written[w.To], w)
 	}

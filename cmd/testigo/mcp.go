@@ -8,10 +8,10 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/katayunak/gofacts/fact"
 	"github.com/katayunak/testigo/internal/agent"
 	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/config"
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
 	"github.com/katayunak/testigo/internal/testPlan"
 )
 
@@ -74,7 +74,7 @@ type testigoMCP struct {
 	round2PreambleAt int
 }
 
-func (s *testigoMCP) load() (*flowEntity.Flow, *domain.AgentResponse, *config.Rules, error) {
+func (s *testigoMCP) load() (*fact.Flow, *domain.AgentResponse, *config.Rules, error) {
 	flow, err := config.LoadFlow(s.root)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("%w — run 'testigo scan' first", err)

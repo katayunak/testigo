@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
 type Family string
@@ -39,11 +39,11 @@ type Scenario struct {
 
 	Requires Requires
 
-	Severity flowEntity.Severity
+	Severity fact.Severity
 }
 
 type Requires struct {
-	SeamKinds       []flowEntity.SeamKind
+	SeamKinds       []fact.SeamKind
 	InjectableSeam  bool
 	StateMachine    bool
 	MoneyFlows      bool
@@ -59,7 +59,7 @@ type Requires struct {
 	TransferFunc   bool
 	IdempotencyKey bool
 
-	WritePatterns []flowEntity.WritePattern
+	WritePatterns []fact.WritePattern
 }
 
 type Facts struct {
@@ -70,12 +70,12 @@ type Facts struct {
 	Uniqueness     string
 	Known          bool
 
-	StateMachines map[string]flowEntity.StateRoles
+	StateMachines map[string]fact.StateRoles
 
 	Skipped map[string]string
 }
 
-func (s Scenario) Applies(f *flowEntity.Flow, b Facts) (bool, string) {
+func (s Scenario) Applies(f *fact.Flow, b Facts) (bool, string) {
 	r := s.Requires
 
 	if why, off := b.Skipped[s.ID]; off {
@@ -103,16 +103,16 @@ func (s Scenario) Applies(f *flowEntity.Flow, b Facts) (bool, string) {
 	if r.MultipleEntries && len(f.Entries) < 2 {
 		return false, "only one entry point is configured, so there is no second path to order against"
 	}
-	if r.MoneyFlows && !b.Known && !anyNode(f, func(n *flowEntity.Node) bool { return n.Facts.HandlesMoney }) {
+	if r.MoneyFlows && !b.Known && !anyNode(f, func(n *fact.Node) bool { return n.Facts.HandlesMoney }) {
 		return false, "no money-shaped type flows through the reachable functions"
 	}
-	if r.OpensTx && !anyNode(f, func(n *flowEntity.Node) bool { return n.Facts.OpensTx }) {
+	if r.OpensTx && !anyNode(f, func(n *fact.Node) bool { return n.Facts.OpensTx }) {
 		return false, "nothing in this flow opens a transaction"
 	}
-	if r.Goroutine && !anyNode(f, func(n *flowEntity.Node) bool { return n.Facts.SpawnsGoroutine }) {
+	if r.Goroutine && !anyNode(f, func(n *fact.Node) bool { return n.Facts.SpawnsGoroutine }) {
 		return false, "this flow never starts a goroutine"
 	}
-	if len(r.SeamKinds) > 0 && !anySeam(f, func(sm flowEntity.Seam) bool {
+	if len(r.SeamKinds) > 0 && !anySeam(f, func(sm fact.Seam) bool {
 		for _, k := range r.SeamKinds {
 			if sm.Kind == k {
 				return true
@@ -134,7 +134,7 @@ func (s Scenario) Applies(f *flowEntity.Flow, b Facts) (bool, string) {
 			return false, "no table in this repository is written the way this scenario needs (" + patternList(r.WritePatterns) + ")"
 		}
 	}
-	if r.InjectableSeam && !anySeam(f, func(sm flowEntity.Seam) bool { return sm.Injectable }) {
+	if r.InjectableSeam && !anySeam(f, func(sm fact.Seam) bool { return sm.Injectable }) {
 
 		return false, "every boundary in this flow is a concrete type, so no fault can be injected — extract an interface first"
 	}
@@ -149,7 +149,7 @@ func (s Scenario) Applies(f *flowEntity.Flow, b Facts) (bool, string) {
 	return true, ""
 }
 
-func anyNode(f *flowEntity.Flow, pred func(*flowEntity.Node) bool) bool {
+func anyNode(f *fact.Flow, pred func(*fact.Node) bool) bool {
 	for _, n := range f.Nodes {
 		if pred(n) {
 			return true
@@ -158,7 +158,7 @@ func anyNode(f *flowEntity.Flow, pred func(*flowEntity.Node) bool) bool {
 	return false
 }
 
-func anySeam(f *flowEntity.Flow, pred func(flowEntity.Seam) bool) bool {
+func anySeam(f *fact.Flow, pred func(fact.Seam) bool) bool {
 	for _, s := range f.Seams {
 		if pred(s) {
 			return true
@@ -167,7 +167,7 @@ func anySeam(f *flowEntity.Flow, pred func(flowEntity.Seam) bool) bool {
 	return false
 }
 
-func kindList(kinds []flowEntity.SeamKind) string {
+func kindList(kinds []fact.SeamKind) string {
 	out := make([]string, 0, len(kinds))
 	for _, k := range kinds {
 		out = append(out, string(k))
@@ -176,12 +176,12 @@ func kindList(kinds []flowEntity.SeamKind) string {
 	return strings.Join(out, " or ")
 }
 
-func (s Scenario) BestTechnique(f *flowEntity.Flow) (Technique, string) {
+func (s Scenario) BestTechnique(f *fact.Flow) (Technique, string) {
 	if len(s.Techniques) == 0 {
 		return "", "no technique is declared for this scenario"
 	}
 	for _, t := range s.Techniques {
-		if t == TechniqueFaultInjection && !anySeam(f, func(sm flowEntity.Seam) bool { return sm.Injectable }) {
+		if t == TechniqueFaultInjection && !anySeam(f, func(sm fact.Seam) bool { return sm.Injectable }) {
 			continue
 		}
 		return t, ""
@@ -193,7 +193,7 @@ func (s Scenario) String() string {
 	return fmt.Sprintf("%s (%s)", s.ID, s.Family)
 }
 
-func patternList(ps []flowEntity.WritePattern) string {
+func patternList(ps []fact.WritePattern) string {
 	out := make([]string, 0, len(ps))
 	for _, p := range ps {
 		out = append(out, string(p))

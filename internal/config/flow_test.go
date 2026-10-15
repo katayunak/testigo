@@ -4,15 +4,15 @@ import (
 	"os"
 	"testing"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 )
 
 func TestSaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	f := flowEntity.NewFlow("example.com/pay")
-	n := &flowEntity.Node{Ref: flowEntity.CodeRef{Pkg: "pay/api", Symbol: "(*S).Create"}}
+	f := fact.NewFlow("example.com/pay")
+	n := &fact.Node{Ref: fact.CodeRef{Pkg: "pay/api", Symbol: "(*S).Create"}}
 	f.Nodes[n.Ref.ID()] = n
-	f.Seams = []flowEntity.Seam{{Kind: flowEntity.SeamDB, Target: "(*sql.DB).Exec", Injectable: false}}
+	f.Seams = []fact.Seam{{Kind: fact.SeamDB, Target: "(*sql.DB).Exec", Injectable: false}}
 
 	if err := SaveFlow(dir, f); err != nil {
 		t.Fatal(err)

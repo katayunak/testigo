@@ -9,16 +9,16 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/katayunak/testigo/internal/scanningFlow/flowEntity"
+	"github.com/katayunak/gofacts/fact"
 	"github.com/katayunak/testigo/internal/testPlan"
 )
 
-func Plan(f *flowEntity.Flow, k *domain.AgentResponse, round domain.Round) []domain.Ask {
+func Plan(f *fact.Flow, k *domain.AgentResponse, round domain.Round) []domain.Ask {
 	asks, _ := PlanWith(f, k, round, nil, 0)
 	return asks
 }
 
-func PlanWith(f *flowEntity.Flow, k *domain.AgentResponse, round domain.Round,
+func PlanWith(f *fact.Flow, k *domain.AgentResponse, round domain.Round,
 	rules *config.Rules, budget int) ([]domain.Ask, planner.Plan) {
 
 	paths := prompts.Paths(f)
@@ -42,7 +42,7 @@ func render(p *prompts.Prompt) string {
 	return p.Render()
 }
 
-func planUnderstand(f *flowEntity.Flow, k *domain.AgentResponse, paths []prompts.Path,
+func planUnderstand(f *fact.Flow, k *domain.AgentResponse, paths []prompts.Path,
 	rules *config.Rules, budget int) ([]domain.Ask, planner.Plan) {
 
 	var asks []domain.Ask
@@ -118,7 +118,7 @@ func planUnderstand(f *flowEntity.Flow, k *domain.AgentResponse, paths []prompts
 		}, 2, false)
 	}
 
-	seamsByTarget := map[string][]flowEntity.Seam{}
+	seamsByTarget := map[string][]fact.Seam{}
 	for _, s := range f.Seams {
 		seamsByTarget[s.Target] = append(seamsByTarget[s.Target], s)
 	}
@@ -164,7 +164,7 @@ func moneyModelTitle(unresolved []string) string {
 	return "Decide " + strings.Join(unresolved, " and ") + ", then name the transfer"
 }
 
-func planGenerate(f *flowEntity.Flow, k *domain.AgentResponse, paths []prompts.Path) []domain.Ask {
+func planGenerate(f *fact.Flow, k *domain.AgentResponse, paths []prompts.Path) []domain.Ask {
 	var asks []domain.Ask
 	for _, c := range testPlan.Select(f, factsOf(k)) {
 		if !c.Runnable() {
@@ -180,7 +180,7 @@ func planGenerate(f *flowEntity.Flow, k *domain.AgentResponse, paths []prompts.P
 	return asks
 }
 
-func Cases(f *flowEntity.Flow, k *domain.AgentResponse, rules *config.Rules) []testPlan.TestCase {
+func Cases(f *fact.Flow, k *domain.AgentResponse, rules *config.Rules) []testPlan.TestCase {
 	return testPlan.Select(f, FactsFrom(k, rules))
 }
 
@@ -223,7 +223,7 @@ func FactsFrom(k *domain.AgentResponse, rules *config.Rules) testPlan.Facts {
 	b.IdempotencyKey = fromAgent.IdempotencyKey
 	b.Uniqueness = fromAgent.Uniqueness
 	if len(k.StateRoles) > 0 {
-		b.StateMachines = map[string]flowEntity.StateRoles{}
+		b.StateMachines = map[string]fact.StateRoles{}
 		for typ, sr := range k.StateRoles {
 			if sr != nil {
 				b.StateMachines[typ] = sr.Roles
@@ -233,7 +233,7 @@ func FactsFrom(k *domain.AgentResponse, rules *config.Rules) testPlan.Facts {
 	return b
 }
 
-func BlockedReason(f *flowEntity.Flow, k *domain.AgentResponse, rules *config.Rules) string {
+func BlockedReason(f *fact.Flow, k *domain.AgentResponse, rules *config.Rules) string {
 	if k == nil || k.MoneyModel == nil {
 		return "the money model has not been named yet — answer moneyModel.json first"
 	}
@@ -247,8 +247,12 @@ func BlockedReason(f *flowEntity.Flow, k *domain.AgentResponse, rules *config.Ru
 			missing = append(missing, "transitions for "+shortType(m.Type))
 		}
 	}
+	askable := map[string]bool{}
+	for _, target := range prompts.SeamTargets(f) {
+		askable[target] = true
+	}
 	for target := range d.Seams {
-		if k.ExternalEffects[target] == nil {
+		if askable[target] && k.ExternalEffects[target] == nil {
 			missing = append(missing, "retry safety of "+target)
 		}
 	}
@@ -290,7 +294,7 @@ func entityTitle(entities []prompts.Entity) string {
 	return fmt.Sprintf("Which struct does this flow move, and which of its %d identifiers is the idempotency key?", ids)
 }
 
-func Preamble(f *flowEntity.Flow, round domain.Round) string {
+func Preamble(f *fact.Flow, round domain.Round) string {
 	switch round {
 	case domain.RoundUnderstand:
 		return prompts.UnderstandPreamble(f, prompts.Paths(f))
