@@ -42,21 +42,10 @@ func ExternalEffectVerify(f *fact.Flow, target string, seams []fact.Seam, paths 
 func SeamTargets(f *fact.Flow) []string {
 	seen := map[string]bool{}
 	for _, s := range f.Seams {
-		switch {
-		case s.Kind == fact.SeamClock, s.Kind == fact.SeamRandom:
-
+		if s.Kind == fact.SeamClock || s.Kind == fact.SeamRandom {
 			continue
-		case s.Injectable:
-
-			seen[s.Target] = true
-		case s.Kind == fact.SeamDB:
-			if isCommit(s.Target) {
-				seen[s.Target] = true
-			}
-		default:
-
-			seen[s.Target] = true
 		}
+		seen[s.Target] = true
 	}
 	out := make([]string, 0, len(seen))
 	for t := range seen {
@@ -64,12 +53,4 @@ func SeamTargets(f *fact.Flow) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func isCommit(target string) bool {
-	name := target
-	if i := strings.LastIndex(name, "."); i >= 0 {
-		name = name[i+1:]
-	}
-	return name == "Commit"
 }

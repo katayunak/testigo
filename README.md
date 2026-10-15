@@ -103,14 +103,14 @@ budget     none; output counted 5x
 ASKED
   questions                free text    5.9k in + 1.5k out = 13.6k
   mainEntity               free text    1.7k in + 512 out = 4.3k
+  externalEffect x9        true/false   2.3k in + 225 out = 3.5k
   stateRoles x2            free text    473 in + 524 out = 3.1k
   moneyModel               free text    1.1k in + 308 out = 2.6k
-  externalEffect x4        true/false   1.1k in + 100 out = 1.6k
 
-cost       10.2k in + 3.0k out = 25.1k
+cost       11.5k in + 3.1k out = 27.0k
 
-est. cost   ~14.5k tokens across 9 prompt(s)
-            ~34.8k saved by hoisting the shared rules into PREAMBLE.md
+est. cost   ~15.8k tokens across 14 prompt(s)
+            ~56.6k saved by hoisting the shared rules into PREAMBLE.md
 ```
 
 Writes markdown into `testigo/asks/`. Point your agent at
@@ -283,7 +283,7 @@ weighted tokens**, without dropping a single test:
    what consumes it. A field with no reader should not exist — and 35 of them did.
 3. **Hoist everything repeated into one preamble.** Shared rules and the rendered
    flow are written once into `PREAMBLE.md`; each ask cites step numbers instead of
-   reprinting them. On the fixture that is ~34.8k saved against 14.7k actually sent.
+   reprinting them. On the fixture that is ~56.6k saved against ~15.8k actually sent.
    A test fails the build if any text is identical across the asks of one kind.
 4. **Prefer a boolean to a paragraph.** A true/false question costs about 5 output
    tokens; an open one costs 40 to 130. Most things worth knowing are decidable.
