@@ -20,9 +20,11 @@ testigo ask --explain --round 1 ./myrepo
 | `collect` | 2 | free | reads `testigo/answers/`, validates, applies |
 | `cases` | 2 | free | prints the test plan and what generating it would cost |
 | `report` | 2 | free | prints everything found; `--ask` writes a prompt for `REPORT.md` |
+| `mcp` | 2 | free | serves round 1 and round 2 as five MCP tools over stdio, instead of files |
 
 Only the agent costs anything, and testigo never calls it. `ask` writes markdown;
-you run your own agent against it.
+you run your own agent against it. With `mcp`, your agent calls testigo instead; the
+tools and what they check are in the [main README](../../README.md#phase-2-as-mcp-tools).
 
 ## The flags that matter
 
@@ -47,5 +49,5 @@ handler, the provider webhook, the reconciliation job, the settlement consumer.
 
 Errors go to stderr prefixed `testigo:` and exit non-zero. Everything testigo writes
 goes under `testigo/`. Your source files are never modified — except by
-`collect` after round two, which writes generated `*_testigo_test.go` files and tells
-you exactly which.
+`collect` after round two, and the `testigo_round2_submit_test` MCP tool, which write
+generated `*_testigo_test.go` files and tell you exactly which.
