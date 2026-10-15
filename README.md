@@ -107,9 +107,9 @@ ASKED
   stateRoles x2            free text    473 in + 524 out = 3.1k
   moneyModel               free text    1.1k in + 308 out = 2.6k
 
-cost       11.5k in + 3.1k out = 27.0k
+cost       11.5k in + 3.1k out = 27.1k
 
-est. cost   ~15.8k tokens across 14 prompt(s)
+est. cost   ~15.9k tokens across 14 prompt(s)
             ~56.6k saved by hoisting the shared rules into PREAMBLE.md
 ```
 
@@ -260,7 +260,9 @@ questions they cannot be written without. Nothing else is asked, ever.
 Round-one answers feed round two, **scoped per case**: a state test receives the
 states it must refuse, a fault-injection test receives the verdicts for the seams it
 fakes, an idempotency test receives the key facts. No case sees another scenario's
-answers.
+raw answers. It can see what they add up to: the true/false verdicts roll up into
+claims about money, seams, flow and the main entity, and a case gets a claim only
+when the claim names its scenario.
 
 Round 2 is gated on round 1 for a reason. If the agent names the wrong money-moving
 call, a test written in the same breath would encode that mistake and pass forever.
@@ -283,7 +285,7 @@ weighted tokens**, without dropping a single test:
    what consumes it. A field with no reader should not exist — and 35 of them did.
 3. **Hoist everything repeated into one preamble.** Shared rules and the rendered
    flow are written once into `PREAMBLE.md`; each ask cites step numbers instead of
-   reprinting them. On the fixture that is ~56.6k saved against ~15.8k actually sent.
+   reprinting them. On the fixture that is ~56.6k saved against ~15.9k actually sent.
    A test fails the build if any text is identical across the asks of one kind.
 4. **Prefer a boolean to a paragraph.** A true/false question costs about 5 output
    tokens; an open one costs 40 to 130. Most things worth knowing are decidable.
@@ -325,7 +327,7 @@ argument and the measurements.
 | `internal/config` | everything under `testigo/`: config, rules and `flow.json` | [README](internal/config/README.md) |
 | `internal/report` | the printed summary and the Mermaid diagrams | [README](internal/report/README.md) |
 
-9 packages, ~9.4k lines of Go and ~2.2k lines of tests.
+9 packages, ~9.9k lines of Go and ~2.6k lines of tests.
 
 Phase 1 itself — SSA, the call graph, seams, transactions, state machines, the
 schema, money and the findings — is not in this repository. It is
@@ -367,7 +369,8 @@ stopped after five minutes.
 ## Limits, stated plainly
 
 - The seam filter over-approximates: it walks the CHA call graph. gofacts also builds a VTA graph, but uses it only to decide which functions call which, not which calls reach I/O.
-- True/false verdicts are collected per question, but nothing yet rolls them up into per-area conclusions.
+- The roll-up into per-area claims counts only true/false verdicts. The per-seam verdicts and the money model reach cases directly, but they are not part of it.
+- Seven true/false questions are not rolled up, because a `true` or `false` alone does not say which way the system leans. `NotRolledUp` in `internal/agent/domain/featureCatalog.go` gives the reason for each.
 - Recheck questions — where the agent re-confirms a fact phase 1 proved, with the proof attached — are built and tested, but nothing currently produces one.
 
 ---

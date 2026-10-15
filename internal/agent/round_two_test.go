@@ -105,3 +105,61 @@ func TestACaseCapsWriteSitesAndPointsAtFlowJSON(t *testing.T) {
 		t.Error("this block is Proof priority, which Trim() never cuts — it must cap itself rather than grow with the flow, or a busy state machine blows the prompt budget silently")
 	}
 }
+
+func TestACaseGetsTheClaimsItsScenarioDependsOn(t *testing.T) {
+	f := fixtureFlow()
+	no := false
+	k := domain.NewAgentResponse()
+	k.PaymentKind["IDEM-REPLAY.stores_result"] = &domain.QuestionAnswer{Verdict: &no, Info: "every repeat runs the insert again"}
+	k.PaymentKind["IDEM-CONCURRENT.exactly_one"] = &domain.QuestionAnswer{Verdict: &no, Info: "no unique index covers the key"}
+	k.PaymentKind["AT-LEAST-ONCE-DELIVERY-IS-SAFE.duplicate_message"] = &domain.QuestionAnswer{Verdict: &no, Info: "the consumer keeps no message ids"}
+
+	p := prompts.TestCase(caseByID(t, f, "IDEM-CONCURRENT"), f, k).Render()
+	for _, want := range []string{
+		"WHAT OTHER ANSWERS ADD UP TO",
+		"does not hold  Repeating a finished request returns the first result",
+		"-  IDEM-REPLAY.stores_result — every repeat runs the insert again",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("IDEM-CONCURRENT is missing %q", want)
+		}
+	}
+	if strings.Contains(p, "Two requests with the same key never both do the work") {
+		t.Error("a claim built only from this case's own answer repeats what the case already reads above")
+	}
+	if strings.Contains(p, "the consumer keeps no message ids") {
+		t.Error("a claim this scenario does not depend on reached its case")
+	}
+}
+
+func TestOnlyOwnAnswersMeansNoConclusionsBlock(t *testing.T) {
+	f := fixtureFlow()
+	no := false
+	k := domain.NewAgentResponse()
+	k.PaymentKind["IDEM-CONCURRENT.exactly_one"] = &domain.QuestionAnswer{Verdict: &no, Info: "no unique index covers the key"}
+	if strings.Contains(prompts.TestCase(caseByID(t, f, "IDEM-CONCURRENT"), f, k).Render(), "WHAT OTHER ANSWERS ADD UP TO") {
+		t.Error("an empty or repeated conclusions block is noise the agent pays to read")
+	}
+}
+
+func TestTheReportGetsConclusionsByArea(t *testing.T) {
+	f := fixtureFlow()
+	no, yes := false, true
+	k := domain.NewAgentResponse()
+	k.PaymentKind["IDEM-CONCURRENT.exactly_one"] = &domain.QuestionAnswer{Verdict: &no, Info: "no unique index covers the key"}
+	k.PaymentKind["TIMEOUT-UNKNOWN-OUTCOME.requery"] = &domain.QuestionAnswer{Verdict: &yes}
+
+	p := prompts.Report(f, k, nil, prompts.Tokens{}).Render()
+	for _, want := range []string{
+		"What the answers add up to, by area",
+		"Seams\n  holds          After a timeout, the real outcome is found by asking the provider",
+		"Main entity\n  does not hold  Two requests with the same key never both do the work.\n      -  IDEM-CONCURRENT.exactly_one\n",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("the report is missing %q", want)
+		}
+	}
+	if n := strings.Count(p, "no unique index covers the key"); n != 1 {
+		t.Errorf("the reason should appear once, in the answers block, got %d", n)
+	}
+}

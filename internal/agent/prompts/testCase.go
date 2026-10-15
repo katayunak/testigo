@@ -164,6 +164,12 @@ func TestCase(c testPlan.TestCase, f *fact.Flow, k *domain.AgentResponse) *Promp
 	if answered := answeredFacts(c, k); answered != "" {
 		p = p.Fact(Supporting, "ANSWERED IN ROUND ONE — about this case only, do not re-ask", answered)
 	}
+	if adds := caseConclusions(c, k); adds != "" {
+		p = p.Fact(Supporting, "WHAT OTHER ANSWERS ADD UP TO — claims this scenario depends on",
+			adds+"A claim that does not hold changes what this test may assume. Either the test\n"+
+				"is expected to fail on this code, and `expected_to_fail` says so, or its\n"+
+				"assertion must allow for it.\n")
+	}
 	return p
 }
 
@@ -316,7 +322,7 @@ func answeredFacts(c testPlan.TestCase, k *domain.AgentResponse) string {
 
 	var ids []string
 	for id := range k.PaymentKind {
-		if strings.HasPrefix(id, c.Scenario.ID+".") || strings.HasPrefix(id, "technique."+string(c.Technique)+".") {
+		if seesOwnAnswer(c, id) {
 			ids = append(ids, id)
 		}
 	}

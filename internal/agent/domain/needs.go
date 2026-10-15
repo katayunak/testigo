@@ -76,7 +76,7 @@ var ScenarioQuestions = map[string][]Question{
 	},
 	"WALLET-STATUS-GATES-MOVEMENT": {
 		*Discover("WALLET-STATUS-GATES-MOVEMENT.blocks_credits",
-			"Do non-active wallet statuses block money coming IN, or only money going out?",
+			"Do non-active wallet statuses block money coming IN, not only money going out?",
 			"Guarding only withdrawals is the usual shape, and it strands deposits in a closed wallet. The test enumerates both directions and needs to know which is intended.").Bool(),
 		*Discover("WALLET-STATUS-GATES-MOVEMENT.active_states",
 			"Which wallet statuses are considered active enough to move money?",
@@ -118,7 +118,7 @@ var ScenarioQuestions = map[string][]Question{
 	},
 	"UNCLASSIFIED-ERROR-NOT-RETRIED": {
 		*Discover("UNCLASSIFIED-ERROR-NOT-RETRIED.default",
-			"When the provider returns an error this code does not recognise, is it treated as retryable or as final?",
+			"When the provider returns an error this code does not recognise, is the call retried?",
 			"Retrying an unclassified error is how a single charge becomes several. The default direction is the whole test.").Bool(),
 	},
 	"CONSERVATION-UNDER-CONCURRENCY": {
@@ -128,7 +128,7 @@ var ScenarioQuestions = map[string][]Question{
 	},
 	"LOST-UPDATE": {
 		*Discover("LOST-UPDATE.locking",
-			"Is a balance updated with a read-then-write in application code, or with a single atomic statement or row lock?",
+			"Is any balance updated by a read in application code followed by a separate write, rather than by a single atomic statement or under a row lock?",
 			"Read-then-write loses one of two concurrent updates. Which one it is decides whether the test is expected to pass or expected to fail.").Bool(),
 	},
 	"DOUBLE-ENTRY-SUMS-TO-ZERO": {
@@ -138,7 +138,7 @@ var ScenarioQuestions = map[string][]Question{
 	},
 	"ILLEGAL-TRANSITION-REFUSED": {
 		*Discover("ILLEGAL-TRANSITION-REFUSED.enforced_where",
-			"Is an illegal status change refused in code, refused by the database, or not refused at all?",
+			"Is an illegal status change refused, either in code or by the database?",
 			"The test drives the entity into a state and attempts the illegal move. If nothing refuses it, the test documents a real defect rather than a passing guard.").Bool(),
 	},
 	"FINAL-STATE-IS-FINAL": {
@@ -203,7 +203,7 @@ var ScenarioQuestions = map[string][]Question{
 	},
 	"LEDGER-OUTSIDE-CALLER-TRANSACTION": {
 		*Discover("LEDGER-OUTSIDE-CALLER-TRANSACTION.shares_tx",
-			"Does the ledger write join the caller's transaction, or open its own?",
+			"Does the ledger write join the caller's transaction, rather than open its own?",
 			"A ledger that opens its own transaction commits even when the caller rolls back, which is how the books and the business disagree.").Bool(),
 	},
 }
