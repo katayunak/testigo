@@ -576,3 +576,59 @@ func TestTheSameFieldCannotBeKeyAndNotKey(t *testing.T) {
 		t.Errorf("a cited, non-conflicting identifier must be accepted: %v", err)
 	}
 }
+
+func addWebhookReachingTheLedger(f *fact.Flow) (ledgerCredit string) {
+	webhook := fact.CodeRef{Pkg: "example.com/paysvc/webhook", Symbol: "(*Handler).PSPCallback",
+		File: "webhook/handler.go", Line: 18}
+	credit := fact.CodeRef{Pkg: "example.com/paysvc/webhook", Symbol: "(*Handler).credit",
+		File: "webhook/handler.go", Line: 52}
+	f.Entries = append(f.Entries, fact.EntryPoint{Pkg: webhook.Pkg, Symbol: webhook.Symbol, Label: "PSP webhook"})
+	f.Nodes[webhook.ID()] = &fact.Node{Ref: webhook, Position: fact.NodePositionEntry, Calls: []string{credit.ID()}}
+	f.Nodes[credit.ID()] = &fact.Node{Ref: credit, Position: fact.NodePositionInternal}
+	ledgerCredit = "(example.com/paysvc/ledger.Store).Credit"
+	f.Seams = append(f.Seams, fact.Seam{In: credit, Kind: fact.SeamDB, Target: ledgerCredit,
+		Line: 57, Injectable: true, Iface: "example.com/paysvc/ledger.Store"})
+	return ledgerCredit
+}
+
+func TestASeamReachableOnlyFromTheSecondEntryIsAskedInRoundOne(t *testing.T) {
+	f := fixtureFlow()
+	ledgerCredit := addWebhookReachingTheLedger(f)
+
+	if by, ok := planner.Demanded(f, factsOf(domain.NewAgentResponse())).NeedsSeam(ledgerCredit); !ok || len(by) == 0 {
+		t.Fatalf("%s is reached only from the second entry point, the webhook, and no runnable scenario demanded it", ledgerCredit)
+	}
+
+	for _, a := range Plan(f, domain.NewAgentResponse(), domain.RoundUnderstand) {
+		if a.Kind == domain.KindExternalEffect && a.Subject == ledgerCredit {
+			return
+		}
+	}
+	t.Fatalf("round one never asks whether retrying %s moves money twice, because only the first entry point was walked", ledgerCredit)
+}
+
+func TestCasePromptNamesEveryEntryThatReachesItsBoundaries(t *testing.T) {
+	f := fixtureFlow()
+	addWebhookReachingTheLedger(f)
+
+	var c testPlan.TestCase
+	for _, sc := range testPlan.Select(f, testPlan.Facts{}) {
+		if sc.Scenario.ID == "UNCLASSIFIED-ERROR-NOT-RETRIED" {
+			c = sc
+		}
+	}
+	if c.Scenario.ID == "" {
+		t.Fatal("UNCLASSIFIED-ERROR-NOT-RETRIED was not selected for the fixture")
+	}
+
+	p := prompts.TestCase(c, f, nil).Render()
+	for _, want := range []string{
+		"Entry points under test",
+		"example.com/paysvc/api#(*Server).CreatePayment   (API create)",
+		"example.com/paysvc/webhook#(*Handler).PSPCallback   (PSP webhook)",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("a case faking a seam only the webhook reaches must name the webhook as an entry under test; prompt is missing %q", want)
+		}
+	}
+}
