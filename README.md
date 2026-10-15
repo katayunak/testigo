@@ -327,7 +327,7 @@ argument and the measurements.
 | `internal/config` | everything under `testigo/`: config, rules and `flow.json` | [README](internal/config/README.md) |
 | `internal/report` | the printed summary and the Mermaid diagrams | [README](internal/report/README.md) |
 
-9 packages, ~9.9k lines of Go and ~2.6k lines of tests.
+9 packages, ~9.9k lines of Go and ~3.3k lines of tests.
 
 Phase 1 itself — SSA, the call graph, seams, transactions, state machines, the
 schema, money and the findings — is not in this repository. It is

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/katayunak/gofacts/cite"
@@ -179,8 +180,19 @@ func (a *MoneyModelAnswer) Validate() error {
 	if strings.HasPrefix(a.Money.Type, "example.com/pay/") {
 		bad = append(bad, "money.type is the placeholder from the prompt, not a symbol from this repository")
 	}
+	for _, named := range []struct{ field, symbol string }{
+		{"money.type", a.Money.Type},
+		{"transfer_func.symbol", a.TransferFunc.Symbol},
+		{"balance_func.symbol", a.BalanceFunc.Symbol},
+	} {
+		if slices.Contains(MoneyModelPlaceholders, named.symbol) {
+			bad = append(bad, fmt.Sprintf("%s %q is the placeholder from the prompt, not a symbol from this repository", named.field, named.symbol))
+		}
+	}
 	return join(bad)
 }
+
+var MoneyModelPlaceholders = []string{"pkg.Money", "pkg#(*Ledger).Post", "pkg#(*Ledger).Balance"}
 
 type TransitionsAnswer struct {
 	InitialState string              `json:"initial_state"`
