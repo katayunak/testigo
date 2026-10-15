@@ -14,7 +14,7 @@ type TestCase struct {
 	TargetPkg  string
 	TargetFile string
 
-	Entry *fact.EntryPoint
+	Entries []fact.EntryPoint
 
 	Seams []fact.Seam
 

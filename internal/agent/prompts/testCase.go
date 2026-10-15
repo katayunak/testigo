@@ -216,15 +216,25 @@ func caseFacts(c testPlan.TestCase, f *fact.Flow) string {
 			c.HashChain.Type, c.HashChain.Method.Symbol, c.HashChain.Method.File, c.HashChain.Method.Line)
 	}
 
-	if c.Entry != nil {
-		fmt.Fprintf(&b, "Entry point under test: %s#%s", c.Entry.Pkg, c.Entry.Symbol)
-		if c.Entry.Label != "" {
-			fmt.Fprintf(&b, "   (%s)", c.Entry.Label)
+	switch len(c.Entries) {
+	case 0:
+	case 1:
+		fmt.Fprintf(&b, "Entry point under test: %s\n", entryUnderTest(c.Entries[0]))
+	default:
+		b.WriteString("Entry points under test, each reaches at least one boundary listed above:\n")
+		for _, e := range c.Entries {
+			fmt.Fprintf(&b, "  %s\n", entryUnderTest(e))
 		}
-		b.WriteString("\n")
 	}
 
 	return b.String()
+}
+
+func entryUnderTest(e fact.EntryPoint) string {
+	if e.Label == "" {
+		return e.ID()
+	}
+	return fmt.Sprintf("%s   (%s)", e.ID(), e.Label)
 }
 
 func answeredFacts(c testPlan.TestCase, k *domain.AgentResponse) string {

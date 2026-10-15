@@ -1,6 +1,7 @@
 package testPlan
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/katayunak/gofacts/fact"
@@ -197,5 +198,122 @@ func TestSelectFallsBackToFirstMachineBeforeRolesAreAnswered(t *testing.T) {
 	}
 	if got == nil || got.Type != "example.com/x.EType" {
 		t.Fatalf("with no roles answered yet, expected the deterministic first-machine fallback, got %+v", got)
+	}
+}
+
+func twoEntryFlow() *fact.Flow {
+	api := fact.CodeRef{Pkg: "example.com/x/api", Symbol: "(*Server).Pay", File: "api/server.go", Line: 10}
+	charge := fact.CodeRef{Pkg: "example.com/x/api", Symbol: "(*Server).charge", File: "api/server.go", Line: 30}
+	webhook := fact.CodeRef{Pkg: "example.com/x/webhook", Symbol: "(*Handler).Callback", File: "webhook/handler.go", Line: 12}
+	credit := fact.CodeRef{Pkg: "example.com/x/webhook", Symbol: "(*Handler).credit", File: "webhook/handler.go", Line: 40}
+	return &fact.Flow{
+		Entries: []fact.EntryPoint{
+			{Pkg: api.Pkg, Symbol: api.Symbol, Label: "API"},
+			{Pkg: webhook.Pkg, Symbol: webhook.Symbol, Label: "webhook"},
+		},
+		Nodes: map[string]*fact.Node{
+			api.ID():     {Ref: api, Calls: []string{charge.ID()}},
+			charge.ID():  {Ref: charge},
+			webhook.ID(): {Ref: webhook, Calls: []string{credit.ID()}},
+			credit.ID():  {Ref: credit},
+		},
+		Seams: []fact.Seam{
+			{In: credit, Kind: fact.SeamDB, Target: "(example.com/x/ledger.Store).Credit", Line: 44, Injectable: true, Iface: "example.com/x/ledger.Store"},
+			{In: charge, Kind: fact.SeamHTTP, Target: "(example.com/x/psp.Gateway).Charge", Line: 33, Injectable: true, Iface: "example.com/x/psp.Gateway"},
+		},
+	}
+}
+
+func caseNamed(t *testing.T, cases []TestCase, id string) TestCase {
+	t.Helper()
+	for _, c := range cases {
+		if c.Scenario.ID == id {
+			return c
+		}
+	}
+	t.Fatalf("%s was not offered at all", id)
+	return TestCase{}
+}
+
+func seamTargets(seams []fact.Seam) []string {
+	out := make([]string, 0, len(seams))
+	for _, s := range seams {
+		out = append(out, s.Target)
+	}
+	return out
+}
+
+func entryIDs(entries []fact.EntryPoint) []string {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.ID())
+	}
+	return out
+}
+
+func TestSeamsAreScopedFromEveryEntryNotOnlyTheFirst(t *testing.T) {
+	c := caseNamed(t, Select(twoEntryFlow(), Facts{}), "UNCLASSIFIED-ERROR-NOT-RETRIED")
+	if !c.Runnable() {
+		t.Fatalf("fixture setup: expected a runnable case, got blocked: %q", c.Blocked)
+	}
+
+	got := strings.Join(seamTargets(c.Seams), ", ")
+	want := "(example.com/x/ledger.Store).Credit, (example.com/x/psp.Gateway).Charge"
+	if got != want {
+		t.Fatalf("seams = %s, want %s: the ledger call is reached only from the webhook, the second entry point", got, want)
+	}
+
+	gotEntries := strings.Join(entryIDs(c.Entries), ", ")
+	wantEntries := "example.com/x/api#(*Server).Pay, example.com/x/webhook#(*Handler).Callback"
+	if gotEntries != wantEntries {
+		t.Fatalf("entries under test = %s, want %s, in config order", gotEntries, wantEntries)
+	}
+}
+
+func TestACaseWhoseSeamsOnlyTheSecondEntryReachesIsDrivenFromIt(t *testing.T) {
+	f := twoEntryFlow()
+	f.Seams = f.Seams[:1]
+
+	c := caseNamed(t, Select(f, Facts{}), "UNCLASSIFIED-ERROR-NOT-RETRIED")
+	if got := strings.Join(entryIDs(c.Entries), ", "); got != "example.com/x/webhook#(*Handler).Callback" {
+		t.Fatalf("entries under test = %s, want only the webhook: the API entry never reaches the ledger call", got)
+	}
+	if c.TargetPkg != "example.com/x/webhook" || !strings.HasPrefix(c.TargetFile, "webhook/") {
+		t.Fatalf("test goes in %s (package %s), want it beside the webhook entry that reaches the seam", c.TargetFile, c.TargetPkg)
+	}
+}
+
+func TestASeamCalledFromTwoEntriesKeepsTheFirstEntrysCallSite(t *testing.T) {
+	f := twoEntryFlow()
+	shared := "(example.com/x/ledger.Store).Credit"
+	charge := f.Nodes["example.com/x/api#(*Server).charge"].Ref
+	f.Seams = append(f.Seams, fact.Seam{In: charge, Kind: fact.SeamDB, Target: shared, Line: 35, Injectable: true, Iface: "example.com/x/ledger.Store"})
+
+	c := caseNamed(t, Select(f, Facts{}), "UNCLASSIFIED-ERROR-NOT-RETRIED")
+	for _, s := range c.Seams {
+		if s.Target == shared && s.In.ID() != charge.ID() {
+			t.Fatalf("%s is shown called in %s; want the call site the first entry point reaches, %s", shared, s.In.Symbol, charge.Symbol)
+		}
+	}
+	if got := strings.Join(entryIDs(c.Entries), ", "); got != "example.com/x/api#(*Server).Pay" {
+		t.Fatalf("entries under test = %s, want only the API entry, since every shown call site is reached from it", got)
+	}
+}
+
+func TestSelectIsTheSameEveryRunWithSeveralEntries(t *testing.T) {
+	first := Select(twoEntryFlow(), Facts{})
+	for run := 0; run < 20; run++ {
+		again := Select(twoEntryFlow(), Facts{})
+		for i := range first {
+			a, b := first[i], again[i]
+			if a.Scenario.ID != b.Scenario.ID ||
+				strings.Join(seamTargets(a.Seams), ",") != strings.Join(seamTargets(b.Seams), ",") ||
+				strings.Join(entryIDs(a.Entries), ",") != strings.Join(entryIDs(b.Entries), ",") ||
+				a.TargetFile != b.TargetFile {
+				t.Fatalf("run %d, case %d differs: %s %v %v vs %s %v %v", run, i,
+					a.Scenario.ID, seamTargets(a.Seams), entryIDs(a.Entries),
+					b.Scenario.ID, seamTargets(b.Seams), entryIDs(b.Entries))
+			}
+		}
 	}
 }
