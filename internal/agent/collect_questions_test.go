@@ -39,7 +39,7 @@ func TestAnAnsweredQuestionSurvivesTheDemandChanging(t *testing.T) {
 		Questions: []string{"LOST-UPDATE.locking"},
 	}
 
-	got, err := Collect(dir, f, k, []domain.Ask{ask})
+	got, err := Collect(dir, f, k, nil, []domain.Ask{ask})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestAnAnswerToSomethingNeverAskedIsStillRefused(t *testing.T) {
 		Questions: []string{"IDEM-REPLAY.stores_result"},
 	}
 
-	got, err := Collect(dir, f, k, []domain.Ask{ask})
+	got, err := Collect(dir, f, k, nil, []domain.Ask{ask})
 	if err != nil {
 		t.Fatal(err)
 	}

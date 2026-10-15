@@ -268,7 +268,7 @@ func TestCollectToleratesFencedAnswers(t *testing.T) {
 
 		k := domain.NewAgentResponse()
 		ask := domain.Ask{Kind: domain.KindQuestions, Subject: "x", Questions: []string{"LOST-UPDATE.locking"}}
-		got, err := Collect(dir, fixtureFlow(), k, []domain.Ask{ask})
+		got, err := Collect(dir, fixtureFlow(), k, nil, []domain.Ask{ask})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -528,6 +528,56 @@ func TestSharedPreambleIsCheaperThanRepeatingIt(t *testing.T) {
 	repeated := cost.EstTokens + cost.SavedByShared
 	if cost.EstTokens >= repeated {
 		t.Fatalf("hoisting did not reduce the pack: %d vs %d", cost.EstTokens, repeated)
+	}
+}
+
+func TestScenarioTurnedOffInRulesIsNotAskedInRoundTwo(t *testing.T) {
+	f := fixtureFlow()
+	k := fullKnowledge(f)
+
+	before, _ := PlanWith(f, k, domain.RoundGenerate, nil, 0)
+	if len(before) == 0 {
+		t.Fatal("fixture setup: expected round 2 to ask for at least one case, or this test proves nothing")
+	}
+	off := before[0].Subject
+	rules := &config.Rules{Skip: []config.SkipRule{{Scenario: off, Why: "does not apply to this service"}}}
+
+	after, _ := PlanWith(f, k, domain.RoundGenerate, rules, 0)
+	for _, a := range after {
+		if a.Subject == off {
+			t.Fatalf("%s is turned off in rules.json, but round 2 still asks for its test", off)
+		}
+	}
+	if len(after) != len(before)-1 {
+		t.Fatalf("turning off one scenario should drop exactly one ask: %d before, %d after", len(before), len(after))
+	}
+}
+
+func TestTransferSymbolInRulesUnlocksRoundTwoCases(t *testing.T) {
+	f := fixtureFlow()
+	k := fullKnowledge(f)
+	rules := &config.Rules{MoneyMovement: config.MoneyMovement{Symbols: []string{"(*example.com/paysvc/api.Server).process"}}}
+
+	runnableWithout := map[string]bool{}
+	for _, c := range Cases(f, k, nil) {
+		runnableWithout[c.Scenario.ID] = c.Runnable()
+	}
+	unlocked := map[string]bool{}
+	for _, c := range Cases(f, k, rules) {
+		if c.Runnable() && !runnableWithout[c.Scenario.ID] {
+			unlocked[c.Scenario.ID] = true
+		}
+	}
+	if len(unlocked) == 0 {
+		t.Fatal("fixture setup: expected naming the transfer function to make some scenario runnable, or this test proves nothing")
+	}
+
+	asks, _ := PlanWith(f, k, domain.RoundGenerate, rules, 0)
+	for _, a := range asks {
+		delete(unlocked, a.Subject)
+	}
+	if len(unlocked) > 0 {
+		t.Fatalf("rules.json names the transfer function, but round 2 does not ask for the cases it makes runnable: %v", unlocked)
 	}
 }
 

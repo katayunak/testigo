@@ -27,7 +27,7 @@ func PlanWith(f *fact.Flow, k *domain.AgentResponse, round domain.Round,
 	case domain.RoundUnderstand:
 		return planUnderstand(f, k, paths, rules, budget)
 	case domain.RoundGenerate:
-		return planGenerate(f, k, paths), planner.Plan{}
+		return planGenerate(f, k, paths, rules), planner.Plan{}
 	}
 	return nil, planner.Plan{}
 }
@@ -164,9 +164,9 @@ func moneyModelTitle(unresolved []string) string {
 	return "Decide " + strings.Join(unresolved, " and ") + ", then name the transfer"
 }
 
-func planGenerate(f *fact.Flow, k *domain.AgentResponse, paths []prompts.Path) []domain.Ask {
+func planGenerate(f *fact.Flow, k *domain.AgentResponse, paths []prompts.Path, rules *config.Rules) []domain.Ask {
 	var asks []domain.Ask
-	for _, c := range testPlan.Select(f, factsOf(k)) {
+	for _, c := range Cases(f, k, rules) {
 		if !c.Runnable() {
 			continue
 		}
