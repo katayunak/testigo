@@ -112,14 +112,7 @@ func (s Scenario) Applies(f *fact.Flow, b Facts) (bool, string) {
 	if r.Goroutine && !anyNode(f, func(n *fact.Node) bool { return n.Facts.SpawnsGoroutine }) {
 		return false, "this flow never starts a goroutine"
 	}
-	if len(r.SeamKinds) > 0 && !anySeam(f, func(sm fact.Seam) bool {
-		for _, k := range r.SeamKinds {
-			if sm.Kind == k {
-				return true
-			}
-		}
-		return false
-	}) {
+	if len(r.SeamKinds) > 0 && !anySeam(f, func(sm fact.Seam) bool { return hasKind(r.SeamKinds, sm.Kind) }) {
 		return false, "this flow has no " + kindList(r.SeamKinds) + " boundary"
 	}
 	if len(r.WritePatterns) > 0 {
@@ -133,6 +126,9 @@ func (s Scenario) Applies(f *fact.Flow, b Facts) (bool, string) {
 		if !found {
 			return false, "no table in this repository is written the way this scenario needs (" + patternList(r.WritePatterns) + ")"
 		}
+	}
+	if r.InjectableSeam && len(r.SeamKinds) > 0 && !anySeam(f, func(sm fact.Seam) bool { return sm.Injectable && hasKind(r.SeamKinds, sm.Kind) }) {
+		return false, "no " + kindList(r.SeamKinds) + " boundary in this flow is an interface, so no fault can be injected there — extract an interface first"
 	}
 	if r.InjectableSeam && !anySeam(f, func(sm fact.Seam) bool { return sm.Injectable }) {
 
@@ -161,6 +157,15 @@ func anyNode(f *fact.Flow, pred func(*fact.Node) bool) bool {
 func anySeam(f *fact.Flow, pred func(fact.Seam) bool) bool {
 	for _, s := range f.Seams {
 		if pred(s) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasKind(kinds []fact.SeamKind, k fact.SeamKind) bool {
+	for _, want := range kinds {
+		if want == k {
 			return true
 		}
 	}

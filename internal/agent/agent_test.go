@@ -363,10 +363,11 @@ func TestScenarioTurnedOffInRulesDoesNotBlockRoundTwo(t *testing.T) {
 	f := fixtureFlow()
 	const bus = "(*example.com/paysvc/events.Bus).Publish"
 	f.Seams = append(f.Seams, fact.Seam{
-		In:     f.Seams[0].In,
-		Kind:   fact.SeamQueue,
-		Target: bus,
-		Line:   70,
+		In:         f.Seams[0].In,
+		Kind:       fact.SeamQueue,
+		Target:     bus,
+		Line:       70,
+		Injectable: true,
 	})
 	k := domain.NewAgentResponse()
 	k.MoneyModel = &domain.MoneyModelAnswer{}

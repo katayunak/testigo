@@ -317,3 +317,32 @@ func TestSelectIsTheSameEveryRunWithSeveralEntries(t *testing.T) {
 		}
 	}
 }
+
+func TestTimeoutUnknownOutcomeBlockedWhenOnlyTheDatabaseSeamIsInjectable(t *testing.T) {
+	f := twoEntryFlow()
+	f.Seams[1].Injectable = false
+	f.Seams[1].Iface = ""
+
+	got := caseNamed(t, Select(f, Facts{}), "TIMEOUT-UNKNOWN-OUTCOME")
+	if got.Runnable() {
+		t.Fatal("a provider timeout cannot be faked through a concrete http client, even when the database seam is an interface")
+	}
+	if !strings.Contains(got.Blocked, "http or queue boundary in this flow is an interface") {
+		t.Fatalf("the reason should name the boundary that needs an interface, got %q", got.Blocked)
+	}
+}
+
+func TestTimeoutUnknownOutcomeIsGivenOnlyTheInjectableProviderSeams(t *testing.T) {
+	f := twoEntryFlow()
+	charge := f.Seams[1].In
+	f.Seams = append(f.Seams, fact.Seam{In: charge, Kind: fact.SeamHTTP, Target: "(*net/http.Client).Do", Line: 35})
+
+	got := caseNamed(t, Select(f, Facts{}), "TIMEOUT-UNKNOWN-OUTCOME")
+	if !got.Runnable() {
+		t.Fatalf("an injectable provider seam should make the timeout scenario runnable, got blocked: %q", got.Blocked)
+	}
+	gotSeams := strings.Join(seamTargets(got.Seams), ", ")
+	if want := "(example.com/x/psp.Gateway).Charge"; gotSeams != want {
+		t.Fatalf("seams = %s, want %s: a fault can only be injected into the interface, not the concrete http client", gotSeams, want)
+	}
+}

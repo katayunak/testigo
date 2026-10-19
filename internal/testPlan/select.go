@@ -49,7 +49,11 @@ func Select(f *fact.Flow, b Facts) []TestCase {
 		var candidates []fact.Seam
 		if len(sc.Requires.SeamKinds) > 0 {
 			for _, k := range sc.Requires.SeamKinds {
-				candidates = append(candidates, seamsByKind[k]...)
+				for _, s := range seamsByKind[k] {
+					if s.Injectable || !sc.Requires.InjectableSeam {
+						candidates = append(candidates, s)
+					}
+				}
 			}
 		} else if sc.Requires.InjectableSeam {
 			candidates = injectable
