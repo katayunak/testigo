@@ -364,3 +364,25 @@ func TestUnclassifiedErrorNotRetriedNeedsAProviderSeamNotOnlyADatabaseOne(t *tes
 		t.Fatalf("seams = %s, want only the provider gateway: the ledger store is not where a provider error comes from", gotSeams)
 	}
 }
+
+func TestConcurrentKeyRaceRunsAgainstARealDatabaseWhenTheKeyIsADatabaseConstraint(t *testing.T) {
+	got := caseNamed(t, Select(twoEntryFlow(), Facts{Known: true, IdempotencyKey: "IdempotencyKey", Uniqueness: UniquenessDatabaseConstraint}), "IDEM-CONCURRENT")
+	if !got.Runnable() {
+		t.Fatalf("a key enforced by a database constraint should still be raced, got blocked: %q", got.Blocked)
+	}
+	if got.Technique != TechniqueNarrowIntegration || got.Size != SizeMedium {
+		t.Fatalf("technique/size = %s/%s, want %s/%s: an in-memory map cannot show the race a unique constraint settles", got.Technique, got.Size, TechniqueNarrowIntegration, SizeMedium)
+	}
+	if !strings.HasSuffix(got.TargetFile, "_testigo_integration_test.go") {
+		t.Fatalf("target file = %s, want an integration test file so it only runs with a database", got.TargetFile)
+	}
+}
+
+func TestConcurrentKeyRaceStaysSmallUnlessTheKeyIsADatabaseConstraint(t *testing.T) {
+	for _, uniqueness := range []string{"", "unknown", "none", "app_check_then_write"} {
+		got := caseNamed(t, Select(twoEntryFlow(), Facts{Known: true, IdempotencyKey: "IdempotencyKey", Uniqueness: uniqueness}), "IDEM-CONCURRENT")
+		if got.Technique != TechniqueConcurrency || got.Size != SizeSmall {
+			t.Fatalf("uniqueness %q: technique/size = %s/%s, want %s/%s", uniqueness, got.Technique, got.Size, TechniqueConcurrency, SizeSmall)
+		}
+	}
+}

@@ -40,7 +40,7 @@ Some scenarios are picked by **how a table is written** — see
 | [`UNCLASSIFIED-ERROR-NOT-RETRIED`](#unclassified-error-not-retried) | failure | high | specification | an injectable http or queue boundary |
 | [`IDEM-REPLAY`](#idem-replay) | idempotency | critical | specification | an injectable seam, an idempotency key |
 | [`IDEM-PAYLOAD-MISMATCH`](#idem-payload-mismatch) | idempotency | high | specification | an injectable seam, an idempotency key |
-| [`IDEM-CONCURRENT`](#idem-concurrent) | idempotency | critical | specification | an injectable seam, an idempotency key |
+| [`IDEM-CONCURRENT`](#idem-concurrent) | idempotency | critical | specification | an injectable seam, an idempotency key; a real database when round 1 says the key is a database constraint |
 | [`IDEM-CRASH-AT-STEP`](#idem-crash-at-step) | idempotency | critical | specification | an injectable seam, an idempotency key |
 | [`UPSERT-HIDES-A-SECOND-EFFECT`](#upsert-hides-a-second-effect) | idempotency | critical | specification | a table written `upsert`, an injectable seam, a real database |
 | [`MONEY-ROUND-TRIP-EXACT`](#money-round-trip-exact) | money | critical | invariant | money in the flow |
@@ -795,8 +795,8 @@ opens it.
 |---|---|
 | severity | critical |
 | oracle | `specification` |
-| techniques | `concurrency`, `narrowIntegration` |
-| needs | an injectable seam, an idempotency key |
+| techniques | `concurrency`, `narrowIntegration` (`narrowIntegration`, medium, when round 1 says the key is a database constraint) |
+| needs | an injectable seam, an idempotency key; a real database when round 1 says the key is a database constraint |
 
 ### IDEM-CRASH-AT-STEP
 

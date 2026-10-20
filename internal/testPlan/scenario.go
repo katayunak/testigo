@@ -55,12 +55,16 @@ type Requires struct {
 	MultiTenant  bool
 	HashChain    bool
 
+	RealDatabaseWhenKeyIsADatabaseConstraint bool
+
 	BalanceFunc    bool
 	TransferFunc   bool
 	IdempotencyKey bool
 
 	WritePatterns []fact.WritePattern
 }
+
+const UniquenessDatabaseConstraint = "db_constraint"
 
 type Facts struct {
 	MoneyType      string
@@ -179,6 +183,19 @@ func kindList(kinds []fact.SeamKind) string {
 	}
 	sort.Strings(out)
 	return strings.Join(out, " or ")
+}
+
+func (s Scenario) keyRaceNeedsTheRealConstraint(b Facts) bool {
+	return s.Requires.RealDatabaseWhenKeyIsADatabaseConstraint && b.Uniqueness == UniquenessDatabaseConstraint
+}
+
+func (s Scenario) hasTechnique(t Technique) bool {
+	for _, have := range s.Techniques {
+		if have == t {
+			return true
+		}
+	}
+	return false
 }
 
 func (s Scenario) BestTechnique(f *fact.Flow) (Technique, string) {

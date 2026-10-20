@@ -98,7 +98,7 @@ opens it.`,
 		},
 		Techniques: []Technique{TechniqueConcurrency, TechniqueNarrowIntegration},
 		Oracle:     OracleSpecification,
-		Requires:   Requires{IdempotencyKey: true, InjectableSeam: true},
+		Requires:   Requires{IdempotencyKey: true, InjectableSeam: true, RealDatabaseWhenKeyIsADatabaseConstraint: true},
 		Severity:   fact.SevCritical,
 	},
 

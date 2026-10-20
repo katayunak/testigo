@@ -39,10 +39,14 @@ func Select(f *fact.Flow, b Facts) []TestCase {
 			cases = append(cases, c)
 			continue
 		}
+		keyRaceNeedsTheRealConstraint := sc.keyRaceNeedsTheRealConstraint(b)
+		if keyRaceNeedsTheRealConstraint && sc.hasTechnique(TechniqueNarrowIntegration) {
+			technique = TechniqueNarrowIntegration
+		}
 		c.Technique = technique
 		props := technique.Props()
 		c.Size = props.DefaultSize
-		if sc.Requires.RealDatabase {
+		if sc.Requires.RealDatabase || keyRaceNeedsTheRealConstraint {
 			c.Size = SizeMedium
 		}
 
