@@ -37,7 +37,7 @@ Some scenarios are picked by **how a table is written** — see
 | [`HASH-CHAIN-CATCHES-TAMPERING`](#hash-chain-catches-tampering) | consistency | high | metamorphic | a hash-chaining method |
 | [`TIMEOUT-UNKNOWN-OUTCOME`](#timeout-unknown-outcome) | failure | critical | specification | an injectable http or queue boundary |
 | [`ORPHANED-AUTHORIZATION`](#orphaned-authorization) | failure | critical | invariant | an injectable seam, an open transaction |
-| [`UNCLASSIFIED-ERROR-NOT-RETRIED`](#unclassified-error-not-retried) | failure | high | specification | an injectable seam |
+| [`UNCLASSIFIED-ERROR-NOT-RETRIED`](#unclassified-error-not-retried) | failure | high | specification | an injectable http or queue boundary |
 | [`IDEM-REPLAY`](#idem-replay) | idempotency | critical | specification | an injectable seam, an idempotency key |
 | [`IDEM-PAYLOAD-MISMATCH`](#idem-payload-mismatch) | idempotency | high | specification | an injectable seam, an idempotency key |
 | [`IDEM-CONCURRENT`](#idem-concurrent) | idempotency | critical | specification | an injectable seam, an idempotency key |
@@ -681,7 +681,7 @@ manual investigation; the unsafe default costs a customer's money.
 | severity | high |
 | oracle | `specification` |
 | techniques | `table`, `faultInjection` |
-| needs | an injectable seam |
+| needs | an injectable http or queue boundary |
 
 ---
 

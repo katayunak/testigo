@@ -252,7 +252,7 @@ func entryIDs(entries []fact.EntryPoint) []string {
 }
 
 func TestSeamsAreScopedFromEveryEntryNotOnlyTheFirst(t *testing.T) {
-	c := caseNamed(t, Select(twoEntryFlow(), Facts{}), "UNCLASSIFIED-ERROR-NOT-RETRIED")
+	c := caseNamed(t, Select(twoEntryFlow(), Facts{}), "IDEM-REPLAY")
 	if !c.Runnable() {
 		t.Fatalf("fixture setup: expected a runnable case, got blocked: %q", c.Blocked)
 	}
@@ -274,7 +274,7 @@ func TestACaseWhoseSeamsOnlyTheSecondEntryReachesIsDrivenFromIt(t *testing.T) {
 	f := twoEntryFlow()
 	f.Seams = f.Seams[:1]
 
-	c := caseNamed(t, Select(f, Facts{}), "UNCLASSIFIED-ERROR-NOT-RETRIED")
+	c := caseNamed(t, Select(f, Facts{}), "IDEM-REPLAY")
 	if got := strings.Join(entryIDs(c.Entries), ", "); got != "example.com/x/webhook#(*Handler).Callback" {
 		t.Fatalf("entries under test = %s, want only the webhook: the API entry never reaches the ledger call", got)
 	}
@@ -289,7 +289,7 @@ func TestASeamCalledFromTwoEntriesKeepsTheFirstEntrysCallSite(t *testing.T) {
 	charge := f.Nodes["example.com/x/api#(*Server).charge"].Ref
 	f.Seams = append(f.Seams, fact.Seam{In: charge, Kind: fact.SeamDB, Target: shared, Line: 35, Injectable: true, Iface: "example.com/x/ledger.Store"})
 
-	c := caseNamed(t, Select(f, Facts{}), "UNCLASSIFIED-ERROR-NOT-RETRIED")
+	c := caseNamed(t, Select(f, Facts{}), "IDEM-REPLAY")
 	for _, s := range c.Seams {
 		if s.Target == shared && s.In.ID() != charge.ID() {
 			t.Fatalf("%s is shown called in %s; want the call site the first entry point reaches, %s", shared, s.In.Symbol, charge.Symbol)
@@ -344,5 +344,23 @@ func TestTimeoutUnknownOutcomeIsGivenOnlyTheInjectableProviderSeams(t *testing.T
 	gotSeams := strings.Join(seamTargets(got.Seams), ", ")
 	if want := "(example.com/x/psp.Gateway).Charge"; gotSeams != want {
 		t.Fatalf("seams = %s, want %s: a fault can only be injected into the interface, not the concrete http client", gotSeams, want)
+	}
+}
+
+func TestUnclassifiedErrorNotRetriedNeedsAProviderSeamNotOnlyADatabaseOne(t *testing.T) {
+	f := twoEntryFlow()
+	f.Seams = f.Seams[:1]
+
+	got := caseNamed(t, Select(f, Facts{}), "UNCLASSIFIED-ERROR-NOT-RETRIED")
+	if got.Runnable() {
+		t.Fatalf("an unrecognised provider error cannot be faked when the only injectable seam is the ledger store, got seams %s", strings.Join(seamTargets(got.Seams), ", "))
+	}
+	if !strings.Contains(got.Blocked, "http or queue boundary") {
+		t.Fatalf("the reason should name the provider boundary that is missing, got %q", got.Blocked)
+	}
+
+	provider := caseNamed(t, Select(twoEntryFlow(), Facts{}), "UNCLASSIFIED-ERROR-NOT-RETRIED")
+	if gotSeams := strings.Join(seamTargets(provider.Seams), ", "); gotSeams != "(example.com/x/psp.Gateway).Charge" {
+		t.Fatalf("seams = %s, want only the provider gateway: the ledger store is not where a provider error comes from", gotSeams)
 	}
 }

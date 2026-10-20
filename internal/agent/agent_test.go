@@ -802,12 +802,12 @@ func TestCasePromptNamesEveryEntryThatReachesItsBoundaries(t *testing.T) {
 
 	var c testPlan.TestCase
 	for _, sc := range testPlan.Select(f, testPlan.Facts{}) {
-		if sc.Scenario.ID == "UNCLASSIFIED-ERROR-NOT-RETRIED" {
+		if sc.Scenario.ID == "IDEM-REPLAY" {
 			c = sc
 		}
 	}
 	if c.Scenario.ID == "" {
-		t.Fatal("UNCLASSIFIED-ERROR-NOT-RETRIED was not selected for the fixture")
+		t.Fatal("IDEM-REPLAY was not selected for the fixture")
 	}
 
 	p := prompts.TestCase(c, f, nil).Render()

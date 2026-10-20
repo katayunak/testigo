@@ -220,7 +220,7 @@ manual investigation; the unsafe default costs a customer's money.`,
 		},
 		Techniques: []Technique{TechniqueTable, TechniqueFaultInjection},
 		Oracle:     OracleSpecification,
-		Requires:   Requires{InjectableSeam: true},
+		Requires:   Requires{InjectableSeam: true, SeamKinds: []fact.SeamKind{fact.SeamHTTP, fact.SeamQueue}},
 		Severity:   fact.SevHigh,
 	},
 
