@@ -85,6 +85,10 @@ Never use ` + "`time.Sleep`" + ` in either. For goroutines, release from a barri
   needs one, mark it blocked and name the dependency instead of adding it.
 - The file must compile and pass ` + "`go vet`" + `. It is built and run automatically;
   anything that does not compile is discarded and sent back.
+- Each case has its own file, but the files of one package compile together.
+  Start the name of every helper type, function and variable with the test's
+  name (` + "`idemReplayGateway`" + `, not ` + "`fakeGateway`" + `), so two files never declare
+  the same name. Write to the FILE the case names, and no other.
 - Fakes must satisfy the repository's own interfaces. Where a case says a seam is
   NOT injectable, you cannot fake it — mark that case blocked and name the
   interface that would need extracting.

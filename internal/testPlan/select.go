@@ -122,7 +122,7 @@ func target(f *fact.Flow, entries []fact.EntryPoint, s Scenario, size Size) (pkg
 	if size != SizeSmall {
 		suffix = "_testigo_integration_test.go"
 	}
-	return pkgPath, dir + "/" + strings.ToLower(string(s.Family)) + suffix
+	return pkgPath, dir + "/" + strings.ToLower(strings.ReplaceAll(s.ID, "-", "_")) + suffix
 }
 
 func bestStateMachine(f *fact.Flow, roles map[string]fact.StateRoles) *fact.StateMachine {

@@ -394,6 +394,7 @@ func applyGeneratedTests(root, sidecarDir string, answers *domain.AgentResponse,
 	byFile := map[string][]string{}
 	runs := map[string]*domain.TestRun{}
 	var ids []string
+	var writtenSoFar []domain.TestRun
 
 	for _, c := range cases {
 		r := &domain.TestRun{CaseID: c.CaseID,
@@ -410,6 +411,12 @@ func applyGeneratedTests(root, sidecarDir string, answers *domain.AgentResponse,
 			}
 			continue
 		}
+		if other := agent.FileClaimedByAnotherCase(writtenSoFar, c); other != "" {
+			r.Status = "refused"
+			r.Reason = fmt.Sprintf("%s already wrote %s; give this case its own file", other, c.File.Path)
+			fmt.Printf("  REFUSED   %s: %s\n", c.CaseID, r.Reason)
+			continue
+		}
 		out, err := agent.WriteTest(root, c)
 		if err != nil {
 			r.Status = "refused"
@@ -418,6 +425,7 @@ func applyGeneratedTests(root, sidecarDir string, answers *domain.AgentResponse,
 			continue
 		}
 		r.File = out.Path
+		writtenSoFar = append(writtenSoFar, *r)
 		switch {
 		case !out.Compiles:
 			r.Status = "no_build"

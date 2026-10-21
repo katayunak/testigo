@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/katayunak/testigo/internal/agent/domain"
@@ -42,6 +43,19 @@ func ApplyCase(root string, ans *domain.CaseAnswer) (*domain.TestRun, error) {
 		r.Output = capOutput(testOut)
 	}
 	return r, nil
+}
+
+func FileClaimedByAnotherCase(runs []domain.TestRun, ans *domain.CaseAnswer) string {
+	if !ans.Written() {
+		return ""
+	}
+	want := filepath.Clean(ans.File.Path)
+	for _, r := range runs {
+		if r.CaseID != ans.CaseID && r.File != "" && filepath.Clean(r.File) == want {
+			return r.CaseID
+		}
+	}
+	return ""
 }
 
 func capOutput(s string) string {

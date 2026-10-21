@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -301,6 +302,75 @@ func TestTerminal(t *testing.T) {
 	if len(answers.TestRuns) != first.Remaining-want {
 		t.Errorf("%d test run(s) on record, want one per submitted case", len(answers.TestRuns))
 	}
+}
+
+func TestMCPRefusesACaseThatWouldOverwriteAnotherCasesTest(t *testing.T) {
+	root := scannedFixture(t, "paysvc")
+	cs := connectMCP(t, root)
+	answerRoundOne(t, cs, root)
+
+	first, second := twoSmallRunnableCases(t, root)
+	shared := "domain/terminal_testigo_test.go"
+	callOK[Round2SubmitOut](t, cs, "testigo_round2_submit_test", map[string]any{
+		"case_id": first,
+		"status":  "written",
+		"file": map[string]any{"path": shared, "package": "domain", "content": `package domain
+
+import "testing"
+
+func TestTerminal(t *testing.T) {
+	if !(&Payment{Status: StatusCaptured}).Terminal() {
+		t.Fatal("captured is not terminal")
+	}
+}
+`},
+		"func_name":          "TestTerminal",
+		"reached_assertions": []string{"Terminal() is called on a captured payment"},
+	})
+
+	refusal := callFails(t, cs, "testigo_round2_submit_test", map[string]any{
+		"case_id":            second,
+		"status":             "written",
+		"file":               map[string]any{"path": shared, "package": "domain", "content": "package domain\n\nimport \"testing\"\n\nfunc TestOther(t *testing.T) {}\n"},
+		"func_name":          "TestOther",
+		"reached_assertions": []string{"nothing"},
+	})
+	if !strings.Contains(refusal, first) || !strings.Contains(refusal, "own file") {
+		t.Fatalf("refusal = %q, want it to name %s and ask for a file of its own", refusal, first)
+	}
+	kept, err := os.ReadFile(filepath.Join(root, shared))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(kept), "TestTerminal") {
+		t.Fatalf("%s no longer holds the first case's test:\n%s", shared, kept)
+	}
+}
+
+func twoSmallRunnableCases(t *testing.T, root string) (string, string) {
+	t.Helper()
+	flow, err := config.LoadFlow(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answers, err := agent.LoadAgentResponse(config.Dir(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules, err := config.LoadRules(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, c := range agent.Cases(flow, answers, rules) {
+		if c.Runnable() && c.Size == testPlan.SizeSmall {
+			ids = append(ids, c.Scenario.ID)
+		}
+	}
+	if len(ids) < 2 {
+		t.Fatalf("fixture setup: %d small runnable case(s) for paysvc after round 1, want two", len(ids))
+	}
+	return ids[0], ids[1]
 }
 
 func TestMCPStatusMovesOnToRoundTwoOnceRoundOneIsAnswered(t *testing.T) {
