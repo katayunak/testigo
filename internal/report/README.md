@@ -8,6 +8,11 @@ Everything known so far in one page: the flow, the findings by severity, what ro
 one settled, the test plan, and the token ledger. It is the answer to "what does
 testigo currently think about this repository", and it costs nothing to ask.
 
+After round two it also lists the tests: how many were written, passed, failed or
+blocked, and every red test with its file. A red test whose answer declared it
+expected to fail is marked `(expected)`, because that red is a finding, not a broken
+test.
+
 ## `Measure` — the token ledger
 
 Reads the bytes actually written to `testigo/asks/` and read back from
@@ -17,6 +22,10 @@ Reads the bytes actually written to `testigo/asks/` and read back from
   prompts sent        14.7k across 9 prompt(s)
   read back            2.8k across 9 answer(s)
 ```
+
+A prompt counts as answered only when its own answer file exists, so round one's
+answers are not counted against a round two pack, and the round comes from the
+pack's `manifest.json`.
 
 This is **measured, not estimated** — it is the size of files on disk. The planner's
 figure before a run is a forecast; this is the receipt. Keeping the two separate is

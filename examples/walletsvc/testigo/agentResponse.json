@@ -1,0 +1,525 @@
+{
+  "schema_version": 2,
+  "money_model": {
+    "money": {
+      "type": "domain.Wallet",
+      "amount_field": "Balance",
+      "representation": "minor_units_int",
+      "currency": "",
+      "proof": {
+        "symbol": "Wallet.Balance",
+        "at": "domain/wallet.go:26"
+      }
+    },
+    "transfer_func": {
+      "symbol": "example.com/walletsvc/service#(*Service).CoreTransfer",
+      "at": "service/transfer.go:17"
+    },
+    "balance_func": {
+      "symbol": "example.com/walletsvc/repo#(*Store).GetWallet",
+      "at": "repo/wallet.go:25"
+    },
+    "idempotency": {
+      "key_field": "TrackingNumber",
+      "uniqueness": "none",
+      "proof": {
+        "symbol": "Transaction.TrackingNumber",
+        "at": "domain/wallet.go:48"
+      }
+    }
+  },
+  "transitions": {
+    "example.com/walletsvc/domain.Status": {
+      "initial_state": "StatusInitial",
+      "may_move_to": {
+        "StatusDeleted": null,
+        "StatusDisable": [
+          "StatusDeleted",
+          "StatusEnable"
+        ],
+        "StatusEnable": [
+          "StatusDeleted"
+        ],
+        "StatusInitial": [
+          "StatusDeleted",
+          "StatusEnable"
+        ],
+        "StatusPending": [
+          "StatusDeleted",
+          "StatusEnable"
+        ]
+      },
+      "unsure": null,
+      "final_states": [
+        "StatusDeleted"
+      ],
+      "final_state_exceptions": null
+    }
+  },
+  "state_roles": {
+    "example.com/walletsvc/domain.Status": {
+      "roles": [
+        {
+          "state": "StatusInitial",
+          "initializing": true,
+          "proof": "domain/wallet.go:14 — declared first; wallets are created outside this module"
+        },
+        {
+          "state": "StatusPending",
+          "pending": true,
+          "proof": "domain/wallet.go:17 — declared, nothing in this module assigns it"
+        },
+        {
+          "state": "StatusEnable",
+          "in_progress": true,
+          "proof": "service/transfer.go:84 — the only state Active() accepts, domain/wallet.go:31"
+        },
+        {
+          "state": "StatusDisable",
+          "in_progress": true,
+          "proof": "domain/wallet.go:16 — a blocked wallet can be enabled again by EnableWallet, service/transfer.go:79"
+        },
+        {
+          "state": "StatusDeleted",
+          "final": true,
+          "proof": "service/transfer.go:93 — set by DeleteWallet"
+        }
+      ],
+      "exceptions": []
+    }
+  },
+  "external_effects": {
+    "(*database/sql.DB).BeginTx": {
+      "changes_external_state": false,
+      "reversible_by_rollback": true,
+      "outcome_observable": true,
+      "accepts_dedup_key": false,
+      "moves_money": false
+    },
+    "(*database/sql.DB).ExecContext": {
+      "changes_external_state": true,
+      "reversible_by_rollback": false,
+      "outcome_observable": true,
+      "accepts_dedup_key": false,
+      "moves_money": true
+    },
+    "(*database/sql.DB).QueryRowContext": {
+      "changes_external_state": false,
+      "reversible_by_rollback": true,
+      "outcome_observable": true,
+      "accepts_dedup_key": false,
+      "moves_money": false
+    },
+    "(*database/sql.Tx).Commit": {
+      "changes_external_state": false,
+      "reversible_by_rollback": true,
+      "outcome_observable": true,
+      "accepts_dedup_key": false,
+      "moves_money": false
+    },
+    "(example.com/walletsvc/repo.Notifier).Settle": {
+      "changes_external_state": true,
+      "reversible_by_rollback": false,
+      "outcome_observable": "unknown",
+      "accepts_dedup_key": false,
+      "moves_money": "unknown"
+    },
+    "(example.com/walletsvc/repo.WalletRepository).Atomic": {
+      "changes_external_state": true,
+      "reversible_by_rollback": false,
+      "outcome_observable": true,
+      "accepts_dedup_key": false,
+      "moves_money": true
+    },
+    "(example.com/walletsvc/repo.WalletRepository).GetWallet": {
+      "changes_external_state": false,
+      "reversible_by_rollback": true,
+      "outcome_observable": true,
+      "accepts_dedup_key": false,
+      "moves_money": false
+    },
+    "(example.com/walletsvc/repo.WalletRepository).InsertTransaction": {
+      "changes_external_state": true,
+      "reversible_by_rollback": false,
+      "outcome_observable": true,
+      "accepts_dedup_key": false,
+      "moves_money": false
+    },
+    "(example.com/walletsvc/repo.WalletRepository).MaxBalance": {
+      "changes_external_state": false,
+      "reversible_by_rollback": true,
+      "outcome_observable": true,
+      "accepts_dedup_key": false,
+      "moves_money": false
+    },
+    "(example.com/walletsvc/repo.WalletRepository).UpdateBalance": {
+      "changes_external_state": true,
+      "reversible_by_rollback": false,
+      "outcome_observable": true,
+      "accepts_dedup_key": false,
+      "moves_money": true
+    }
+  },
+  "classification": {
+    "spine": "wallet",
+    "motions": [
+      "payout"
+    ],
+    "why": {
+      "payout": [
+        "payout or withdrawal paths"
+      ],
+      "wallet": [
+        "a mutable balance column",
+        "a wallets or balances table",
+        "functions that add to and subtract from a balance"
+      ]
+    }
+  },
+  "payment_kind": {
+    "BALANCE-LIMIT-ENFORCED.checked_atomically": {
+      "verdict": false,
+      "info": "The limit is read (service/transfer.go:50) and compared in Go (service/transfer.go:54) before a separate UPDATE (service/transfer.go:58)."
+    },
+    "BALANCE-LIMIT-ENFORCED.limit_exists": {
+      "info": "A maximum balance per wallet type from settings.max_balance (repo/wallet.go:52), checked on deposit only (service/transfer.go:54), not when a transfer credits a wallet (service/transfer.go:41)."
+    },
+    "BALANCE-NEVER-NEGATIVE.guard_is_atomic": {
+      "verdict": false,
+      "info": "Transfer reads the balance (service/transfer.go:20) and checks it in Go (service/transfer.go:29) before a separate write (service/transfer.go:33); withdraw has no check (service/transfer.go:75)."
+    },
+    "BALANCE-NEVER-NEGATIVE.may_go_negative": {
+      "verdict": false
+    },
+    "CONSERVATION-UNDER-CONCURRENCY.invariant": {
+      "info": "The sum of the two wallets' balances must be the same before and after any set of transfers between them (service/transfer.go:33, service/transfer.go:41)."
+    },
+    "CURRENCY-MIXING-REFUSED.can_mix": {
+      "info": "Not applicable: there is no currency anywhere (domain/wallet.go:5), so one currency is implied."
+    },
+    "DOUBLE-ENTRY-SUMS-TO-ZERO.enforced_outside_go": {
+      "verdict": false,
+      "info": "No CHECK or trigger exists (migrations/0001_wallets.sql:1), and the two legs of a transfer are separate writes (service/transfer.go:33, service/transfer.go:41)."
+    },
+    "FAILURE-IS-NOT-TERMINAL.retry_entry": {
+      "info": "Not applicable: wallets have no failed state (domain/wallet.go:13)."
+    },
+    "FINAL-STATE-IS-FINAL.exceptions": {
+      "info": "StatusDeleted should have no way out, but EnableWallet sets enable with no status check, so a deleted wallet can be re-enabled (service/transfer.go:84)."
+    },
+    "IDEM-CONCURRENT.exactly_one": {
+      "verdict": true
+    },
+    "IDEM-CONCURRENT.loser_behaviour": {
+      "info": "It should get a conflict or the first result; today both deposits run, because the tracking number is never checked (service/transfer.go:62)."
+    },
+    "IDEM-CRASH-AT-STEP.recovery": {
+      "info": "Nothing: a transfer that fails after the debit (service/transfer.go:33) keeps it, and no job or retry path finishes or reverses it."
+    },
+    "IDEM-PAYLOAD-MISMATCH.rejects": {
+      "verdict": true,
+      "info": "That is the rule; the code never reads the tracking number back, so it compares nothing (service/transfer.go:62)."
+    },
+    "IDEM-REPLAY.replays_failures": {
+      "verdict": false,
+      "info": "A failed deposit is only returned (service/transfer.go:58), so a retry starts over."
+    },
+    "IDEM-REPLAY.stores_result": {
+      "verdict": false,
+      "info": "Nothing is stored against the tracking number; a repeated deposit runs again (service/transfer.go:44)."
+    },
+    "ILLEGAL-TRANSITION-REFUSED.enforced_where": {
+      "verdict": false,
+      "info": "EnableWallet and DeleteWallet set status with no check of the current one (service/transfer.go:84, service/transfer.go:93), and the column has no CHECK (migrations/0001_wallets.sql:7)."
+    },
+    "LEDGER-OUTSIDE-CALLER-TRANSACTION.shares_tx": {
+      "verdict": false,
+      "info": "Atomic opens a transaction but runs fn on the plain *sql.DB (repo/wallet.go:59, repo/wallet.go:63), so every write is outside it."
+    },
+    "LOST-UPDATE.locking": {
+      "verdict": true
+    },
+    "MINOR-UNIT-CONVERSION.boundaries": {
+      "info": "None: there is no currency and no conversion; amounts are already integers (domain/wallet.go:5)."
+    },
+    "MONEY-ROUND-TRIP-EXACT.representation": {
+      "verdict": true
+    },
+    "ORPHANED-AUTHORIZATION.expiry": {
+      "info": "Not applicable: there are no authorizations or holds in this repository."
+    },
+    "RECONCILER-IS-IDEMPOTENT.rerun": {
+      "info": "Not applicable: there is no reconciliation job in this repository."
+    },
+    "SELF-TRANSFER-REFUSED.is_refused": {
+      "verdict": false,
+      "info": "CoreTransfer loads the same wallet twice (service/transfer.go:20, service/transfer.go:24) and never compares the two ids."
+    },
+    "SPLIT-SUMS-TO-TOTAL.remainder": {
+      "info": "Nobody: Fee returns amount / 100 and drops the remainder (service/transfer.go:97)."
+    },
+    "TRANSFER-IS-ATOMIC.async_leg": {
+      "info": "Settle hands the source wallet to another system between the two legs (service/transfer.go:37); its implementation is not in this repository."
+    },
+    "TRANSFER-IS-ATOMIC.same_transaction": {
+      "verdict": false,
+      "info": "The debit and the credit are separate UpdateBalance calls with Settle between them and no transaction around them (service/transfer.go:33, service/transfer.go:37, service/transfer.go:41)."
+    },
+    "UNCLASSIFIED-ERROR-NOT-RETRIED.default": {
+      "verdict": false,
+      "info": "Every error is returned as is; nothing retries (service/transfer.go:37)."
+    },
+    "WALLET-STATUS-GATES-MOVEMENT.active_states": {
+      "info": "Only StatusEnable (domain/wallet.go:31)."
+    },
+    "WALLET-STATUS-GATES-MOVEMENT.blocks_credits": {
+      "verdict": true,
+      "info": "That is the rule; Deposit and CoreTransfer never check status, only Withdraw does (service/transfer.go:71)."
+    },
+    "WEBHOOK-ORDER-INDEPENDENT.out_of_order": {
+      "info": "Not applicable: there are no provider callbacks in this repository."
+    },
+    "payout.destination_snapshot": {
+      "info": "Not applicable: Withdraw takes no destination account (api/server.go:20)."
+    },
+    "payout.duplicate_rejection": {
+      "info": "Not safe: Withdraw takes no request id (api/server.go:20), so a re-submission debits again."
+    },
+    "payout.gross_or_net": {
+      "info": "Not applicable: withdraw charges no fee (service/transfer.go:66), and TransferInput.Fee is accepted but never applied (domain/wallet.go:61)."
+    },
+    "payout.return_handling": {
+      "info": "unknown: nothing in this repository credits a wallet back after a withdrawal (service/transfer.go:66)."
+    },
+    "payout.return_window": {
+      "info": "unknown: Withdraw only lowers the balance (service/transfer.go:75); the money leaves through a system that is not in this repository."
+    },
+    "technique.concurrency.contended": {
+      "info": "The balance of one wallet id: concurrent deposits read it (service/transfer.go:45) and write it back (service/transfer.go:58)."
+    },
+    "technique.faultInjection.observable": {
+      "info": "The balance a fake WalletRepository holds for each wallet id, and the Transaction rows it was asked to insert (repo/wallet.go:10)."
+    },
+    "technique.fuzz.valid_input": {
+      "info": "An existing wallet id and any Amount; nothing validates the amount (service/transfer.go:18, service/transfer.go:44)."
+    },
+    "technique.metamorphic.relation": {
+      "info": "One transfer of A+B and two transfers of A then B between the same wallets must leave the same two balances (service/transfer.go:17)."
+    },
+    "technique.narrowIntegration.real_dependency": {
+      "info": "Postgres must be real for repo.Store (repo/wallet.go:23); the Notifier can be faked (repo/wallet.go:19)."
+    },
+    "technique.property.bounds": {
+      "info": "An amount should be positive and below 2^53 for the float conversion (service/transfer.go:18); today zero and negative amounts are accepted."
+    },
+    "technique.stateMachine.driver": {
+      "info": "EnableWallet and DeleteWallet with a wallet id (service/transfer.go:79, service/transfer.go:88), over any WalletRepository."
+    },
+    "technique.table.boundaries": {
+      "info": "Amounts 0, 1, 99, 100 and 101 for Fee (service/transfer.go:97), a balance equal to the amount for the funds check (service/transfer.go:29), and a deposit landing exactly on max_balance (service/transfer.go:54)."
+    },
+    "wallet.history_truth": {
+      "info": "Best-effort: deposit writes the balance first (service/transfer.go:58) and the history row after it with nothing joining them (service/transfer.go:61), transfers and withdrawals write no history, and no job compares the two."
+    },
+    "wallet.in_flight_money": {
+      "info": "There is no reserved concept: a transfer debits the source (service/transfer.go:33) before calling Settle (service/transfer.go:37), and if Settle fails the debit stays while the credit never happens."
+    },
+    "wallet.negative_paths": {
+      "info": "Withdraw writes balance minus amount with no funds check (service/transfer.go:75), so a withdrawal larger than the balance goes negative; only transfer checks funds (service/transfer.go:29)."
+    },
+    "wallet.other_writers": {
+      "info": "unknown: nothing in this repository writes wallets.balance outside UpdateBalance (repo/wallet.go:34); only the team can say whether an admin tool or another service does."
+    },
+    "wallet.replayable_credits": {
+      "info": "Deposit (service/transfer.go:44) takes a caller tracking number but never checks it (service/transfer.go:62), so a replayed deposit credits twice."
+    },
+    "wallet.unit": {
+      "info": "Minor units in a bigint column (migrations/0001_wallets.sql:6) with no currency anywhere, so one fixed currency is implied and a wallet holds one unit."
+    }
+  },
+  "test_runs": [
+    {
+      "case_id": "APPEND-ONLY-HISTORY-IS-IMMUTABLE",
+      "status": "blocked",
+      "reason": "The case is medium and must read the real transactions table (repo/wallet.go:45), which needs a Postgres driver in go.mod (for example github.com/jackc/pgx/v5/stdlib); this module requires nothing (go.mod), and round 2 may not add a dependency. In the code, the table is only ever inserted into (repo/wallet.go:44-49)."
+    },
+    {
+      "case_id": "BALANCE-LIMIT-ENFORCED",
+      "status": "blocked",
+      "reason": "The case is medium and must race two real deposits past settings.max_balance (repo/wallet.go:52), which needs a Postgres driver in go.mod (for example github.com/jackc/pgx/v5/stdlib); this module requires nothing (go.mod), and round 2 may not add a dependency. Note for the report: a transfer credits the destination with no limit check at all (service/transfer.go:41)."
+    },
+    {
+      "case_id": "BALANCE-NEVER-NEGATIVE",
+      "status": "blocked",
+      "reason": "The case is medium and must race real UPDATEs on the wallets table through repo.Store (repo/wallet.go:34), which needs a Postgres driver in go.mod (for example github.com/jackc/pgx/v5/stdlib); this module requires nothing (go.mod), and round 2 may not add a dependency. Note for the report: Withdraw has no funds check at all (service/transfer.go:75), so the balance goes negative even without concurrency."
+    },
+    {
+      "case_id": "CONSERVATION-UNDER-CONCURRENCY",
+      "status": "blocked",
+      "reason": "The case is medium and must run against the real wallets table through repo.Store (repo/wallet.go:23), which needs a Postgres driver in go.mod (for example github.com/jackc/pgx/v5/stdlib); this module requires nothing (go.mod), and round 2 may not add a dependency."
+    },
+    {
+      "case_id": "CURRENCY-MIXING-REFUSED",
+      "file": "api/currency_mixing_refused_testigo_test.go",
+      "func": "TestCurrencyMixingRefused",
+      "status": "written",
+      "passed": false,
+      "expected_to_fail": "No money-carrying type has a currency (domain/wallet.go:21-62), so nothing can refuse arithmetic across currencies. The absence is the finding.",
+      "output": "--- FAIL: TestCurrencyMixingRefused (0.00s)\n    --- FAIL: TestCurrencyMixingRefused/domain.Wallet (0.00s)\n        currency_mixing_refused_testigo_test.go:42: domain.Wallet carries money in [Balance] with no currency beside it, so adding EUR minor units to USD minor units compiles and runs without error (domain/wallet.go)\n    --- FAIL: TestCurrencyMixingRefused/domain.Transaction (0.00s)\n        currency_mixing_refused_testigo_test.go:42: domain.Transaction carries money in [Amount Balance Fee] with no currency beside it, so adding EUR minor units to USD minor units compiles and runs without error (domain/wallet.go)\n    --- FAIL: TestCurrencyMixingRefused/domain.TransferInput (0.00s)\n        currency_mixing_refused_testigo_test.go:42: domain.TransferInput carries money in [Amount Fee] with no currency beside it, so adding EUR minor units to USD minor units compiles and runs without error (domain/wallet.go)\nFAIL\nFAIL\texample.com/walletsvc/api\t0.967s\nFAIL"
+    },
+    {
+      "case_id": "DEADLOCK-IS-RECOVERED",
+      "status": "blocked",
+      "reason": "The case is medium and needs real row locks, which needs a Postgres driver in go.mod (for example github.com/jackc/pgx/v5/stdlib); this module requires nothing (go.mod), and round 2 may not add a dependency. Note for the report: no code here takes a row lock at all (repo/wallet.go:25-56), so the failure this module has is lost updates, not deadlocks."
+    },
+    {
+      "case_id": "DOUBLE-ENTRY-SUMS-TO-ZERO",
+      "file": "api/double_entry_sums_to_zero_testigo_test.go",
+      "func": "TestDoubleEntrySumsToZero",
+      "status": "written",
+      "passed": false,
+      "expected_to_fail": "There is no constructor that takes both legs of a movement, so nothing can refuse an unbalanced set; and a transfer whose source and destination are the same wallet writes a debit and then a credit computed from the balance read before the debit (service/transfer.go:24, service/transfer.go:41), which adds the amount to the total.",
+      "output": "--- FAIL: TestDoubleEntrySumsToZero (0.00s)\n    double_entry_sums_to_zero_testigo_test.go:88: seed 20261021\n    double_entry_sums_to_zero_testigo_test.go:112: transfer 0 (w-c -\u003e w-c, amount 4588) was accepted and moved the total of all wallets from 3000000 to 3004588: its legs sum to 4588, not zero (seed 20261021)\nFAIL\nFAIL\texample.com/walletsvc/api\t0.402s\nFAIL"
+    },
+    {
+      "case_id": "FAILURE-IS-NOT-TERMINAL",
+      "status": "blocked",
+      "reason": "Does not apply: domain.Status has no failed value (domain/wallet.go:13-19), and no payment moves through a failed state in this module."
+    },
+    {
+      "case_id": "FINAL-STATE-IS-FINAL",
+      "file": "api/final_state_is_final_testigo_test.go",
+      "func": "TestFinalStateIsFinal",
+      "status": "written",
+      "passed": false,
+      "expected_to_fail": "EnableWallet sets enable without reading the current status (service/transfer.go:84), so a deleted wallet comes back to life.",
+      "output": "--- FAIL: TestFinalStateIsFinal (0.00s)\n    final_state_is_final_testigo_test.go:100: deleted -\u003e enable was accepted: StatusDeleted is final and no exception was declared for it (service/transfer.go:84 sets enable without reading the current status)\n    final_state_is_final_testigo_test.go:103: stored status changed from \"deleted\" to \"enable\" on a move that must be refused\n    final_state_is_final_testigo_test.go:108: deleted -\u003e initial, pending and disable are also refused by the roles, but no function in this module can attempt them\nFAIL\nFAIL\texample.com/walletsvc/api\t0.425s\nFAIL"
+    },
+    {
+      "case_id": "IDEM-CONCURRENT",
+      "file": "api/idem_concurrent_testigo_test.go",
+      "func": "TestIdemConcurrent",
+      "status": "written",
+      "passed": false,
+      "expected_to_fail": "Nothing checks the tracking number (service/transfer.go:62), so every simultaneous delivery credits; and because the balance is read then written back (service/transfer.go:45, service/transfer.go:58), most of those credits overwrite each other.",
+      "output": "--- FAIL: TestIdemConcurrent (0.00s)\n    idem_concurrent_testigo_test.go:121: 32 of 32 deposits reported success; up to 14 were between read and write at once\n    idem_concurrent_testigo_test.go:130: 32 history rows carry tracking number trk-1 after 32 simultaneous deliveries, want 1: the key is never checked (service/transfer.go:62)\n    idem_concurrent_testigo_test.go:133: 32 balance writes for one deposit delivered 32 times at once, want 1\n    idem_concurrent_testigo_test.go:136: balance = 400, want 100: one deposit of 100, delivered 32 times at once; the 32 history rows say 3200 was credited, so the balance and its history also disagree\nFAIL\nFAIL\texample.com/walletsvc/api\t0.414s\nFAIL"
+    },
+    {
+      "case_id": "IDEM-CRASH-AT-STEP",
+      "file": "api/idem_crash_at_step_testigo_test.go",
+      "func": "TestIdemCrashAtStep",
+      "status": "written",
+      "passed": false,
+      "expected_to_fail": "A transfer that fails after the debit keeps it (service/transfer.go:33), so the retry debits again; a deposit that fails after the credit keeps it (service/transfer.go:58), so the retry credits again. Timeouts after an applied write behave the same way.",
+      "output": "--- FAIL: TestIdemCrashAtStep (0.00s)\n    --- FAIL: TestIdemCrashAtStep/transfer,_the_debit_times_out_after_it_was_applied (0.00s)\n        idem_crash_at_step_testigo_test.go:213: w-a ends at 800 after a failure at UpdateBalance#1 and one retry, want 900, the same as one clean run\n        idem_crash_at_step_testigo_test.go:219: w-a was written 2 times across both attempts, want exactly 1\n    --- FAIL: TestIdemCrashAtStep/transfer,_settle_fails (0.00s)\n        idem_crash_at_step_testigo_test.go:213: w-a ends at 800 after a failure at Settle#1 and one retry, want 900, the same as one clean run\n        idem_crash_at_step_testigo_test.go:219: w-a was written 2 times across both attempts, want exactly 1\n    --- FAIL: TestIdemCrashAtStep/transfer,_settle_times_out_after_it_was_applied (0.00s)\n        idem_crash_at_step_testigo_test.go:213: w-a ends at 800 after a failure at Settle#1 and one retry, want 900, the same as one clean run\n        idem_crash_at_step_testigo_test.go:219: w-a was written 2 times across both attempts, want exactly 1\n        idem_crash_at_step_testigo_test.go:222: settle reached the core 2 times across both attempts, want 1\n    --- FAIL: TestIdemCrashAtStep/transfer\n… truncated"
+    },
+    {
+      "case_id": "IDEM-PAYLOAD-MISMATCH",
+      "file": "api/idem_payload_mismatch_testigo_test.go",
+      "func": "TestIdemPayloadMismatch",
+      "status": "written",
+      "passed": false,
+      "expected_to_fail": "The tracking number is never read back (service/transfer.go:62), so a second request with the same key and a different amount runs as a new deposit.",
+      "output": "--- FAIL: TestIdemPayloadMismatch (0.00s)\n    idem_payload_mismatch_testigo_test.go:98: a second deposit reusing tracking number trk-1 with amount 200 instead of 100 was accepted; it must be refused as a conflict\n    idem_payload_mismatch_testigo_test.go:101: the balance was written 2 times, want 1: the conflicting request moved money\n    idem_payload_mismatch_testigo_test.go:104: balance = 300, want 100: only the first request may have taken effect\n    idem_payload_mismatch_testigo_test.go:108: a history row for trk-1 records amount 200; the stored record must still reflect the first request\nFAIL\nFAIL\texample.com/walletsvc/api\t0.440s\nFAIL"
+    },
+    {
+      "case_id": "IDEM-REPLAY",
+      "file": "api/idem_replay_testigo_test.go",
+      "func": "TestIdemReplay",
+      "status": "written",
+      "passed": false,
+      "expected_to_fail": "Deposit never reads the tracking number back (service/transfer.go:62), so the repeat credits again and the balance ends at 200. A failed deposit keeps its credit, because the balance is written before the history row and nothing joins the two (service/transfer.go:58, service/transfer.go:61).",
+      "output": "--- FAIL: TestIdemReplay (0.00s)\n    --- FAIL: TestIdemReplay/a_repeated_deposit_with_the_same_tracking_number_credits_once (0.00s)\n        idem_replay_testigo_test.go:125: balance after two deliveries of tracking number trk-1 = 200, want 100: the repeat ran the deposit again instead of replaying it\n        idem_replay_testigo_test.go:128: 2 history rows carry tracking number trk-1, want 1\n    --- FAIL: TestIdemReplay/a_deposit_that_failed_is_answered_with_the_same_failure,_not_run_again (0.00s)\n        idem_replay_testigo_test.go:150: 2 balance writes across a failed deposit and its repeat, want 1: the repeat ran the deposit again\n        idem_replay_testigo_test.go:153: both attempts reported failure, yet the balance is 200: the wallet was credited while the caller was told the deposit failed\nFAIL\nFAIL\texample.com/walletsvc/api\t0.441s\nFAIL"
+    },
+    {
+      "case_id": "ILLEGAL-TRANSITION-REFUSED",
+      "file": "api/illegal_transition_refused_testigo_test.go",
+      "func": "TestIllegalTransitionRefused",
+      "status": "written",
+      "passed": false,
+      "expected_to_fail": "EnableWallet and DeleteWallet write the new status without reading the current one (service/transfer.go:84, service/transfer.go:93), so deleted -\u003e enable is accepted. The legal moves in the same table pass.",
+      "output": "--- FAIL: TestIllegalTransitionRefused (0.00s)\n    --- FAIL: TestIllegalTransitionRefused/deleted_to_enable (0.00s)\n        illegal_transition_refused_testigo_test.go:118: illegal move accepted: nothing checks the current status before writing \"enable\" (service/transfer.go:84)\n        illegal_transition_refused_testigo_test.go:121: stored status changed from \"deleted\" to \"enable\" on a move that must be refused\n    illegal_transition_refused_testigo_test.go:125: the other 12 illegal pairs end in initial, pending or disable; no function in this module can attempt them\nFAIL\nFAIL\texample.com/walletsvc/api\t0.423s\nFAIL"
+    },
+    {
+      "case_id": "LEDGER-OUTSIDE-CALLER-TRANSACTION",
+      "status": "blocked",
+      "reason": "The case is medium: it must show that Store.Atomic runs fn on the plain *sql.DB instead of the transaction it opened (repo/wallet.go:59, repo/wallet.go:63), and only a real database shows which handle a write used. That needs a Postgres driver in go.mod (for example github.com/jackc/pgx/v5/stdlib); this module requires nothing (go.mod), and round 2 may not add a dependency."
+    },
+    {
+      "case_id": "LOST-UPDATE",
+      "status": "blocked",
+      "reason": "The case is medium and must run against the real wallets table through repo.Store (repo/wallet.go:34), which needs a Postgres driver in go.mod (for example github.com/jackc/pgx/v5/stdlib); this module requires nothing (go.mod), and round 2 may not add a dependency."
+    },
+    {
+      "case_id": "MINOR-UNIT-CONVERSION",
+      "status": "blocked",
+      "reason": "There is nothing to call: the module has no currency and no conversion between major and minor units; amounts are integers from end to end (domain/wallet.go:5-7)."
+    },
+    {
+      "case_id": "MONEY-ROUND-TRIP-EXACT",
+      "file": "api/money_round_trip_exact_testigo_test.go",
+      "func": "FuzzMoneyRoundTripExact",
+      "status": "written",
+      "passed": false,
+      "expected_to_fail": "CoreTransfer passes the amount through float64 for math.Abs (service/transfer.go:18), and float64 holds integers exactly only up to 2^53, so the seeds 2^53+1 and 2^62+1 arrive one minor unit short.",
+      "output": "--- FAIL: FuzzMoneyRoundTripExact (0.00s)\n    --- FAIL: FuzzMoneyRoundTripExact/seed#5 (0.00s)\n        money_round_trip_exact_testigo_test.go:99: sent 9007199254740993, the receiving wallet got 9007199254740992: the amount lost 1 minor unit(s) on its way through float64 (service/transfer.go:18)\n    --- FAIL: FuzzMoneyRoundTripExact/seed#6 (0.00s)\n        money_round_trip_exact_testigo_test.go:99: sent 4611686018427387905, the receiving wallet got 4611686018427387904: the amount lost 1 minor unit(s) on its way through float64 (service/transfer.go:18)\nFAIL\nFAIL\texample.com/walletsvc/api\t0.423s\nFAIL"
+    },
+    {
+      "case_id": "ORPHANED-AUTHORIZATION",
+      "status": "blocked",
+      "reason": "Does not apply: nothing in this module authorizes or holds money at a provider. The flows only read and write wallet balances through repo.WalletRepository (service/transfer.go:17-77)."
+    },
+    {
+      "case_id": "READ-MODIFY-WRITE-NEEDS-A-LOCK",
+      "status": "blocked",
+      "reason": "The case is medium and must show two real UPDATEs overwriting each other on one wallets row (repo/wallet.go:35), which needs a Postgres driver in go.mod (for example github.com/jackc/pgx/v5/stdlib); this module requires nothing (go.mod), and round 2 may not add a dependency."
+    },
+    {
+      "case_id": "RECONCILER-IS-IDEMPOTENT",
+      "status": "blocked",
+      "reason": "Does not apply: there is no reconciliation or repair job in this module."
+    },
+    {
+      "case_id": "SELF-TRANSFER-REFUSED",
+      "file": "api/self_transfer_refused_testigo_test.go",
+      "func": "TestSelfTransferRefused",
+      "status": "written",
+      "passed": false,
+      "expected_to_fail": "CoreTransfer reads the same wallet twice and never compares the ids (service/transfer.go:20, service/transfer.go:24); the credit is computed from the balance read before the debit, so the wallet gains the amount.",
+      "output": "--- FAIL: TestSelfTransferRefused (0.00s)\n    --- FAIL: TestSelfTransferRefused/part_of_the_balance (0.00s)\n        self_transfer_refused_testigo_test.go:107: a transfer of 100 from w-1 to w-1 was accepted and changed the balance from 500 to 600: money was created from nothing\n    --- FAIL: TestSelfTransferRefused/the_whole_balance (0.00s)\n        self_transfer_refused_testigo_test.go:107: a transfer of 500 from w-1 to w-1 was accepted and changed the balance from 500 to 1000: money was created from nothing\n    --- FAIL: TestSelfTransferRefused/with_a_fee (0.00s)\n        self_transfer_refused_testigo_test.go:107: a transfer of 100 from w-1 to w-1 was accepted and changed the balance from 500 to 600: money was created from nothing\nFAIL\nFAIL\texample.com/walletsvc/api\t0.392s\nFAIL"
+    },
+    {
+      "case_id": "SPLIT-SUMS-TO-TOTAL",
+      "status": "blocked",
+      "reason": "There is no split to test: no function divides an amount into parts. Fee takes 1% and truncates (service/transfer.go:97), but nothing calls it, and how a fee rounds is a policy for its owner, not this sum."
+    },
+    {
+      "case_id": "TRANSFER-IS-ATOMIC",
+      "file": "api/transfer_is_atomic_testigo_test.go",
+      "func": "TestTransferIsAtomic",
+      "status": "written",
+      "passed": false,
+      "expected_to_fail": "The debit, Settle and the credit are three separate calls with no transaction around them (service/transfer.go:33, service/transfer.go:37, service/transfer.go:41), so a failure after the debit destroys the amount.",
+      "output": "--- FAIL: TestTransferIsAtomic (0.00s)\n    --- FAIL: TestTransferIsAtomic/settle_fails_between_the_debit_and_the_credit (0.00s)\n        transfer_is_atomic_testigo_test.go:128: the two wallets held 1000 together before the transfer and 700 after it failed: 300 minor units were destroyed\n        transfer_is_atomic_testigo_test.go:131: w-a holds 700 after a failed transfer, want 1000: the debit survived without its credit (service/transfer.go:33)\n    --- FAIL: TestTransferIsAtomic/the_credit_fails_after_the_debit (0.00s)\n        transfer_is_atomic_testigo_test.go:128: the two wallets held 1000 together before the transfer and 700 after it failed: 300 minor units were destroyed\n        transfer_is_atomic_testigo_test.go:131: w-a holds 700 after a failed transfer, want 1000: the debit survived without its credit (service/transfer.go:33)\nFAIL\nFAIL\texample.com/walletsvc/api\t0.428s\nFAIL"
+    },
+    {
+      "case_id": "UNCLASSIFIED-ERROR-NOT-RETRIED",
+      "status": "blocked",
+      "reason": "This code classifies no error and retries nothing: CoreTransfer returns every Settle error unchanged (service/transfer.go:37-39). A test needs a retryable class beside the unknown one, or it passes on code that never retries anything, and no such class is stated anywhere in this module."
+    },
+    {
+      "case_id": "WALLET-STATUS-GATES-MOVEMENT",
+      "file": "api/wallet_status_gates_movement_testigo_test.go",
+      "func": "TestWalletStatusGatesMovement",
+      "status": "written",
+      "passed": false,
+      "expected_to_fail": "Only Withdraw checks the status (service/transfer.go:71); Deposit and CoreTransfer move money into and out of initial, pending, disabled and deleted wallets. Withdraw's refusal says \"wallet not active\" without naming the status.",
+      "output": "--- FAIL: TestWalletStatusGatesMovement (0.00s)\n    --- FAIL: TestWalletStatusGatesMovement/initial_wallet,_deposit_into_it (0.00s)\n        wallet_status_gates_movement_testigo_test.go:126: a wallet in status \"initial\" accepted a request to deposit into it; only \"enable\" may move money (domain/wallet.go:31)\n        wallet_status_gates_movement_testigo_test.go:129: the balance of a wallet in status \"initial\" moved from 500 to 600\n    --- FAIL: TestWalletStatusGatesMovement/initial_wallet,_withdraw_from_it (0.00s)\n        wallet_status_gates_movement_testigo_test.go:132: the refusal \"wallet not active\" does not name the status \"initial\", so support cannot tell why the money did not move\n    --- FAIL: TestWalletStatusGatesMovement/initial_wallet,_transfer_into_it (0.00s)\n        wallet_status_gates_movement_testigo_test.go:126: a wallet in status \"initial\" accepted a request to transfer into it; only \"enable\" may move money (domain/wallet.go:31)\n        wallet_status_gates_movement_testigo_test.go:129: the balance of a wallet in status \"initial\" moved from 500 to 600\n    --- FAIL: TestWalletStatusGatesMovement/initial_wallet,_transfer_out_of_it (0.00s)\n        wallet_status_gates_move\n… truncated"
+    },
+    {
+      "case_id": "WEBHOOK-ORDER-INDEPENDENT",
+      "status": "blocked",
+      "reason": "Does not apply: this module receives no provider callbacks or events; every entry point is a direct call (api/server.go:12-30)."
+    }
+  ]
+}

@@ -47,6 +47,22 @@ func TestSelectPicksTheLifecycleStateMachineNotTheFirstOne(t *testing.T) {
 	}
 }
 
+func TestEveryCaseGetsATestFileOfItsOwn(t *testing.T) {
+	writtenBy := map[string]string{}
+	for _, c := range Select(twoEntryFlow(), Facts{}) {
+		if !c.Runnable() {
+			continue
+		}
+		if other, taken := writtenBy[c.TargetFile]; taken {
+			t.Fatalf("%s and %s are both told to write %s; the second would delete the first one's test", other, c.Scenario.ID, c.TargetFile)
+		}
+		writtenBy[c.TargetFile] = c.Scenario.ID
+	}
+	if len(writtenBy) < 2 {
+		t.Fatalf("fixture setup: only %d runnable case(s), so nothing could collide", len(writtenBy))
+	}
+}
+
 func TestDeadlockIsRecoveredNeedsAnOpenTransactionAndATransferFunc(t *testing.T) {
 	f := &fact.Flow{
 		Nodes: map[string]*fact.Node{

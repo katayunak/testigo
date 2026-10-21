@@ -1,0 +1,1210 @@
+{
+  "schema_version": 5,
+  "module": "example.com/walletsvc",
+  "generated_at": "2026-10-21T13:49:32+03:30",
+  "entries": [
+    {
+      "pkg": "example.com/walletsvc/api",
+      "symbol": "(*Server).Transfer",
+      "label": "transfer"
+    },
+    {
+      "pkg": "example.com/walletsvc/api",
+      "symbol": "(*Server).Deposit",
+      "label": "deposit"
+    },
+    {
+      "pkg": "example.com/walletsvc/api",
+      "symbol": "(*Server).Withdraw",
+      "label": "withdraw"
+    }
+  ],
+  "nodes": {
+    "example.com/walletsvc/api#(*Server).Deposit": {
+      "ref": {
+        "pkg": "example.com/walletsvc/api",
+        "symbol": "(*Server).Deposit",
+        "file": "api/server.go",
+        "line": 16
+      },
+      "position": "entry",
+      "calls": [
+        "example.com/walletsvc/service#(*Service).Deposit"
+      ],
+      "facts": {
+        "handles_money": true,
+        "money_types": [
+          "amount example.com/walletsvc/domain.Amount",
+          "example.com/walletsvc/domain.Amount"
+        ],
+        "reaches": [
+          "db"
+        ]
+      }
+    },
+    "example.com/walletsvc/api#(*Server).Transfer": {
+      "ref": {
+        "pkg": "example.com/walletsvc/api",
+        "symbol": "(*Server).Transfer",
+        "file": "api/server.go",
+        "line": 12
+      },
+      "position": "entry",
+      "calls": [
+        "example.com/walletsvc/service#(*Service).CoreTransfer"
+      ],
+      "facts": {
+        "handles_money": true,
+        "money_types": [
+          "example.com/walletsvc/domain.TransferInput (carries Amount)"
+        ],
+        "reaches": [
+          "db"
+        ]
+      }
+    },
+    "example.com/walletsvc/api#(*Server).Withdraw": {
+      "ref": {
+        "pkg": "example.com/walletsvc/api",
+        "symbol": "(*Server).Withdraw",
+        "file": "api/server.go",
+        "line": 20
+      },
+      "position": "entry",
+      "calls": [
+        "example.com/walletsvc/service#(*Service).Withdraw"
+      ],
+      "facts": {
+        "handles_money": true,
+        "money_types": [
+          "amount example.com/walletsvc/domain.Amount",
+          "example.com/walletsvc/domain.Amount"
+        ],
+        "reaches": [
+          "db"
+        ]
+      }
+    },
+    "example.com/walletsvc/domain#Balance.ToUint64": {
+      "ref": {
+        "pkg": "example.com/walletsvc/domain",
+        "symbol": "Balance.ToUint64",
+        "file": "domain/wallet.go",
+        "line": 9
+      },
+      "position": "leaf",
+      "facts": {}
+    },
+    "example.com/walletsvc/domain#Wallet.Active": {
+      "ref": {
+        "pkg": "example.com/walletsvc/domain",
+        "symbol": "Wallet.Active",
+        "file": "domain/wallet.go",
+        "line": 31
+      },
+      "position": "leaf",
+      "facts": {}
+    },
+    "example.com/walletsvc/repo#(*Store).Atomic": {
+      "ref": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).Atomic",
+        "file": "repo/wallet.go",
+        "line": 58
+      },
+      "position": "internal",
+      "calls": [
+        "example.com/walletsvc/service#(*Service).Withdraw"
+      ],
+      "facts": {
+        "touches_db": true,
+        "opens_tx": true,
+        "commits_tx": true,
+        "reaches": [
+          "db"
+        ]
+      }
+    },
+    "example.com/walletsvc/repo#(*Store).GetWallet": {
+      "ref": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).GetWallet",
+        "file": "repo/wallet.go",
+        "line": 25
+      },
+      "position": "leaf",
+      "facts": {
+        "touches_db": true,
+        "handles_money": true,
+        "money_types": [
+          "example.com/walletsvc/domain.Wallet (carries Balance)"
+        ],
+        "reaches": [
+          "db"
+        ]
+      }
+    },
+    "example.com/walletsvc/repo#(*Store).InsertTransaction": {
+      "ref": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).InsertTransaction",
+        "file": "repo/wallet.go",
+        "line": 44
+      },
+      "position": "leaf",
+      "facts": {
+        "touches_db": true,
+        "handles_money": true,
+        "money_types": [
+          "example.com/walletsvc/domain.Transaction (carries TransferID)"
+        ],
+        "reaches": [
+          "db"
+        ]
+      }
+    },
+    "example.com/walletsvc/repo#(*Store).MaxBalance": {
+      "ref": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).MaxBalance",
+        "file": "repo/wallet.go",
+        "line": 51
+      },
+      "position": "leaf",
+      "facts": {
+        "touches_db": true,
+        "reaches": [
+          "db"
+        ]
+      }
+    },
+    "example.com/walletsvc/repo#(*Store).UpdateBalance": {
+      "ref": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).UpdateBalance",
+        "file": "repo/wallet.go",
+        "line": 34
+      },
+      "position": "leaf",
+      "facts": {
+        "touches_db": true,
+        "handles_money": true,
+        "money_types": [
+          "balance example.com/walletsvc/domain.Balance",
+          "example.com/walletsvc/domain.Balance"
+        ],
+        "reaches": [
+          "db"
+        ]
+      }
+    },
+    "example.com/walletsvc/service#(*Service).CoreTransfer": {
+      "ref": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).CoreTransfer",
+        "file": "service/transfer.go",
+        "line": 17
+      },
+      "position": "internal",
+      "calls": [
+        "example.com/walletsvc/repo#(*Store).GetWallet",
+        "example.com/walletsvc/repo#(*Store).UpdateBalance"
+      ],
+      "facts": {
+        "touches_db": true,
+        "handles_money": true,
+        "money_types": [
+          "example.com/walletsvc/domain.TransferInput (carries Amount)"
+        ],
+        "reaches": [
+          "db"
+        ]
+      }
+    },
+    "example.com/walletsvc/service#(*Service).Deposit": {
+      "ref": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).Deposit",
+        "file": "service/transfer.go",
+        "line": 44
+      },
+      "position": "internal",
+      "calls": [
+        "example.com/walletsvc/repo#(*Store).GetWallet",
+        "example.com/walletsvc/repo#(*Store).MaxBalance",
+        "example.com/walletsvc/domain#Balance.ToUint64",
+        "example.com/walletsvc/repo#(*Store).UpdateBalance",
+        "example.com/walletsvc/repo#(*Store).InsertTransaction"
+      ],
+      "facts": {
+        "touches_db": true,
+        "handles_money": true,
+        "money_types": [
+          "amount example.com/walletsvc/domain.Amount",
+          "example.com/walletsvc/domain.Amount"
+        ],
+        "reaches": [
+          "db"
+        ]
+      }
+    },
+    "example.com/walletsvc/service#(*Service).Withdraw": {
+      "ref": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).Withdraw",
+        "file": "service/transfer.go",
+        "line": 66
+      },
+      "position": "internal",
+      "calls": [
+        "example.com/walletsvc/repo#(*Store).GetWallet",
+        "example.com/walletsvc/domain#Wallet.Active",
+        "example.com/walletsvc/repo#(*Store).Atomic",
+        "example.com/walletsvc/repo#(*Store).UpdateBalance"
+      ],
+      "facts": {
+        "touches_db": true,
+        "handles_money": true,
+        "money_types": [
+          "amount example.com/walletsvc/domain.Amount",
+          "example.com/walletsvc/domain.Amount"
+        ],
+        "reaches": [
+          "db"
+        ]
+      }
+    }
+  },
+  "seams": [
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).Atomic",
+        "file": "repo/wallet.go",
+        "line": 58
+      },
+      "kind": "db",
+      "target": "(*database/sql.DB).BeginTx",
+      "line": 59,
+      "injectable": false
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).Atomic",
+        "file": "repo/wallet.go",
+        "line": 58
+      },
+      "kind": "db",
+      "target": "(*database/sql.Tx).Commit",
+      "line": 66,
+      "injectable": false
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).GetWallet",
+        "file": "repo/wallet.go",
+        "line": 25
+      },
+      "kind": "db",
+      "target": "(*database/sql.DB).QueryRowContext",
+      "line": 26,
+      "injectable": false
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).InsertTransaction",
+        "file": "repo/wallet.go",
+        "line": 44
+      },
+      "kind": "db",
+      "target": "(*database/sql.DB).ExecContext",
+      "line": 45,
+      "injectable": false
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).MaxBalance",
+        "file": "repo/wallet.go",
+        "line": 51
+      },
+      "kind": "db",
+      "target": "(*database/sql.DB).QueryRowContext",
+      "line": 52,
+      "injectable": false
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).UpdateBalance",
+        "file": "repo/wallet.go",
+        "line": 34
+      },
+      "kind": "db",
+      "target": "(*database/sql.DB).ExecContext",
+      "line": 35,
+      "injectable": false
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).CoreTransfer",
+        "file": "service/transfer.go",
+        "line": 17
+      },
+      "kind": "db",
+      "target": "(example.com/walletsvc/repo.WalletRepository).GetWallet",
+      "line": 20,
+      "injectable": true,
+      "iface": "example.com/walletsvc/repo.WalletRepository"
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).CoreTransfer",
+        "file": "service/transfer.go",
+        "line": 17
+      },
+      "kind": "db",
+      "target": "(example.com/walletsvc/repo.WalletRepository).GetWallet",
+      "line": 24,
+      "injectable": true,
+      "iface": "example.com/walletsvc/repo.WalletRepository"
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).CoreTransfer",
+        "file": "service/transfer.go",
+        "line": 17
+      },
+      "kind": "db",
+      "target": "(example.com/walletsvc/repo.WalletRepository).UpdateBalance",
+      "line": 33,
+      "injectable": true,
+      "iface": "example.com/walletsvc/repo.WalletRepository"
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).CoreTransfer",
+        "file": "service/transfer.go",
+        "line": 17
+      },
+      "kind": "db",
+      "target": "(example.com/walletsvc/repo.Notifier).Settle",
+      "line": 37,
+      "injectable": true,
+      "iface": "example.com/walletsvc/repo.Notifier"
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).CoreTransfer",
+        "file": "service/transfer.go",
+        "line": 17
+      },
+      "kind": "db",
+      "target": "(example.com/walletsvc/repo.WalletRepository).UpdateBalance",
+      "line": 41,
+      "injectable": true,
+      "iface": "example.com/walletsvc/repo.WalletRepository"
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).Deposit",
+        "file": "service/transfer.go",
+        "line": 44
+      },
+      "kind": "db",
+      "target": "(example.com/walletsvc/repo.WalletRepository).GetWallet",
+      "line": 45,
+      "injectable": true,
+      "iface": "example.com/walletsvc/repo.WalletRepository"
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).Deposit",
+        "file": "service/transfer.go",
+        "line": 44
+      },
+      "kind": "db",
+      "target": "(example.com/walletsvc/repo.WalletRepository).MaxBalance",
+      "line": 50,
+      "injectable": true,
+      "iface": "example.com/walletsvc/repo.WalletRepository"
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).Deposit",
+        "file": "service/transfer.go",
+        "line": 44
+      },
+      "kind": "db",
+      "target": "(example.com/walletsvc/repo.WalletRepository).UpdateBalance",
+      "line": 58,
+      "injectable": true,
+      "iface": "example.com/walletsvc/repo.WalletRepository"
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).Deposit",
+        "file": "service/transfer.go",
+        "line": 44
+      },
+      "kind": "db",
+      "target": "(example.com/walletsvc/repo.WalletRepository).InsertTransaction",
+      "line": 61,
+      "injectable": true,
+      "iface": "example.com/walletsvc/repo.WalletRepository"
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).Withdraw",
+        "file": "service/transfer.go",
+        "line": 66
+      },
+      "kind": "db",
+      "target": "(example.com/walletsvc/repo.WalletRepository).GetWallet",
+      "line": 67,
+      "injectable": true,
+      "iface": "example.com/walletsvc/repo.WalletRepository"
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).Withdraw",
+        "file": "service/transfer.go",
+        "line": 66
+      },
+      "kind": "db",
+      "target": "(example.com/walletsvc/repo.WalletRepository).Atomic",
+      "line": 74,
+      "injectable": true,
+      "iface": "example.com/walletsvc/repo.WalletRepository"
+    },
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).Withdraw",
+        "file": "service/transfer.go",
+        "line": 66
+      },
+      "kind": "db",
+      "target": "(example.com/walletsvc/repo.WalletRepository).UpdateBalance",
+      "line": 75,
+      "injectable": true,
+      "iface": "example.com/walletsvc/repo.WalletRepository"
+    }
+  ],
+  "states": [
+    {
+      "type": "example.com/walletsvc/domain.Status",
+      "field": "Status",
+      "fields": [
+        "Status"
+      ],
+      "states": [
+        "StatusDeleted",
+        "StatusDisable",
+        "StatusEnable",
+        "StatusInitial",
+        "StatusPending"
+      ],
+      "writes": [
+        {
+          "in": {
+            "pkg": "example.com/walletsvc/service",
+            "symbol": "(*Service).DeleteWallet",
+            "file": "service/transfer.go",
+            "line": 88
+          },
+          "to": "StatusDeleted",
+          "line": 93,
+          "via": "assign"
+        },
+        {
+          "in": {
+            "pkg": "example.com/walletsvc/service",
+            "symbol": "(*Service).EnableWallet",
+            "file": "service/transfer.go",
+            "line": 79
+          },
+          "to": "StatusEnable",
+          "line": 84,
+          "via": "assign"
+        }
+      ],
+      "decl": {
+        "file": "domain/wallet.go",
+        "line": 11,
+        "col": 6
+      },
+      "never_assigned": [
+        "StatusDisable",
+        "StatusInitial",
+        "StatusPending"
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "id": "MONEY-FLOAT",
+      "severity": "critical",
+      "basis": "heuristic",
+      "title": "money converted to a float mid-expression",
+      "detail": "An exact integer amount is widened to a float here and will be narrowed back. Binary floating point cannot hold every decimal value, and beyond 2^53 it cannot hold every integer either, so the round trip can return a different number than it was given. Do the arithmetic on the integer type, and negate or compare without leaving it.",
+      "ref": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).CoreTransfer",
+        "file": "service/transfer.go",
+        "line": 17
+      },
+      "line": 18
+    },
+    {
+      "id": "MONEY-DIV",
+      "severity": "high",
+      "basis": "heuristic",
+      "title": "money divided with no stated rounding rule",
+      "detail": "Integer division truncates toward zero. Splitting a charge, prorating or computing a percentage fee this way silently loses the remainder, and the lost minor units show up as a ledger that will not balance. Decide the rounding direction explicitly and give the remainder an owner.",
+      "ref": {
+        "pkg": "example.com/walletsvc/service",
+        "symbol": "(*Service).Fee",
+        "file": "service/transfer.go",
+        "line": 97
+      },
+      "line": 97
+    },
+    {
+      "id": "SEAM-CONCRETE",
+      "severity": "high",
+      "basis": "proved",
+      "title": "I/O called on a concrete type, so faults cannot be injected",
+      "detail": "1 call(s) to db go straight to a concrete type. A test cannot make them time out, fail, or return a duplicate, which is where payment bugs live.",
+      "ref": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).GetWallet",
+        "file": "repo/wallet.go",
+        "line": 25
+      },
+      "line": 26
+    },
+    {
+      "id": "SEAM-CONCRETE",
+      "severity": "high",
+      "basis": "proved",
+      "title": "I/O called on a concrete type, so faults cannot be injected",
+      "detail": "1 call(s) to db go straight to a concrete type. A test cannot make them time out, fail, or return a duplicate, which is where payment bugs live.",
+      "ref": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).UpdateBalance",
+        "file": "repo/wallet.go",
+        "line": 34
+      },
+      "line": 35
+    },
+    {
+      "id": "SEAM-CONCRETE",
+      "severity": "high",
+      "basis": "proved",
+      "title": "I/O called on a concrete type, so faults cannot be injected",
+      "detail": "1 call(s) to db go straight to a concrete type. A test cannot make them time out, fail, or return a duplicate, which is where payment bugs live.",
+      "ref": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).InsertTransaction",
+        "file": "repo/wallet.go",
+        "line": 44
+      },
+      "line": 45
+    },
+    {
+      "id": "SEAM-CONCRETE",
+      "severity": "high",
+      "basis": "proved",
+      "title": "I/O called on a concrete type, so faults cannot be injected",
+      "detail": "1 call(s) to db go straight to a concrete type. A test cannot make them time out, fail, or return a duplicate, which is where payment bugs live.",
+      "ref": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).MaxBalance",
+        "file": "repo/wallet.go",
+        "line": 51
+      },
+      "line": 52
+    },
+    {
+      "id": "SEAM-CONCRETE",
+      "severity": "high",
+      "basis": "proved",
+      "title": "I/O called on a concrete type, so faults cannot be injected",
+      "detail": "2 call(s) to db go straight to a concrete type. A test cannot make them time out, fail, or return a duplicate, which is where payment bugs live.",
+      "ref": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).Atomic",
+        "file": "repo/wallet.go",
+        "line": 58
+      },
+      "line": 59,
+      "related": [
+        {
+          "file": "repo/wallet.go",
+          "line": 66
+        }
+      ]
+    },
+    {
+      "id": "TX-NO-ROLLBACK",
+      "severity": "high",
+      "basis": "proved",
+      "title": "a return leaves the transaction open",
+      "detail": "1 return path(s) after the begin at repo/wallet.go:59 reach neither a commit nor a rollback, and no rollback is deferred. The connection and its locks stay held until the pool reclaims them. Pair the begin with `defer tx.Rollback()`, which is a no-op after a successful commit.",
+      "ref": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).Atomic",
+        "file": "repo/wallet.go",
+        "line": 58
+      },
+      "line": 64,
+      "related": [
+        {
+          "file": "repo/wallet.go",
+          "line": 59,
+          "col": 25
+        }
+      ]
+    },
+    {
+      "id": "TX-UNUSED",
+      "severity": "high",
+      "basis": "proved",
+      "title": "transaction opened but no statement runs on it",
+      "detail": "Nothing between the begin and the commit is executed on the transaction or handed to a function that could use it, so every write in between goes through the pool directly and is not atomic. The transaction protects nothing.",
+      "ref": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).Atomic",
+        "file": "repo/wallet.go",
+        "line": 58
+      },
+      "line": 59
+    },
+    {
+      "id": "MONEY-NO-CURRENCY",
+      "severity": "medium",
+      "basis": "heuristic",
+      "title": "Transaction.Fee is a bare integer with no currency alongside it",
+      "detail": "An amount without a currency is a number. Nothing stops a caller adding EUR minor units to USD minor units, and the type system will not object. Pair the amount with a currency in one type so the compiler can refuse the mistake.",
+      "ref": {
+        "pkg": "example.com/walletsvc/domain",
+        "symbol": "type Transaction",
+        "file": "domain/wallet.go",
+        "line": 52
+      },
+      "line": 52
+    },
+    {
+      "id": "MONEY-NO-CURRENCY",
+      "severity": "medium",
+      "basis": "heuristic",
+      "title": "TransferInput.Fee is a bare integer with no currency alongside it",
+      "detail": "An amount without a currency is a number. Nothing stops a caller adding EUR minor units to USD minor units, and the type system will not object. Pair the amount with a currency in one type so the compiler can refuse the mistake.",
+      "ref": {
+        "pkg": "example.com/walletsvc/domain",
+        "symbol": "type TransferInput",
+        "file": "domain/wallet.go",
+        "line": 61
+      },
+      "line": 61
+    },
+    {
+      "id": "STATE-NEVER-SET",
+      "severity": "medium",
+      "basis": "proved",
+      "title": "example.com/walletsvc/domain.Status.StatusInitial is declared but nothing in this module produces it",
+      "detail": "No assignment, struct literal, return statement or typed call argument in the scanned packages produces this state. Either it is dead, or something outside this code — a migration, a manual fix, another service — puts rows into it. If the second, every read path has to handle a state no write path here produces, and no test covers that.",
+      "ref": {
+        "pkg": "example.com/walletsvc/domain",
+        "symbol": "const StatusInitial",
+        "file": "domain/wallet.go",
+        "line": 14
+      },
+      "line": 14
+    },
+    {
+      "id": "STATE-NEVER-SET",
+      "severity": "medium",
+      "basis": "proved",
+      "title": "example.com/walletsvc/domain.Status.StatusDisable is declared but nothing in this module produces it",
+      "detail": "No assignment, struct literal, return statement or typed call argument in the scanned packages produces this state. Either it is dead, or something outside this code — a migration, a manual fix, another service — puts rows into it. If the second, every read path has to handle a state no write path here produces, and no test covers that.",
+      "ref": {
+        "pkg": "example.com/walletsvc/domain",
+        "symbol": "const StatusDisable",
+        "file": "domain/wallet.go",
+        "line": 16
+      },
+      "line": 16
+    },
+    {
+      "id": "STATE-NEVER-SET",
+      "severity": "medium",
+      "basis": "proved",
+      "title": "example.com/walletsvc/domain.Status.StatusPending is declared but nothing in this module produces it",
+      "detail": "No assignment, struct literal, return statement or typed call argument in the scanned packages produces this state. Either it is dead, or something outside this code — a migration, a manual fix, another service — puts rows into it. If the second, every read path has to handle a state no write path here produces, and no test covers that.",
+      "ref": {
+        "pkg": "example.com/walletsvc/domain",
+        "symbol": "const StatusPending",
+        "file": "domain/wallet.go",
+        "line": 17
+      },
+      "line": 17
+    }
+  ],
+  "infra": {
+    "constraints": [
+      {
+        "table": "wallets",
+        "columns": [
+          "id"
+        ],
+        "kind": "primary_key",
+        "name": "wallets_pkey",
+        "file": "migrations/0001_wallets.sql",
+        "line": 1
+      },
+      {
+        "table": "transactions",
+        "columns": [
+          "id"
+        ],
+        "kind": "primary_key",
+        "name": "transactions_pkey",
+        "file": "migrations/0001_wallets.sql",
+        "line": 11
+      },
+      {
+        "table": "settings",
+        "columns": [
+          "wallet_type"
+        ],
+        "kind": "primary_key",
+        "name": "settings_pkey",
+        "file": "migrations/0001_wallets.sql",
+        "line": 21
+      }
+    ],
+    "tables": [
+      {
+        "name": "wallets",
+        "columns": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "not_null": true,
+            "primary_key": true
+          },
+          {
+            "name": "user_id",
+            "type": "uuid",
+            "not_null": true
+          },
+          {
+            "name": "account",
+            "type": "varchar(64)",
+            "not_null": true
+          },
+          {
+            "name": "wallet_type",
+            "type": "varchar(32)",
+            "not_null": true
+          },
+          {
+            "name": "balance",
+            "type": "bigint",
+            "not_null": true,
+            "default": "0"
+          },
+          {
+            "name": "status",
+            "type": "varchar(16)",
+            "not_null": true
+          },
+          {
+            "name": "created_at",
+            "type": "timestamptz",
+            "not_null": true,
+            "default": "now()"
+          }
+        ],
+        "file": "migrations/0001_wallets.sql",
+        "line": 1
+      },
+      {
+        "name": "transactions",
+        "columns": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "not_null": true,
+            "primary_key": true
+          },
+          {
+            "name": "wallet_id",
+            "type": "uuid",
+            "not_null": true
+          },
+          {
+            "name": "transfer_id",
+            "type": "uuid",
+            "not_null": true
+          },
+          {
+            "name": "tracking_number",
+            "type": "varchar(64)",
+            "not_null": true
+          },
+          {
+            "name": "amount",
+            "type": "bigint",
+            "not_null": true
+          },
+          {
+            "name": "type",
+            "type": "varchar(16)",
+            "not_null": true
+          },
+          {
+            "name": "created_at",
+            "type": "timestamptz",
+            "not_null": true,
+            "default": "now()"
+          }
+        ],
+        "file": "migrations/0001_wallets.sql",
+        "line": 11
+      },
+      {
+        "name": "settings",
+        "columns": [
+          {
+            "name": "wallet_type",
+            "type": "varchar(32)",
+            "not_null": true,
+            "primary_key": true
+          },
+          {
+            "name": "max_balance",
+            "type": "bigint",
+            "not_null": true
+          }
+        ],
+        "file": "migrations/0001_wallets.sql",
+        "line": 21
+      }
+    ],
+    "migration_dirs": [
+      "migrations"
+    ],
+    "migration_files": 1,
+    "schema_sources": [
+      "sql files"
+    ]
+  },
+  "table_writes": [
+    {
+      "table": "transactions",
+      "pattern": "insert_only",
+      "inserts": 1,
+      "where": [
+        {
+          "pkg": "example.com/walletsvc/repo",
+          "symbol": "(*Store).InsertTransaction",
+          "file": "repo/wallet.go",
+          "line": 44
+        }
+      ]
+    },
+    {
+      "table": "wallets",
+      "pattern": "update_in_place",
+      "updates": 2,
+      "read_modify_write": true,
+      "where": [
+        {
+          "pkg": "example.com/walletsvc/repo",
+          "symbol": "(*Store).UpdateBalance",
+          "file": "repo/wallet.go",
+          "line": 34
+        },
+        {
+          "pkg": "example.com/walletsvc/repo",
+          "symbol": "(*Store).UpdateStatus",
+          "file": "repo/wallet.go",
+          "line": 39
+        }
+      ]
+    }
+  ],
+  "transactions": [
+    {
+      "in": {
+        "pkg": "example.com/walletsvc/repo",
+        "symbol": "(*Store).Atomic",
+        "file": "repo/wallet.go",
+        "line": 58
+      },
+      "begin": {
+        "file": "repo/wallet.go",
+        "line": 59,
+        "col": 25
+      },
+      "via": "(*database/sql.DB).BeginTx",
+      "commits": [
+        {
+          "file": "repo/wallet.go",
+          "line": 66,
+          "col": 18
+        }
+      ],
+      "leaks": [
+        {
+          "file": "repo/wallet.go",
+          "line": 64,
+          "col": 3
+        }
+      ],
+      "used": false
+    }
+  ],
+  "idempotency_keys": [
+    {
+      "name": "TransferID",
+      "owner": "Transaction",
+      "type": "string",
+      "file": "domain/wallet.go",
+      "line": 44,
+      "score": -1,
+      "proof": [
+        "the name is in the idempotency-key vocabulary"
+      ],
+      "declarative": true,
+      "against": [
+        "Transaction carries no lifecycle state, so it is a message or a config rather than the entity the flow moves",
+        "no constraint makes column \"transfer_id\" unique, so nothing stops two concurrent inserts"
+      ],
+      "table": "transactions",
+      "column": "transfer_id"
+    },
+    {
+      "name": "PaymentID",
+      "owner": "Transaction",
+      "type": "string",
+      "file": "domain/wallet.go",
+      "line": 45,
+      "score": -1,
+      "proof": [
+        "the name is in the idempotency-key vocabulary"
+      ],
+      "declarative": true,
+      "against": [
+        "Transaction carries no lifecycle state, so it is a message or a config rather than the entity the flow moves",
+        "no constraint makes column \"payment_id\" unique, so nothing stops two concurrent inserts"
+      ],
+      "table": "transactions",
+      "column": "payment_id"
+    },
+    {
+      "name": "OrderID",
+      "owner": "Transaction",
+      "type": "string",
+      "file": "domain/wallet.go",
+      "line": 46,
+      "score": -1,
+      "proof": [
+        "the name is in the idempotency-key vocabulary"
+      ],
+      "declarative": true,
+      "against": [
+        "Transaction carries no lifecycle state, so it is a message or a config rather than the entity the flow moves",
+        "no constraint makes column \"order_id\" unique, so nothing stops two concurrent inserts"
+      ],
+      "table": "transactions",
+      "column": "order_id"
+    },
+    {
+      "name": "Rrn",
+      "owner": "Transaction",
+      "type": "string",
+      "file": "domain/wallet.go",
+      "line": 47,
+      "score": -1,
+      "proof": [
+        "the name is in the idempotency-key vocabulary"
+      ],
+      "declarative": true,
+      "against": [
+        "Transaction carries no lifecycle state, so it is a message or a config rather than the entity the flow moves",
+        "no constraint makes column \"rrn\" unique, so nothing stops two concurrent inserts"
+      ],
+      "table": "transactions",
+      "column": "rrn"
+    },
+    {
+      "name": "TrackingNumber",
+      "owner": "Transaction",
+      "type": "string",
+      "file": "domain/wallet.go",
+      "line": 48,
+      "score": -1,
+      "proof": [
+        "the name is in the idempotency-key vocabulary"
+      ],
+      "declarative": true,
+      "against": [
+        "Transaction carries no lifecycle state, so it is a message or a config rather than the entity the flow moves",
+        "no constraint makes column \"tracking_number\" unique, so nothing stops two concurrent inserts"
+      ],
+      "table": "transactions",
+      "column": "tracking_number"
+    }
+  ],
+  "money_types": [
+    {
+      "name": "Amount",
+      "owner": "example.com/walletsvc/domain",
+      "type": "int64",
+      "file": "domain/wallet.go",
+      "line": 5,
+      "score": 5,
+      "proof": [
+        "a named type whose name means money",
+        "declared as int64"
+      ]
+    },
+    {
+      "name": "Balance",
+      "owner": "example.com/walletsvc/domain",
+      "type": "int64",
+      "file": "domain/wallet.go",
+      "line": 7,
+      "score": 5,
+      "proof": [
+        "a named type whose name means money",
+        "declared as int64"
+      ]
+    },
+    {
+      "name": "Balance",
+      "owner": "Wallet",
+      "type": "Balance",
+      "file": "domain/wallet.go",
+      "line": 26,
+      "score": 5,
+      "proof": [
+        "the field name means an amount",
+        "a named integer type, so minor units with somewhere to hang the rules"
+      ],
+      "against": [
+        "no currency field in the same struct — an amount alone is a number, not money"
+      ]
+    },
+    {
+      "name": "Balance",
+      "owner": "Transaction",
+      "type": "Balance",
+      "file": "domain/wallet.go",
+      "line": 50,
+      "score": 5,
+      "proof": [
+        "the field name means an amount",
+        "a named integer type, so minor units with somewhere to hang the rules"
+      ],
+      "against": [
+        "no currency field in the same struct — an amount alone is a number, not money"
+      ]
+    },
+    {
+      "name": "Amount",
+      "owner": "Transaction",
+      "type": "Amount",
+      "file": "domain/wallet.go",
+      "line": 51,
+      "score": 5,
+      "proof": [
+        "the field name means an amount",
+        "a named integer type, so minor units with somewhere to hang the rules"
+      ],
+      "against": [
+        "no currency field in the same struct — an amount alone is a number, not money"
+      ]
+    },
+    {
+      "name": "Amount",
+      "owner": "TransferInput",
+      "type": "Amount",
+      "file": "domain/wallet.go",
+      "line": 60,
+      "score": 5,
+      "proof": [
+        "the field name means an amount",
+        "a named integer type, so minor units with somewhere to hang the rules"
+      ],
+      "against": [
+        "no currency field in the same struct — an amount alone is a number, not money"
+      ]
+    },
+    {
+      "name": "Fee",
+      "owner": "Transaction",
+      "type": "uint64",
+      "file": "domain/wallet.go",
+      "line": 52,
+      "score": 4,
+      "proof": [
+        "the field name means an amount",
+        "a plain integer, so minor units"
+      ],
+      "against": [
+        "no currency field in the same struct — an amount alone is a number, not money"
+      ]
+    },
+    {
+      "name": "Fee",
+      "owner": "TransferInput",
+      "type": "uint64",
+      "file": "domain/wallet.go",
+      "line": 61,
+      "score": 4,
+      "proof": [
+        "the field name means an amount",
+        "a plain integer, so minor units"
+      ],
+      "against": [
+        "no currency field in the same struct — an amount alone is a number, not money"
+      ]
+    },
+    {
+      "name": "TransferID",
+      "owner": "Transaction",
+      "type": "string",
+      "file": "domain/wallet.go",
+      "line": 44,
+      "score": 2,
+      "proof": [
+        "the field name means an amount"
+      ],
+      "against": [
+        "no currency field in the same struct — an amount alone is a number, not money"
+      ]
+    }
+  ],
+  "entities": {
+    "Wallet": "example.com/walletsvc/domain.Status"
+  }
+}

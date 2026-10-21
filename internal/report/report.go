@@ -1,6 +1,7 @@
 package report
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,12 +13,14 @@ import (
 )
 
 type Ledger struct {
-	AskBytes     int
-	PreambleByes int
-	Prompts      int
-	AnswerBytes  int
-	Answers      int
-	Missing      int
+	Round           int
+	AskBytes        int
+	PreambleByes    int
+	Prompts         int
+	AnsweredPrompts int
+	AnswerBytes     int
+	Answers         int
+	Missing         int
 }
 
 func Report(f *fact.Flow, k *domain.AgentResponse, l Ledger, asksDir string) string {
@@ -87,11 +90,11 @@ func Report(f *fact.Flow, k *domain.AgentResponse, l Ledger, asksDir string) str
 	switch {
 	case l.Prompts == 0:
 		b.WriteString("  nothing asked yet. run 'testigo ask' to write the prompt pack.\n")
-	case l.Answers == 0:
-		fmt.Fprintf(&b, "  round 1   %d question(s) written, none answered yet\n", l.Prompts)
+	case l.AnsweredPrompts == 0:
+		fmt.Fprintf(&b, "  round %d   %d question(s) written, none answered yet\n", l.Round, l.Prompts)
 		fmt.Fprintf(&b, "            point an agent at %s\n", filepath.Join(asksDir, "INSTRUCTIONS.md"))
 	default:
-		fmt.Fprintf(&b, "  round 1   %d of %d answered", l.Answers, l.Prompts)
+		fmt.Fprintf(&b, "  round %d   %d of %d answered", l.Round, l.AnsweredPrompts, l.Prompts)
 		if l.Missing > 0 {
 			fmt.Fprintf(&b, ", %d still missing", l.Missing)
 		}
@@ -116,6 +119,10 @@ func Report(f *fact.Flow, k *domain.AgentResponse, l Ledger, asksDir string) str
 		if n := len(k.ExternalEffects); n > 0 {
 			fmt.Fprintf(&b, "  effects   %d external call(s) described\n", n)
 		}
+	}
+
+	if k != nil && len(k.TestRuns) > 0 {
+		b.WriteString(testRuns(k.TestRuns))
 	}
 
 	b.WriteString("\nTOKENS\n")
@@ -145,6 +152,40 @@ func Report(f *fact.Flow, k *domain.AgentResponse, l Ledger, asksDir string) str
     Claude Console    console.anthropic.com/usage
 `)
 
+	return b.String()
+}
+
+func testRuns(runs []domain.TestRun) string {
+	var b strings.Builder
+	count := map[string]int{}
+	for _, r := range runs {
+		switch {
+		case r.Status == "written" && r.Green():
+			count["passed"]++
+		case r.Status == "written":
+			count["failed"]++
+		default:
+			count[r.Status]++
+		}
+	}
+	written := count["passed"] + count["failed"]
+	b.WriteString("\nTESTS — round 2, written by the agent, run with -race\n")
+	fmt.Fprintf(&b, "  %d written: %d passed, %d failed\n", written, count["passed"], count["failed"])
+	for _, status := range []string{"blocked", "no_build", "vet_fail", "refused"} {
+		if count[status] > 0 {
+			fmt.Fprintf(&b, "  %d %s\n", count[status], strings.ReplaceAll(status, "_", " "))
+		}
+	}
+	for _, r := range runs {
+		if r.Status != "written" || r.Green() {
+			continue
+		}
+		note := ""
+		if r.ExpectedToFail != "" {
+			note = "  (expected)"
+		}
+		fmt.Fprintf(&b, "  failed    %-34s %s%s\n", r.CaseID, r.File, note)
+	}
 	return b.String()
 }
 
@@ -190,10 +231,14 @@ func Measure(asksDir, answersDir string) Ledger {
 			switch e.Name() {
 			case "PREAMBLE.md":
 				l.PreambleByes = int(info.Size())
-			case "INSTRUCTIONS.md":
+			case "INSTRUCTIONS.md", "report.md":
 
 			default:
 				l.Prompts++
+				answer := strings.TrimSuffix(e.Name(), ".md") + ".json"
+				if _, err := os.Stat(filepath.Join(answersDir, answer)); err == nil {
+					l.AnsweredPrompts++
+				}
 			}
 		}
 	}
@@ -208,8 +253,21 @@ func Measure(asksDir, answersDir string) Ledger {
 			}
 		}
 	}
-	if l.Prompts > l.Answers {
-		l.Missing = l.Prompts - l.Answers
-	}
+	l.Missing = l.Prompts - l.AnsweredPrompts
+	l.Round = packRound(asksDir)
 	return l
+}
+
+func packRound(asksDir string) int {
+	b, err := os.ReadFile(filepath.Join(asksDir, "manifest.json"))
+	if err != nil {
+		return 1
+	}
+	var m struct {
+		Round int `json:"round"`
+	}
+	if json.Unmarshal(b, &m) != nil || m.Round == 0 {
+		return 1
+	}
+	return m.Round
 }
