@@ -1,0 +1,8 @@
+{
+  "patterns": ["./..."],
+  "entries": [
+    { "pkg": "example.com/walletsvc/api", "symbol": "(*Server).Transfer", "label": "transfer" },
+    { "pkg": "example.com/walletsvc/api", "symbol": "(*Server).Deposit",  "label": "deposit" },
+    { "pkg": "example.com/walletsvc/api", "symbol": "(*Server).Withdraw", "label": "withdraw" }
+  ]
+}

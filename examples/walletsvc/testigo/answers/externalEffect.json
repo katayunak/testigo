@@ -1,0 +1,12 @@
+{
+  "externalEffect-database-sql-DB-BeginTx":        { "changes_external_state": false, "reversible_by_rollback": true,  "outcome_observable": true, "accepts_dedup_key": false, "moves_money": false },
+  "externalEffect-database-sql-DB-ExecContext":    { "changes_external_state": true,  "reversible_by_rollback": false, "outcome_observable": true, "accepts_dedup_key": false, "moves_money": true },
+  "externalEffect-database-sql-DB-QueryRowContext":{ "changes_external_state": false, "reversible_by_rollback": true,  "outcome_observable": true, "accepts_dedup_key": false, "moves_money": false },
+  "externalEffect-database-sql-Tx-Commit":         { "changes_external_state": false, "reversible_by_rollback": true,  "outcome_observable": true, "accepts_dedup_key": false, "moves_money": false },
+  "externalEffect-example-com-walletsvc-repo-Notifier-Settle": { "changes_external_state": true, "reversible_by_rollback": false, "outcome_observable": "unknown", "accepts_dedup_key": false, "moves_money": "unknown" },
+  "externalEffect-example-com-walletsvc-repo-WalletRepository-Atomic": { "changes_external_state": true, "reversible_by_rollback": false, "outcome_observable": true, "accepts_dedup_key": false, "moves_money": true },
+  "externalEffect-example-com-walletsvc-repo-WalletRepository-GetWallet": { "changes_external_state": false, "reversible_by_rollback": true, "outcome_observable": true, "accepts_dedup_key": false, "moves_money": false },
+  "externalEffect-example-com-walletsvc-repo-WalletRepository-InsertTransaction": { "changes_external_state": true, "reversible_by_rollback": false, "outcome_observable": true, "accepts_dedup_key": false, "moves_money": false },
+  "externalEffect-example-com-walletsvc-repo-WalletRepository-MaxBalance": { "changes_external_state": false, "reversible_by_rollback": true, "outcome_observable": true, "accepts_dedup_key": false, "moves_money": false },
+  "externalEffect-example-com-walletsvc-repo-WalletRepository-UpdateBalance": { "changes_external_state": true, "reversible_by_rollback": false, "outcome_observable": true, "accepts_dedup_key": false, "moves_money": true }
+}

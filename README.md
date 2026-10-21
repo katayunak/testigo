@@ -4,23 +4,29 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 
-Testigo starts with the entry points of your payment flow and figures out what kind of payment system you have — whether it's a credit system, wallet, PSP payment, or something else.
+**testigo finds the bugs that lose money in Go payment code, then has an AI agent write the tests that prove them.**
 
-Then it reads your code and figures out what is actually happening inside the flow: how money moves, where state changes, what external systems are involved, what can go wrong, and what needs to be tested.
+The Go compiler reads your code first, for free. The agent is asked only what
+the compiler cannot know, and every answer has to point at a file and line.
 
-But Testigo doesn't just throw all of that code and information at an agent and hope it figures things out.
+On the bundled wallet service, whose bugs were planted on purpose, one run wrote
+12 tests. All 12 fail, all 12 said in advance that they would, and each failure
+names the bug:
 
-It prepares the context for the agent.
+```
+--- FAIL: TestTransferIsAtomic/settle_fails_between_the_debit_and_the_credit
+    the two wallets held 1000 together before the transfer and 700 after it failed: 300 minor units were destroyed
+--- FAIL: TestSelfTransferRefused/part_of_the_balance
+    a transfer of 100 from w-1 to w-1 was accepted and changed the balance from 500 to 600: money was created from nothing
+--- FAIL: TestIdemReplay/a_repeated_deposit_with_the_same_tracking_number_credits_once
+    balance after two deliveries of tracking number trk-1 = 200, want 100: the repeat ran the deposit again instead of replaying it
+```
 
-Different payment flows have different scenarios, and every scenario has its own requirements. Testigo figures out what matters for each scenario and gives the agent the relevant information it needs, without wasting tokens on things that don't matter.
-
-So instead of asking the agent to explore your codebase from scratch, Testigo does the groundwork first. The agent can focus on reasoning about the actual payment scenarios and generating the right tests.
-
-The result is faster and more focused testing, fewer wasted tokens, and a detailed report showing what was tested and what happened.
-
+Every answer, every test and the final report from that run are in
+[examples/walletsvc](examples/walletsvc).
 
 ```sh
-go install ./cmd/testigo
+go install github.com/katayunak/testigo/cmd/testigo@latest
 ```
 
 Go 1.25+. No API key, no network, no vendor lock — the prompts are markdown you can
@@ -28,6 +34,22 @@ read before you spend anything.
 
 Phase 2 runs two ways: as markdown files any agent can read, or as an
 [MCP server](#phase-2-as-mcp-tools) (`testigo mcp`) that an agent calls directly.
+
+## How it works
+
+testigo starts with the entry points of your payment flow and figures out what kind of payment system you have — whether it's a credit system, wallet, PSP payment, or something else.
+
+Then it reads your code and figures out what is actually happening inside the flow: how money moves, where state changes, what external systems are involved, what can go wrong, and what needs to be tested.
+
+But testigo doesn't just throw all of that code and information at an agent and hope it figures things out.
+
+It prepares the context for the agent.
+
+Different payment flows have different scenarios, and every scenario has its own requirements. testigo figures out what matters for each scenario and gives the agent the relevant information it needs, without wasting tokens on things that don't matter.
+
+So instead of asking the agent to explore your codebase from scratch, testigo does the groundwork first. The agent can focus on reasoning about the actual payment scenarios and generating the right tests.
+
+The result is faster and more focused testing, fewer wasted tokens, and a detailed report showing what was tested and what happened.
 
 ---
 
@@ -146,6 +168,13 @@ testigo report --ask .   # a prompt; the agent writes testigo/REPORT.md
 Every claim must cite `file:line`, and every proposed fix must be safe for money:
 nothing that could charge twice, drop a payment or lose the audit trail. A database
 constraint beats a check in Go, and the cost of the fix has to be stated.
+
+### A complete run
+
+The steps above show the commands. For a run through every step with every output
+kept, on the second fixture, a wallet service, see [examples/walletsvc](examples/walletsvc):
+the round 1 answers, the 12 tests round 2 wrote (all red, each one a planted bug),
+the 15 cases it blocked and why, and the `REPORT.md` the agent wrote.
 
 ---
 
@@ -327,12 +356,13 @@ argument and the measurements.
 | `internal/config` | everything under `testigo/`: config, rules and `flow.json` | [README](internal/config/README.md) |
 | `internal/report` | the printed summary and the Mermaid diagrams | [README](internal/report/README.md) |
 
-9 packages, ~9.9k lines of Go and ~3.3k lines of tests.
+9 packages, ~10.0k lines of Go and ~3.5k lines of tests.
 
 Phase 1 itself — SSA, the call graph, seams, transactions, state machines, the
 schema, money and the findings — is not in this repository. It is
-[gofacts](https://github.com/katayunak/gofacts), a library testigo shares with the
-1819 reviewer. `cmd/testigo` calls it, and `flow.json` is its `fact.Flow` type.
+[gofacts](https://github.com/katayunak/gofacts), a library testigo shares with
+[1819](https://github.com/katayunak/1819), a code reviewer that checks diffs against
+the same facts. `cmd/testigo` calls it, and `flow.json` is its `fact.Flow` type.
 
 ---
 
@@ -372,6 +402,8 @@ stopped after five minutes.
 - The roll-up into per-area claims counts only true/false verdicts. The per-seam verdicts and the money model reach cases directly, but they are not part of it.
 - Seven true/false questions are not rolled up, because a `true` or `false` alone does not say which way the system leans. `NotRolledUp` in `internal/agent/domain/featureCatalog.go` gives the reason for each.
 - Recheck questions — where the agent re-confirms a fact phase 1 proved, with the proof attached — are built and tested, but nothing currently produces one.
+- A round 1 answer that says a scenario does not apply here does not remove it from round 2. The agent marks it blocked instead, which costs a little output.
+- A `medium` case needs a database driver in the scanned module's `go.mod`. testigo does not check for one before planning the case, so without a driver the agent can only block it.
 
 ---
 

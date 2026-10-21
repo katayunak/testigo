@@ -1,0 +1,6 @@
+{
+  "money": { "type": "domain.Wallet", "amount_field": "Balance", "representation": "minor_units_int", "proof": { "symbol": "Wallet.Balance", "at": "domain/wallet.go:26" } },
+  "idempotency": { "key_field": "TrackingNumber", "uniqueness": "none", "proof": { "symbol": "Transaction.TrackingNumber", "at": "domain/wallet.go:48" } },
+  "transfer_func": { "symbol": "example.com/walletsvc/service#(*Service).CoreTransfer", "at": "service/transfer.go:17" },
+  "balance_func": { "symbol": "example.com/walletsvc/repo#(*Store).GetWallet", "at": "repo/wallet.go:25" }
+}

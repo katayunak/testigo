@@ -1,0 +1,10 @@
+{
+  "roles": [
+    { "state": "StatusInitial", "initializing": true, "proof": "domain/wallet.go:14 — declared first; wallets are created outside this module" },
+    { "state": "StatusPending", "pending": true, "proof": "domain/wallet.go:17 — declared, nothing in this module assigns it" },
+    { "state": "StatusEnable", "in_progress": true, "proof": "service/transfer.go:84 — the only state Active() accepts, domain/wallet.go:31" },
+    { "state": "StatusDisable", "in_progress": true, "proof": "domain/wallet.go:16 — a blocked wallet can be enabled again by EnableWallet, service/transfer.go:79" },
+    { "state": "StatusDeleted", "final": true, "proof": "service/transfer.go:93 — set by DeleteWallet" }
+  ],
+  "exceptions": []
+}
