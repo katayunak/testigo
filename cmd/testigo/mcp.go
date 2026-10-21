@@ -365,10 +365,11 @@ func (s *testigoMCP) round2SubmitTest(_ context.Context, _ *mcp.CallToolRequest,
 	}
 
 	size := testPlan.SizeSmall
+	ownFile := ""
 	found := false
 	for _, c := range agent.Cases(flow, answers, rules) {
 		if c.Scenario.ID == in.CaseID {
-			size, found = c.Size, true
+			size, ownFile, found = c.Size, c.TargetFile, true
 			break
 		}
 	}
@@ -389,6 +390,9 @@ func (s *testigoMCP) round2SubmitTest(_ context.Context, _ *mcp.CallToolRequest,
 
 	if err := ans.Validate(size); err != nil {
 		return nil, Round2SubmitOut{}, err
+	}
+	if other := agent.FileClaimedByAnotherCase(answers.TestRuns, ans); other != "" {
+		return nil, Round2SubmitOut{}, fmt.Errorf("%s already wrote %s, and writing it again would delete that test; write this case to its own file, %s", other, ans.File.Path, ownFile)
 	}
 
 	run, err := agent.ApplyCase(s.root, ans)

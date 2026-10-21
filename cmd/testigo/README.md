@@ -51,3 +51,7 @@ Errors go to stderr prefixed `testigo:` and exit non-zero. Everything testigo wr
 goes under `testigo/`. Your source files are never modified — except by
 `collect` after round two, and the `testigo_round2_submit_test` MCP tool, which write
 generated `*_testigo_test.go` files and tell you exactly which.
+
+Each case gets its own file, named after its scenario
+(`api/idem_replay_testigo_test.go`). Both refuse a case that would write a file
+another case already wrote, because the second write would delete the first test.

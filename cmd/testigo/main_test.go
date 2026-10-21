@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/katayunak/testigo/internal/agent/domain"
 	"github.com/katayunak/testigo/internal/config"
 )
 
@@ -161,5 +162,39 @@ func TestFailedNamesReadsGoTestOutput(t *testing.T) {
 	got := failedNames(out)
 	if !got["TestA"] || !got["TestC/sub"] || got["TestB"] {
 		t.Fatalf("failedNames = %v, want TestA and TestC/sub only", got)
+	}
+}
+
+func TestCollectRefusesASecondCaseWritingTheSameFile(t *testing.T) {
+	root := copiedFixture(t, "paysvc")
+	shared := "domain/terminal_testigo_test.go"
+	first := &domain.CaseAnswer{CaseID: "FINAL-STATE-IS-FINAL", Status: "written", FuncName: "TestTerminal"}
+	first.File.Path = shared
+	first.File.Content = "package domain\n\nimport \"testing\"\n\nfunc TestTerminal(t *testing.T) {\n\tif !(&Payment{Status: StatusCaptured}).Terminal() {\n\t\tt.Fatal(\"captured is not terminal\")\n\t}\n}\n"
+	second := &domain.CaseAnswer{CaseID: "ILLEGAL-TRANSITION-REFUSED", Status: "written", FuncName: "TestOther"}
+	second.File.Path = shared
+	second.File.Content = "package domain\n\nimport \"testing\"\n\nfunc TestOther(t *testing.T) {}\n"
+
+	answers := &domain.AgentResponse{}
+	if err := applyGeneratedTests(root, config.Dir(root), answers, []*domain.CaseAnswer{first, second}); err != nil {
+		t.Fatal(err)
+	}
+
+	byCase := map[string]domain.TestRun{}
+	for _, r := range answers.TestRuns {
+		byCase[r.CaseID] = r
+	}
+	if got := byCase["ILLEGAL-TRANSITION-REFUSED"]; got.Status != "refused" || !strings.Contains(got.Reason, "FINAL-STATE-IS-FINAL") {
+		t.Fatalf("second case = %+v, want refused, naming the case that already wrote %s", got, shared)
+	}
+	if got := byCase["FINAL-STATE-IS-FINAL"]; !got.Green() {
+		t.Fatalf("first case = %+v, want its test kept and passing", got)
+	}
+	kept, err := os.ReadFile(filepath.Join(root, shared))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(kept), "TestTerminal") {
+		t.Fatalf("%s was overwritten:\n%s", shared, kept)
 	}
 }
