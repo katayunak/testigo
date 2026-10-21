@@ -22,7 +22,7 @@ Some scenarios are picked by **how a table is written** — see
 | ID | Family | Severity | Oracle | Needs |
 |---|---|---|---|---|
 | [`LEDGER-OUTSIDE-CALLER-TRANSACTION`](#ledger-outside-caller-transaction) | boundary | critical | invariant | an open transaction, a real database, a transfer function |
-| [`NETWORK-CALL-INSIDE-TRANSACTION`](#network-call-inside-transaction) | boundary | high | specification | an injectable http or queue boundary, an open transaction |
+| [`NETWORK-CALL-INSIDE-TRANSACTION`](#network-call-inside-transaction) | boundary | high | specification | an injectable http or queue boundary, an open transaction, no concrete network call inside a transaction |
 | [`ASYNC-RESPONSE-BEFORE-DURABILITY`](#async-response-before-durability) | boundary | critical | invariant | an injectable seam, a goroutine |
 | [`BALANCE-LIMIT-ENFORCED`](#balance-limit-enforced) | boundary | high | specification | money in the flow, a real database, a balance function |
 | [`CONSERVATION-UNDER-CONCURRENCY`](#conservation-under-concurrency) | consistency | critical | invariant | money in the flow, a real database, a balance function |
@@ -126,7 +126,7 @@ the version that keeps being true as the code changes.
 | severity | high |
 | oracle | `specification` |
 | techniques | `faultInjection`, `unit` |
-| needs | an injectable http or queue boundary, an open transaction |
+| needs | an injectable http or queue boundary, an open transaction, no concrete network call inside a transaction |
 
 ### ASYNC-RESPONSE-BEFORE-DURABILITY
 

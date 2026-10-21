@@ -2,6 +2,7 @@ package testPlan
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -132,7 +133,8 @@ func (s Scenario) Applies(f *fact.Flow, b Facts) (bool, string) {
 		}
 	}
 	if r.InjectableSeam && len(r.SeamKinds) > 0 && !anySeam(f, func(sm fact.Seam) bool { return sm.Injectable && hasKind(r.SeamKinds, sm.Kind) }) {
-		return false, "no " + kindList(r.SeamKinds) + " boundary in this flow is an interface, so no fault can be injected there — extract an interface first"
+		concrete := seamsWhere(f, func(sm fact.Seam) bool { return hasKind(r.SeamKinds, sm.Kind) })
+		return false, "no " + kindList(r.SeamKinds) + " boundary in this flow is an interface, so no fault can be injected there — extract an interface for " + seamSites(concrete)
 	}
 	if r.InjectableSeam && !anySeam(f, func(sm fact.Seam) bool { return sm.Injectable }) {
 
@@ -167,6 +169,34 @@ func anySeam(f *fact.Flow, pred func(fact.Seam) bool) bool {
 	return false
 }
 
+func seamsWhere(f *fact.Flow, pred func(fact.Seam) bool) []fact.Seam {
+	var out []fact.Seam
+	for _, s := range f.Seams {
+		if pred(s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+const maxSitesInAReason = 3
+
+func seamSites(seams []fact.Seam) string {
+	sites := make([]string, 0, len(seams))
+	for _, s := range seams {
+		sites = append(sites, s.Target+" at "+s.At().String())
+	}
+	return listSites(sites)
+}
+
+func listSites(sites []string) string {
+	sites = slices.Compact(slices.Sorted(slices.Values(sites)))
+	if extra := len(sites) - maxSitesInAReason; extra > 0 {
+		sites = append(sites[:maxSitesInAReason], fmt.Sprintf("and %d more", extra))
+	}
+	return strings.Join(sites, ", ")
+}
+
 func hasKind(kinds []fact.SeamKind, k fact.SeamKind) bool {
 	for _, want := range kinds {
 		if want == k {
@@ -191,6 +221,10 @@ func (s Scenario) keyRaceNeedsTheRealConstraint(b Facts) bool {
 
 func (r Requires) needsASeam() bool {
 	return r.InjectableSeam || len(r.SeamKinds) > 0
+}
+
+func (r Requires) watchesNetworkCallsInATransaction() bool {
+	return r.OpensTx && slices.ContainsFunc(r.SeamKinds, fact.SeamKind.Network)
 }
 
 func (s Scenario) BestTechnique(f *fact.Flow) (Technique, string) {

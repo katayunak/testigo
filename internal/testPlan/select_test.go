@@ -330,6 +330,9 @@ func TestTimeoutUnknownOutcomeBlockedWhenOnlyTheDatabaseSeamIsInjectable(t *test
 	if !strings.Contains(got.Blocked, "http or queue boundary in this flow is an interface") {
 		t.Fatalf("the reason should name the boundary that needs an interface, got %q", got.Blocked)
 	}
+	if !strings.Contains(got.Blocked, "extract an interface for (example.com/x/psp.Gateway).Charge at api/server.go:33") {
+		t.Fatalf("the reason should say which call needs the interface, with its file:line, got %q", got.Blocked)
+	}
 }
 
 func TestTimeoutUnknownOutcomeIsGivenOnlyTheInjectableProviderSeams(t *testing.T) {
@@ -411,6 +414,87 @@ func TestAnInjectableProviderSeamNoEntryReachesDoesNotMakeTheTimeoutCaseRunnable
 		if !strings.Contains(got.Blocked, "no injectable http or queue boundary is reached from any entry point") {
 			t.Fatalf("%s: the reason should say the injectable boundary is unreachable, got %q", id, got.Blocked)
 		}
+		if !strings.Contains(got.Blocked, "not reached: (example.com/x/psp.Refunds).Refund at jobs/retry.go:7") {
+			t.Fatalf("%s: the reason should name the unreached boundary with its file:line, got %q", id, got.Blocked)
+		}
+	}
+}
+
+func flowWithAProviderCallInsideATransaction(inside fact.Seam) *fact.Flow {
+	f := twoEntryFlow()
+	charge := f.Seams[1].In
+	f.Nodes[charge.ID()].Facts.OpensTx = true
+	f.Seams = append(f.Seams, inside)
+	effect := fact.TxEffect{At: fact.Pos{File: inside.In.File, Line: inside.Line}, Kind: inside.Kind, Target: inside.Target}
+	if inside.In.ID() != charge.ID() {
+		f.Nodes[inside.In.ID()] = &fact.Node{Ref: inside.In}
+		f.Nodes[charge.ID()].Calls = append(f.Nodes[charge.ID()].Calls, inside.In.ID())
+		effect = fact.TxEffect{At: fact.Pos{File: charge.File, Line: 34}, Kind: inside.Kind, Target: inside.In.ID(), Via: inside.In.ID()}
+	}
+	f.Transactions = []fact.Tx{{In: charge, Begin: fact.Pos{File: charge.File, Line: 31}, Inside: []fact.TxEffect{effect}}}
+	return f
+}
+
+func TestNetworkCallInsideTransactionIsBlockedWhenTheCallInsideIsConcrete(t *testing.T) {
+	charge := twoEntryFlow().Seams[1].In
+	send := fact.CodeRef{Pkg: "example.com/x/psp", Symbol: "(*Client).send", File: "psp/client.go", Line: 20}
+	for name, inside := range map[string]fact.Seam{
+		"called right in the transaction":    {In: charge, Kind: fact.SeamHTTP, Target: "(*net/http.Client).Do", Line: 36},
+		"called through a function it calls": {In: send, Kind: fact.SeamHTTP, Target: "(*net/http.Client).Do", Line: 25},
+	} {
+		got := caseNamed(t, Select(flowWithAProviderCallInsideATransaction(inside), Facts{}), "NETWORK-CALL-INSIDE-TRANSACTION")
+		if got.Runnable() {
+			t.Fatalf("%s: a concrete client called inside the transaction cannot be seen by the test, so a green run would hide the very call it exists to catch; got seams %v", name, seamTargets(got.Seams))
+		}
+		want := "(*net/http.Client).Do at " + inside.At().String() + " (transaction begun at api/server.go:31)"
+		if !strings.Contains(got.Blocked, want) {
+			t.Fatalf("%s: the reason should name the hidden call and its transaction, want %q in %q", name, want, got.Blocked)
+		}
+	}
+}
+
+func TestNetworkCallInsideTransactionRunsWhenTheCallInsideCanBeFaked(t *testing.T) {
+	f := twoEntryFlow()
+	gateway := f.Seams[1]
+	f.Nodes[gateway.In.ID()].Facts.OpensTx = true
+	f.Seams = append(f.Seams, fact.Seam{In: gateway.In, Kind: fact.SeamHTTP, Target: "(*net/http.Client).Do", Line: 40})
+	f.Transactions = []fact.Tx{{
+		In:     gateway.In,
+		Begin:  fact.Pos{File: gateway.In.File, Line: 31},
+		Inside: []fact.TxEffect{{At: gateway.At(), Kind: gateway.Kind, Target: gateway.Target}},
+	}}
+
+	got := caseNamed(t, Select(f, Facts{}), "NETWORK-CALL-INSIDE-TRANSACTION")
+	if !got.Runnable() {
+		t.Fatalf("the only call inside the transaction goes through the gateway interface, and the concrete client is called after the commit, so the test can see everything it must; got blocked: %q", got.Blocked)
+	}
+	if gotSeams := strings.Join(seamTargets(got.Seams), ", "); gotSeams != gateway.Target {
+		t.Fatalf("seams = %s, want only %s", gotSeams, gateway.Target)
+	}
+}
+
+func TestNetworkCallInsideTransactionRunsWhenTheConcreteClientSitsBehindAFakedInterface(t *testing.T) {
+	f := twoEntryFlow()
+	gateway := f.Seams[1]
+	charge := gateway.In
+	authorize := fact.CodeRef{Pkg: "example.com/x/api", Symbol: "(*Server).authorize", File: "api/server.go", Line: 50}
+	httpCharge := fact.CodeRef{Pkg: "example.com/x/psp", Symbol: "(*HTTPGateway).Charge", File: "psp/http.go", Line: 15}
+	f.Nodes[charge.ID()].Facts.OpensTx = true
+	f.Nodes[charge.ID()].Calls = []string{authorize.ID()}
+	f.Nodes[authorize.ID()] = &fact.Node{Ref: authorize, Calls: []string{httpCharge.ID()}}
+	f.Nodes[httpCharge.ID()] = &fact.Node{Ref: httpCharge}
+	f.Seams[1].In = authorize
+	f.Seams[1].Line = 52
+	f.Seams = append(f.Seams, fact.Seam{In: httpCharge, Kind: fact.SeamHTTP, Target: "(*net/http.Client).Do", Line: 20})
+	f.Transactions = []fact.Tx{{
+		In:     charge,
+		Begin:  fact.Pos{File: charge.File, Line: 31},
+		Inside: []fact.TxEffect{{At: fact.Pos{File: charge.File, Line: 34}, Kind: fact.SeamHTTP, Target: authorize.ID(), Via: authorize.ID()}},
+	}}
+
+	got := caseNamed(t, Select(f, Facts{}), "NETWORK-CALL-INSIDE-TRANSACTION")
+	if !got.Runnable() {
+		t.Fatalf("the transaction reaches the concrete client only through the gateway interface, which the test fakes, so the client is never called; got blocked: %q", got.Blocked)
 	}
 }
 
