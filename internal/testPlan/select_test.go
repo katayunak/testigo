@@ -370,11 +370,47 @@ func TestConcurrentKeyRaceRunsAgainstARealDatabaseWhenTheKeyIsADatabaseConstrain
 	if !got.Runnable() {
 		t.Fatalf("a key enforced by a database constraint should still be raced, got blocked: %q", got.Blocked)
 	}
-	if got.Technique != TechniqueNarrowIntegration || got.Size != SizeMedium {
-		t.Fatalf("technique/size = %s/%s, want %s/%s: an in-memory map cannot show the race a unique constraint settles", got.Technique, got.Size, TechniqueNarrowIntegration, SizeMedium)
+	if got.Technique != TechniqueConcurrency || got.Size != SizeMedium {
+		t.Fatalf("technique/size = %s/%s, want %s/%s: it is still a race, and an in-memory map cannot show the race a unique constraint settles", got.Technique, got.Size, TechniqueConcurrency, SizeMedium)
 	}
 	if !strings.HasSuffix(got.TargetFile, "_testigo_integration_test.go") {
 		t.Fatalf("target file = %s, want an integration test file so it only runs with a database", got.TargetFile)
+	}
+}
+
+func TestConcurrentKeyRaceOnADatabaseConstraintIsNotToldToFakeTheDatabase(t *testing.T) {
+	got := caseNamed(t, Select(twoEntryFlow(), Facts{Known: true, IdempotencyKey: "IdempotencyKey", Uniqueness: UniquenessDatabaseConstraint}), "IDEM-CONCURRENT")
+	if gotSeams := strings.Join(seamTargets(got.Seams), ", "); gotSeams != "(example.com/x/psp.Gateway).Charge" {
+		t.Fatalf("seams to fake = %s, want only the provider gateway: the ledger store must be the real one, or the unique constraint never runs", gotSeams)
+	}
+	if gotEntries := strings.Join(entryIDs(got.Entries), ", "); gotEntries != "example.com/x/api#(*Server).Pay" {
+		t.Fatalf("entries under test = %s, want only the API: the webhook reaches no boundary this case fakes", gotEntries)
+	}
+
+	f := twoEntryFlow()
+	f.Seams = f.Seams[:1]
+	onlyTheStore := caseNamed(t, Select(f, Facts{Known: true, IdempotencyKey: "IdempotencyKey", Uniqueness: UniquenessDatabaseConstraint}), "IDEM-CONCURRENT")
+	if !onlyTheStore.Runnable() || len(onlyTheStore.Seams) != 0 {
+		t.Fatalf("with the database store as the only injectable seam the race still runs against the real database with nothing faked, got blocked %q, seams %v", onlyTheStore.Blocked, seamTargets(onlyTheStore.Seams))
+	}
+}
+
+func TestAnInjectableProviderSeamNoEntryReachesDoesNotMakeTheTimeoutCaseRunnable(t *testing.T) {
+	f := twoEntryFlow()
+	unreached := fact.CodeRef{Pkg: "example.com/x/jobs", Symbol: "retry", File: "jobs/retry.go", Line: 5}
+	f.Nodes[unreached.ID()] = &fact.Node{Ref: unreached}
+	f.Seams[1].Injectable = false
+	f.Seams[1].Iface = ""
+	f.Seams = append(f.Seams, fact.Seam{In: unreached, Kind: fact.SeamHTTP, Target: "(example.com/x/psp.Refunds).Refund", Line: 7, Injectable: true, Iface: "example.com/x/psp.Refunds"})
+
+	for _, id := range []string{"TIMEOUT-UNKNOWN-OUTCOME", "UNCLASSIFIED-ERROR-NOT-RETRIED"} {
+		got := caseNamed(t, Select(f, Facts{}), id)
+		if got.Runnable() {
+			t.Fatalf("%s: the only injectable provider seam is in code no entry point calls, so there is nothing to inject a fault into, got seams %v", id, seamTargets(got.Seams))
+		}
+		if !strings.Contains(got.Blocked, "no injectable http or queue boundary is reached from any entry point") {
+			t.Fatalf("%s: the reason should say the injectable boundary is unreachable, got %q", id, got.Blocked)
+		}
 	}
 }
 

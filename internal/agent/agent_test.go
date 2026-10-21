@@ -8,6 +8,7 @@ import (
 	"github.com/katayunak/testigo/internal/config"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -820,4 +821,29 @@ func TestCasePromptNamesEveryEntryThatReachesItsBoundaries(t *testing.T) {
 			t.Errorf("a case faking a seam only the webhook reaches must name the webhook as an entry under test; prompt is missing %q", want)
 		}
 	}
+}
+
+func TestKeyRaceOnADatabaseConstraintStillAsksAndShowsTheContendedKey(t *testing.T) {
+	f := fixtureFlow()
+	k := domain.NewAgentResponse()
+	k.MoneyModel = &domain.MoneyModelAnswer{
+		Idempotency: domain.Idempotency{KeyField: "IdempotencyKey", Uniqueness: testPlan.UniquenessDatabaseConstraint},
+	}
+
+	techniques := planner.Demanded(f, FactsFrom(k, nil)).Techniques
+	if !slices.Contains(techniques, string(testPlan.TechniqueConcurrency)) {
+		t.Fatalf("techniques demanded = %v: racing the key against a real constraint is still a race, so round one must still ask which key the requests contend for", techniques)
+	}
+
+	k.PaymentKind["technique.concurrency.contended"] = &domain.QuestionAnswer{Info: "payments.idempotency_key"}
+	for _, c := range Cases(f, k, nil) {
+		if c.Scenario.ID != "IDEM-CONCURRENT" {
+			continue
+		}
+		if p := prompts.TestCase(c, f, k).Render(); !strings.Contains(p, "technique.concurrency.contended — payments.idempotency_key") {
+			t.Fatalf("the IDEM-CONCURRENT case must see the answer naming the key it races on; prompt:\n%s", p)
+		}
+		return
+	}
+	t.Fatal("IDEM-CONCURRENT was not selected for the fixture")
 }

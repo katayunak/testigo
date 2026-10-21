@@ -1,6 +1,7 @@
 package testPlan
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -39,17 +40,6 @@ func Select(f *fact.Flow, b Facts) []TestCase {
 			cases = append(cases, c)
 			continue
 		}
-		keyRaceNeedsTheRealConstraint := sc.keyRaceNeedsTheRealConstraint(b)
-		if keyRaceNeedsTheRealConstraint && sc.hasTechnique(TechniqueNarrowIntegration) {
-			technique = TechniqueNarrowIntegration
-		}
-		c.Technique = technique
-		props := technique.Props()
-		c.Size = props.DefaultSize
-		if sc.Requires.RealDatabase || keyRaceNeedsTheRealConstraint {
-			c.Size = SizeMedium
-		}
-
 		var candidates []fact.Seam
 		if len(sc.Requires.SeamKinds) > 0 {
 			for _, k := range sc.Requires.SeamKinds {
@@ -62,7 +52,25 @@ func Select(f *fact.Flow, b Facts) []TestCase {
 		} else if sc.Requires.InjectableSeam {
 			candidates = injectable
 		}
-		c.Seams = scopeSeams(candidates, reachInEntryOrder)
+		seams := scopeSeams(candidates, reachInEntryOrder)
+		if len(seams) == 0 && sc.Requires.needsASeam() {
+			c.Blocked = noReachableSeam(sc.Requires)
+			cases = append(cases, c)
+			continue
+		}
+
+		keyRaceNeedsTheRealConstraint := sc.keyRaceNeedsTheRealConstraint(b)
+		if keyRaceNeedsTheRealConstraint {
+			seams = slices.DeleteFunc(seams, isDatabaseSeam)
+		}
+		c.Technique = technique
+		props := technique.Props()
+		c.Size = props.DefaultSize
+		if sc.Requires.RealDatabase || keyRaceNeedsTheRealConstraint {
+			c.Size = SizeMedium
+		}
+
+		c.Seams = seams
 		c.Entries = entriesUnderTest(reachByEntry, c.Seams)
 		if sc.Requires.StateMachine {
 			c.States = bestStateMachine(f, b.StateMachines)
@@ -89,6 +97,19 @@ func Select(f *fact.Flow, b Facts) []TestCase {
 	})
 	return cases
 }
+
+func noReachableSeam(r Requires) string {
+	boundary := "boundary"
+	if len(r.SeamKinds) > 0 {
+		boundary = kindList(r.SeamKinds) + " " + boundary
+	}
+	if r.InjectableSeam {
+		boundary = "injectable " + boundary
+	}
+	return "no " + boundary + " is reached from any entry point, so a test started from one can never get there"
+}
+
+func isDatabaseSeam(s fact.Seam) bool { return s.Kind == fact.SeamDB }
 
 func severityRank(s fact.Severity) int {
 	switch s {

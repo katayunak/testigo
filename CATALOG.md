@@ -795,7 +795,7 @@ opens it.
 |---|---|
 | severity | critical |
 | oracle | `specification` |
-| techniques | `concurrency`, `narrowIntegration` (`narrowIntegration`, medium, when round 1 says the key is a database constraint) |
+| techniques | `concurrency`, `narrowIntegration` (`concurrency`, medium, when round 1 says the key is a database constraint) |
 | needs | an injectable seam, an idempotency key; a real database when round 1 says the key is a database constraint |
 
 ### IDEM-CRASH-AT-STEP

@@ -189,13 +189,8 @@ func (s Scenario) keyRaceNeedsTheRealConstraint(b Facts) bool {
 	return s.Requires.RealDatabaseWhenKeyIsADatabaseConstraint && b.Uniqueness == UniquenessDatabaseConstraint
 }
 
-func (s Scenario) hasTechnique(t Technique) bool {
-	for _, have := range s.Techniques {
-		if have == t {
-			return true
-		}
-	}
-	return false
+func (r Requires) needsASeam() bool {
+	return r.InjectableSeam || len(r.SeamKinds) > 0
 }
 
 func (s Scenario) BestTechnique(f *fact.Flow) (Technique, string) {
