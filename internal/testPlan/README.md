@@ -75,7 +75,7 @@ traceable to a source in
 
 Owning a scenario costs nothing. Only the ones whose preconditions match a repository
 are ever rendered, so the catalogue can grow without the prompt pack growing. On the
-wallet fixture, 27 of the 34 apply; the rest are reported *with the reason they do
+wallet fixture, 26 of the 34 apply; the rest are reported *with the reason they do
 not apply*, which is itself information.
 
 The sharpest filters come from **round one**, not from the compiler:

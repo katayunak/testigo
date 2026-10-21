@@ -252,7 +252,7 @@ func entryIDs(entries []fact.EntryPoint) []string {
 }
 
 func TestSeamsAreScopedFromEveryEntryNotOnlyTheFirst(t *testing.T) {
-	c := caseNamed(t, Select(twoEntryFlow(), Facts{}), "UNCLASSIFIED-ERROR-NOT-RETRIED")
+	c := caseNamed(t, Select(twoEntryFlow(), Facts{}), "IDEM-REPLAY")
 	if !c.Runnable() {
 		t.Fatalf("fixture setup: expected a runnable case, got blocked: %q", c.Blocked)
 	}
@@ -274,7 +274,7 @@ func TestACaseWhoseSeamsOnlyTheSecondEntryReachesIsDrivenFromIt(t *testing.T) {
 	f := twoEntryFlow()
 	f.Seams = f.Seams[:1]
 
-	c := caseNamed(t, Select(f, Facts{}), "UNCLASSIFIED-ERROR-NOT-RETRIED")
+	c := caseNamed(t, Select(f, Facts{}), "IDEM-REPLAY")
 	if got := strings.Join(entryIDs(c.Entries), ", "); got != "example.com/x/webhook#(*Handler).Callback" {
 		t.Fatalf("entries under test = %s, want only the webhook: the API entry never reaches the ledger call", got)
 	}
@@ -289,7 +289,7 @@ func TestASeamCalledFromTwoEntriesKeepsTheFirstEntrysCallSite(t *testing.T) {
 	charge := f.Nodes["example.com/x/api#(*Server).charge"].Ref
 	f.Seams = append(f.Seams, fact.Seam{In: charge, Kind: fact.SeamDB, Target: shared, Line: 35, Injectable: true, Iface: "example.com/x/ledger.Store"})
 
-	c := caseNamed(t, Select(f, Facts{}), "UNCLASSIFIED-ERROR-NOT-RETRIED")
+	c := caseNamed(t, Select(f, Facts{}), "IDEM-REPLAY")
 	for _, s := range c.Seams {
 		if s.Target == shared && s.In.ID() != charge.ID() {
 			t.Fatalf("%s is shown called in %s; want the call site the first entry point reaches, %s", shared, s.In.Symbol, charge.Symbol)
@@ -314,6 +314,195 @@ func TestSelectIsTheSameEveryRunWithSeveralEntries(t *testing.T) {
 					a.Scenario.ID, seamTargets(a.Seams), entryIDs(a.Entries),
 					b.Scenario.ID, seamTargets(b.Seams), entryIDs(b.Entries))
 			}
+		}
+	}
+}
+
+func TestTimeoutUnknownOutcomeBlockedWhenOnlyTheDatabaseSeamIsInjectable(t *testing.T) {
+	f := twoEntryFlow()
+	f.Seams[1].Injectable = false
+	f.Seams[1].Iface = ""
+
+	got := caseNamed(t, Select(f, Facts{}), "TIMEOUT-UNKNOWN-OUTCOME")
+	if got.Runnable() {
+		t.Fatal("a provider timeout cannot be faked through a concrete http client, even when the database seam is an interface")
+	}
+	if !strings.Contains(got.Blocked, "http or queue boundary in this flow is an interface") {
+		t.Fatalf("the reason should name the boundary that needs an interface, got %q", got.Blocked)
+	}
+	if !strings.Contains(got.Blocked, "extract an interface for (example.com/x/psp.Gateway).Charge at api/server.go:33") {
+		t.Fatalf("the reason should say which call needs the interface, with its file:line, got %q", got.Blocked)
+	}
+}
+
+func TestTimeoutUnknownOutcomeIsGivenOnlyTheInjectableProviderSeams(t *testing.T) {
+	f := twoEntryFlow()
+	charge := f.Seams[1].In
+	f.Seams = append(f.Seams, fact.Seam{In: charge, Kind: fact.SeamHTTP, Target: "(*net/http.Client).Do", Line: 35})
+
+	got := caseNamed(t, Select(f, Facts{}), "TIMEOUT-UNKNOWN-OUTCOME")
+	if !got.Runnable() {
+		t.Fatalf("an injectable provider seam should make the timeout scenario runnable, got blocked: %q", got.Blocked)
+	}
+	gotSeams := strings.Join(seamTargets(got.Seams), ", ")
+	if want := "(example.com/x/psp.Gateway).Charge"; gotSeams != want {
+		t.Fatalf("seams = %s, want %s: a fault can only be injected into the interface, not the concrete http client", gotSeams, want)
+	}
+}
+
+func TestUnclassifiedErrorNotRetriedNeedsAProviderSeamNotOnlyADatabaseOne(t *testing.T) {
+	f := twoEntryFlow()
+	f.Seams = f.Seams[:1]
+
+	got := caseNamed(t, Select(f, Facts{}), "UNCLASSIFIED-ERROR-NOT-RETRIED")
+	if got.Runnable() {
+		t.Fatalf("an unrecognised provider error cannot be faked when the only injectable seam is the ledger store, got seams %s", strings.Join(seamTargets(got.Seams), ", "))
+	}
+	if !strings.Contains(got.Blocked, "http or queue boundary") {
+		t.Fatalf("the reason should name the provider boundary that is missing, got %q", got.Blocked)
+	}
+
+	provider := caseNamed(t, Select(twoEntryFlow(), Facts{}), "UNCLASSIFIED-ERROR-NOT-RETRIED")
+	if gotSeams := strings.Join(seamTargets(provider.Seams), ", "); gotSeams != "(example.com/x/psp.Gateway).Charge" {
+		t.Fatalf("seams = %s, want only the provider gateway: the ledger store is not where a provider error comes from", gotSeams)
+	}
+}
+
+func TestConcurrentKeyRaceRunsAgainstARealDatabaseWhenTheKeyIsADatabaseConstraint(t *testing.T) {
+	got := caseNamed(t, Select(twoEntryFlow(), Facts{Known: true, IdempotencyKey: "IdempotencyKey", Uniqueness: UniquenessDatabaseConstraint}), "IDEM-CONCURRENT")
+	if !got.Runnable() {
+		t.Fatalf("a key enforced by a database constraint should still be raced, got blocked: %q", got.Blocked)
+	}
+	if got.Technique != TechniqueConcurrency || got.Size != SizeMedium {
+		t.Fatalf("technique/size = %s/%s, want %s/%s: it is still a race, and an in-memory map cannot show the race a unique constraint settles", got.Technique, got.Size, TechniqueConcurrency, SizeMedium)
+	}
+	if !strings.HasSuffix(got.TargetFile, "_testigo_integration_test.go") {
+		t.Fatalf("target file = %s, want an integration test file so it only runs with a database", got.TargetFile)
+	}
+}
+
+func TestConcurrentKeyRaceOnADatabaseConstraintIsNotToldToFakeTheDatabase(t *testing.T) {
+	got := caseNamed(t, Select(twoEntryFlow(), Facts{Known: true, IdempotencyKey: "IdempotencyKey", Uniqueness: UniquenessDatabaseConstraint}), "IDEM-CONCURRENT")
+	if gotSeams := strings.Join(seamTargets(got.Seams), ", "); gotSeams != "(example.com/x/psp.Gateway).Charge" {
+		t.Fatalf("seams to fake = %s, want only the provider gateway: the ledger store must be the real one, or the unique constraint never runs", gotSeams)
+	}
+	if gotEntries := strings.Join(entryIDs(got.Entries), ", "); gotEntries != "example.com/x/api#(*Server).Pay" {
+		t.Fatalf("entries under test = %s, want only the API: the webhook reaches no boundary this case fakes", gotEntries)
+	}
+
+	f := twoEntryFlow()
+	f.Seams = f.Seams[:1]
+	onlyTheStore := caseNamed(t, Select(f, Facts{Known: true, IdempotencyKey: "IdempotencyKey", Uniqueness: UniquenessDatabaseConstraint}), "IDEM-CONCURRENT")
+	if !onlyTheStore.Runnable() || len(onlyTheStore.Seams) != 0 {
+		t.Fatalf("with the database store as the only injectable seam the race still runs against the real database with nothing faked, got blocked %q, seams %v", onlyTheStore.Blocked, seamTargets(onlyTheStore.Seams))
+	}
+}
+
+func TestAnInjectableProviderSeamNoEntryReachesDoesNotMakeTheTimeoutCaseRunnable(t *testing.T) {
+	f := twoEntryFlow()
+	unreached := fact.CodeRef{Pkg: "example.com/x/jobs", Symbol: "retry", File: "jobs/retry.go", Line: 5}
+	f.Nodes[unreached.ID()] = &fact.Node{Ref: unreached}
+	f.Seams[1].Injectable = false
+	f.Seams[1].Iface = ""
+	f.Seams = append(f.Seams, fact.Seam{In: unreached, Kind: fact.SeamHTTP, Target: "(example.com/x/psp.Refunds).Refund", Line: 7, Injectable: true, Iface: "example.com/x/psp.Refunds"})
+
+	for _, id := range []string{"TIMEOUT-UNKNOWN-OUTCOME", "UNCLASSIFIED-ERROR-NOT-RETRIED"} {
+		got := caseNamed(t, Select(f, Facts{}), id)
+		if got.Runnable() {
+			t.Fatalf("%s: the only injectable provider seam is in code no entry point calls, so there is nothing to inject a fault into, got seams %v", id, seamTargets(got.Seams))
+		}
+		if !strings.Contains(got.Blocked, "no injectable http or queue boundary is reached from any entry point") {
+			t.Fatalf("%s: the reason should say the injectable boundary is unreachable, got %q", id, got.Blocked)
+		}
+		if !strings.Contains(got.Blocked, "not reached: (example.com/x/psp.Refunds).Refund at jobs/retry.go:7") {
+			t.Fatalf("%s: the reason should name the unreached boundary with its file:line, got %q", id, got.Blocked)
+		}
+	}
+}
+
+func flowWithAProviderCallInsideATransaction(inside fact.Seam) *fact.Flow {
+	f := twoEntryFlow()
+	charge := f.Seams[1].In
+	f.Nodes[charge.ID()].Facts.OpensTx = true
+	f.Seams = append(f.Seams, inside)
+	effect := fact.TxEffect{At: fact.Pos{File: inside.In.File, Line: inside.Line}, Kind: inside.Kind, Target: inside.Target}
+	if inside.In.ID() != charge.ID() {
+		f.Nodes[inside.In.ID()] = &fact.Node{Ref: inside.In}
+		f.Nodes[charge.ID()].Calls = append(f.Nodes[charge.ID()].Calls, inside.In.ID())
+		effect = fact.TxEffect{At: fact.Pos{File: charge.File, Line: 34}, Kind: inside.Kind, Target: inside.In.ID(), Via: inside.In.ID()}
+	}
+	f.Transactions = []fact.Tx{{In: charge, Begin: fact.Pos{File: charge.File, Line: 31}, Inside: []fact.TxEffect{effect}}}
+	return f
+}
+
+func TestNetworkCallInsideTransactionIsBlockedWhenTheCallInsideIsConcrete(t *testing.T) {
+	charge := twoEntryFlow().Seams[1].In
+	send := fact.CodeRef{Pkg: "example.com/x/psp", Symbol: "(*Client).send", File: "psp/client.go", Line: 20}
+	for name, inside := range map[string]fact.Seam{
+		"called right in the transaction":    {In: charge, Kind: fact.SeamHTTP, Target: "(*net/http.Client).Do", Line: 36},
+		"called through a function it calls": {In: send, Kind: fact.SeamHTTP, Target: "(*net/http.Client).Do", Line: 25},
+	} {
+		got := caseNamed(t, Select(flowWithAProviderCallInsideATransaction(inside), Facts{}), "NETWORK-CALL-INSIDE-TRANSACTION")
+		if got.Runnable() {
+			t.Fatalf("%s: a concrete client called inside the transaction cannot be seen by the test, so a green run would hide the very call it exists to catch; got seams %v", name, seamTargets(got.Seams))
+		}
+		want := "(*net/http.Client).Do at " + inside.At().String() + " (transaction begun at api/server.go:31)"
+		if !strings.Contains(got.Blocked, want) {
+			t.Fatalf("%s: the reason should name the hidden call and its transaction, want %q in %q", name, want, got.Blocked)
+		}
+	}
+}
+
+func TestNetworkCallInsideTransactionRunsWhenTheCallInsideCanBeFaked(t *testing.T) {
+	f := twoEntryFlow()
+	gateway := f.Seams[1]
+	f.Nodes[gateway.In.ID()].Facts.OpensTx = true
+	f.Seams = append(f.Seams, fact.Seam{In: gateway.In, Kind: fact.SeamHTTP, Target: "(*net/http.Client).Do", Line: 40})
+	f.Transactions = []fact.Tx{{
+		In:     gateway.In,
+		Begin:  fact.Pos{File: gateway.In.File, Line: 31},
+		Inside: []fact.TxEffect{{At: gateway.At(), Kind: gateway.Kind, Target: gateway.Target}},
+	}}
+
+	got := caseNamed(t, Select(f, Facts{}), "NETWORK-CALL-INSIDE-TRANSACTION")
+	if !got.Runnable() {
+		t.Fatalf("the only call inside the transaction goes through the gateway interface, and the concrete client is called after the commit, so the test can see everything it must; got blocked: %q", got.Blocked)
+	}
+	if gotSeams := strings.Join(seamTargets(got.Seams), ", "); gotSeams != gateway.Target {
+		t.Fatalf("seams = %s, want only %s", gotSeams, gateway.Target)
+	}
+}
+
+func TestNetworkCallInsideTransactionRunsWhenTheConcreteClientSitsBehindAFakedInterface(t *testing.T) {
+	f := twoEntryFlow()
+	gateway := f.Seams[1]
+	charge := gateway.In
+	authorize := fact.CodeRef{Pkg: "example.com/x/api", Symbol: "(*Server).authorize", File: "api/server.go", Line: 50}
+	httpCharge := fact.CodeRef{Pkg: "example.com/x/psp", Symbol: "(*HTTPGateway).Charge", File: "psp/http.go", Line: 15}
+	f.Nodes[charge.ID()].Facts.OpensTx = true
+	f.Nodes[charge.ID()].Calls = []string{authorize.ID()}
+	f.Nodes[authorize.ID()] = &fact.Node{Ref: authorize, Calls: []string{httpCharge.ID()}}
+	f.Nodes[httpCharge.ID()] = &fact.Node{Ref: httpCharge}
+	f.Seams[1].In = authorize
+	f.Seams[1].Line = 52
+	f.Seams = append(f.Seams, fact.Seam{In: httpCharge, Kind: fact.SeamHTTP, Target: "(*net/http.Client).Do", Line: 20})
+	f.Transactions = []fact.Tx{{
+		In:     charge,
+		Begin:  fact.Pos{File: charge.File, Line: 31},
+		Inside: []fact.TxEffect{{At: fact.Pos{File: charge.File, Line: 34}, Kind: fact.SeamHTTP, Target: authorize.ID(), Via: authorize.ID()}},
+	}}
+
+	got := caseNamed(t, Select(f, Facts{}), "NETWORK-CALL-INSIDE-TRANSACTION")
+	if !got.Runnable() {
+		t.Fatalf("the transaction reaches the concrete client only through the gateway interface, which the test fakes, so the client is never called; got blocked: %q", got.Blocked)
+	}
+}
+
+func TestConcurrentKeyRaceStaysSmallUnlessTheKeyIsADatabaseConstraint(t *testing.T) {
+	for _, uniqueness := range []string{"", "unknown", "none", "app_check_then_write"} {
+		got := caseNamed(t, Select(twoEntryFlow(), Facts{Known: true, IdempotencyKey: "IdempotencyKey", Uniqueness: uniqueness}), "IDEM-CONCURRENT")
+		if got.Technique != TechniqueConcurrency || got.Size != SizeSmall {
+			t.Fatalf("uniqueness %q: technique/size = %s/%s, want %s/%s", uniqueness, got.Technique, got.Size, TechniqueConcurrency, SizeSmall)
 		}
 	}
 }

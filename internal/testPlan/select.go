@@ -1,6 +1,7 @@
 package testPlan
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -19,6 +20,7 @@ func Select(f *fact.Flow, b Facts) []TestCase {
 
 	reachByEntry := reachableFromEachEntry(f)
 	reachInEntryOrder := reachSetsInEntryOrder(f, reachByEntry)
+	unseenInATransaction := concreteNetworkCallsInATransaction(f, reachInEntryOrder)
 
 	var cases []TestCase
 	for _, sc := range Catalog {
@@ -39,22 +41,43 @@ func Select(f *fact.Flow, b Facts) []TestCase {
 			cases = append(cases, c)
 			continue
 		}
-		c.Technique = technique
-		props := technique.Props()
-		c.Size = props.DefaultSize
-		if sc.Requires.RealDatabase {
-			c.Size = SizeMedium
-		}
-
 		var candidates []fact.Seam
 		if len(sc.Requires.SeamKinds) > 0 {
 			for _, k := range sc.Requires.SeamKinds {
-				candidates = append(candidates, seamsByKind[k]...)
+				for _, s := range seamsByKind[k] {
+					if s.Injectable || !sc.Requires.InjectableSeam {
+						candidates = append(candidates, s)
+					}
+				}
 			}
 		} else if sc.Requires.InjectableSeam {
 			candidates = injectable
 		}
-		c.Seams = scopeSeams(candidates, reachInEntryOrder)
+		seams := scopeSeams(candidates, reachInEntryOrder)
+		if len(seams) == 0 && sc.Requires.needsASeam() {
+			c.Blocked = noReachableSeam(sc.Requires, candidates)
+			cases = append(cases, c)
+			continue
+		}
+		if sc.Requires.watchesNetworkCallsInATransaction() && len(unseenInATransaction) > 0 {
+			c.Blocked = "a network call inside a transaction goes through a concrete type, so a test cannot see it go out: " +
+				callsInATransaction(unseenInATransaction) + " — extract an interface first"
+			cases = append(cases, c)
+			continue
+		}
+
+		keyRaceNeedsTheRealConstraint := sc.keyRaceNeedsTheRealConstraint(b)
+		if keyRaceNeedsTheRealConstraint {
+			seams = slices.DeleteFunc(seams, isDatabaseSeam)
+		}
+		c.Technique = technique
+		props := technique.Props()
+		c.Size = props.DefaultSize
+		if sc.Requires.RealDatabase || keyRaceNeedsTheRealConstraint {
+			c.Size = SizeMedium
+		}
+
+		c.Seams = seams
 		c.Entries = entriesUnderTest(reachByEntry, c.Seams)
 		if sc.Requires.StateMachine {
 			c.States = bestStateMachine(f, b.StateMachines)
@@ -81,6 +104,107 @@ func Select(f *fact.Flow, b Facts) []TestCase {
 	})
 	return cases
 }
+
+func noReachableSeam(r Requires, unreached []fact.Seam) string {
+	boundary := "boundary"
+	if len(r.SeamKinds) > 0 {
+		boundary = kindList(r.SeamKinds) + " " + boundary
+	}
+	if r.InjectableSeam {
+		boundary = "injectable " + boundary
+	}
+	return "no " + boundary + " is reached from any entry point, so a test started from one can never get there; not reached: " + seamSites(unreached)
+}
+
+type callInATransaction struct {
+	seam  fact.Seam
+	begin fact.Pos
+}
+
+func concreteNetworkCallsInATransaction(f *fact.Flow, reachInEntryOrder []map[string]bool) []callInATransaction {
+	var out []callInATransaction
+	seen := map[string]bool{}
+	fakedAway := implementationsBehindAnInjectableSeam(f)
+	for _, tx := range f.Transactions {
+		if !reachedFromAnEntry(tx.In.ID(), reachInEntryOrder) {
+			continue
+		}
+		for _, e := range tx.Inside {
+			if !e.Kind.Network() {
+				continue
+			}
+			for _, s := range networkSeamsBehind(f, e, fakedAway) {
+				site := s.Target + "@" + s.At().String()
+				if s.Injectable || seen[site] {
+					continue
+				}
+				seen[site] = true
+				out = append(out, callInATransaction{seam: s, begin: tx.Begin})
+			}
+		}
+	}
+	return out
+}
+
+func implementationsBehindAnInjectableSeam(f *fact.Flow) map[string]bool {
+	out := map[string]bool{}
+	for _, s := range f.Seams {
+		caller, ok := f.Nodes[s.In.ID()]
+		if !s.Injectable || !ok {
+			continue
+		}
+		for _, callee := range caller.Calls {
+			if method := methodName(s.Target); method != "" && methodName(callee) == method {
+				out[callee] = true
+			}
+		}
+	}
+	return out
+}
+
+func methodName(symbol string) string {
+	if i := strings.LastIndex(symbol, ")."); i >= 0 {
+		return symbol[i+len(")."):]
+	}
+	return ""
+}
+
+func networkSeamsBehind(f *fact.Flow, e fact.TxEffect, fakedAway map[string]bool) []fact.Seam {
+	var reachedThroughVia map[string]bool
+	if e.Via != "" {
+		reachedThroughVia = walkCallsAvoiding(f, e.Via, fakedAway)
+	}
+	var out []fact.Seam
+	for _, s := range f.Seams {
+		if !s.Kind.Network() {
+			continue
+		}
+		calledRightThere := e.Via == "" && s.In.File == e.At.File && s.Line == e.At.Line
+		if calledRightThere || reachedThroughVia[s.In.ID()] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func reachedFromAnEntry(id string, reachInEntryOrder []map[string]bool) bool {
+	for _, reachable := range reachInEntryOrder {
+		if reachable[id] {
+			return true
+		}
+	}
+	return false
+}
+
+func callsInATransaction(calls []callInATransaction) string {
+	sites := make([]string, 0, len(calls))
+	for _, c := range calls {
+		sites = append(sites, c.seam.Target+" at "+c.seam.At().String()+" (transaction begun at "+c.begin.String()+")")
+	}
+	return listSites(sites)
+}
+
+func isDatabaseSeam(s fact.Seam) bool { return s.Kind == fact.SeamDB }
 
 func severityRank(s fact.Severity) int {
 	switch s {
@@ -184,6 +308,10 @@ func reachSetsInEntryOrder(f *fact.Flow, reachByEntry []entryReach) []map[string
 }
 
 func walkCalls(f *fact.Flow, start string) map[string]bool {
+	return walkCallsAvoiding(f, start, nil)
+}
+
+func walkCallsAvoiding(f *fact.Flow, start string, avoid map[string]bool) map[string]bool {
 	seen := map[string]bool{start: true}
 	queue := []string{start}
 	for len(queue) > 0 {
@@ -194,7 +322,7 @@ func walkCalls(f *fact.Flow, start string) map[string]bool {
 			continue
 		}
 		for _, callee := range node.Calls {
-			if !seen[callee] {
+			if !seen[callee] && !avoid[callee] {
 				seen[callee] = true
 				queue = append(queue, callee)
 			}

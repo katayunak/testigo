@@ -22,7 +22,7 @@ Some scenarios are picked by **how a table is written** — see
 | ID | Family | Severity | Oracle | Needs |
 |---|---|---|---|---|
 | [`LEDGER-OUTSIDE-CALLER-TRANSACTION`](#ledger-outside-caller-transaction) | boundary | critical | invariant | an open transaction, a real database, a transfer function |
-| [`NETWORK-CALL-INSIDE-TRANSACTION`](#network-call-inside-transaction) | boundary | high | specification | a http or queue boundary, an injectable seam, an open transaction |
+| [`NETWORK-CALL-INSIDE-TRANSACTION`](#network-call-inside-transaction) | boundary | high | specification | an injectable http or queue boundary, an open transaction, no concrete network call inside a transaction |
 | [`ASYNC-RESPONSE-BEFORE-DURABILITY`](#async-response-before-durability) | boundary | critical | invariant | an injectable seam, a goroutine |
 | [`BALANCE-LIMIT-ENFORCED`](#balance-limit-enforced) | boundary | high | specification | money in the flow, a real database, a balance function |
 | [`CONSERVATION-UNDER-CONCURRENCY`](#conservation-under-concurrency) | consistency | critical | invariant | money in the flow, a real database, a balance function |
@@ -35,12 +35,12 @@ Some scenarios are picked by **how a table is written** — see
 | [`READ-MODIFY-WRITE-NEEDS-A-LOCK`](#read-modify-write-needs-a-lock) | consistency | critical | invariant | a table written `update_in_place`, an open transaction, a real database |
 | [`APPEND-ONLY-HISTORY-IS-IMMUTABLE`](#append-only-history-is-immutable) | consistency | high | invariant | a table written `insert_only`, a real database |
 | [`HASH-CHAIN-CATCHES-TAMPERING`](#hash-chain-catches-tampering) | consistency | high | metamorphic | a hash-chaining method |
-| [`TIMEOUT-UNKNOWN-OUTCOME`](#timeout-unknown-outcome) | failure | critical | specification | a http or queue boundary, an injectable seam |
+| [`TIMEOUT-UNKNOWN-OUTCOME`](#timeout-unknown-outcome) | failure | critical | specification | an injectable http or queue boundary |
 | [`ORPHANED-AUTHORIZATION`](#orphaned-authorization) | failure | critical | invariant | an injectable seam, an open transaction |
-| [`UNCLASSIFIED-ERROR-NOT-RETRIED`](#unclassified-error-not-retried) | failure | high | specification | an injectable seam |
+| [`UNCLASSIFIED-ERROR-NOT-RETRIED`](#unclassified-error-not-retried) | failure | high | specification | an injectable http or queue boundary |
 | [`IDEM-REPLAY`](#idem-replay) | idempotency | critical | specification | an injectable seam, an idempotency key |
 | [`IDEM-PAYLOAD-MISMATCH`](#idem-payload-mismatch) | idempotency | high | specification | an injectable seam, an idempotency key |
-| [`IDEM-CONCURRENT`](#idem-concurrent) | idempotency | critical | specification | an injectable seam, an idempotency key |
+| [`IDEM-CONCURRENT`](#idem-concurrent) | idempotency | critical | specification | an injectable seam, an idempotency key; a real database when round 1 says the key is a database constraint |
 | [`IDEM-CRASH-AT-STEP`](#idem-crash-at-step) | idempotency | critical | specification | an injectable seam, an idempotency key |
 | [`UPSERT-HIDES-A-SECOND-EFFECT`](#upsert-hides-a-second-effect) | idempotency | critical | specification | a table written `upsert`, an injectable seam, a real database |
 | [`MONEY-ROUND-TRIP-EXACT`](#money-round-trip-exact) | money | critical | invariant | money in the flow |
@@ -50,7 +50,7 @@ Some scenarios are picked by **how a table is written** — see
 | [`BALANCE-NEVER-NEGATIVE`](#balance-never-negative) | money | critical | invariant | money in the flow, an open transaction, a real database, a balance function |
 | [`SELF-TRANSFER-REFUSED`](#self-transfer-refused) | money | high | invariant | a transfer function |
 | [`WEBHOOK-ORDER-INDEPENDENT`](#webhook-order-independent) | ordering | high | metamorphic | a state machine, two or more entry points |
-| [`AT-LEAST-ONCE-DELIVERY-IS-SAFE`](#at-least-once-delivery-is-safe) | ordering | high | invariant | a queue boundary, an injectable seam |
+| [`AT-LEAST-ONCE-DELIVERY-IS-SAFE`](#at-least-once-delivery-is-safe) | ordering | high | invariant | an injectable queue boundary |
 | [`ILLEGAL-TRANSITION-REFUSED`](#illegal-transition-refused) | state | high | specification | a state machine |
 | [`FINAL-STATE-IS-FINAL`](#final-state-is-final) | state | critical | specification | a state machine |
 | [`FAILURE-IS-NOT-TERMINAL`](#failure-is-not-terminal) | state | high | specification | an injectable seam, a state machine |
@@ -126,7 +126,7 @@ the version that keeps being true as the code changes.
 | severity | high |
 | oracle | `specification` |
 | techniques | `faultInjection`, `unit` |
-| needs | a http or queue boundary, an injectable seam, an open transaction |
+| needs | an injectable http or queue boundary, an open transaction, no concrete network call inside a transaction |
 
 ### ASYNC-RESPONSE-BEFORE-DURABILITY
 
@@ -613,7 +613,7 @@ timeout onto failure and retries is moving the money twice for one purchase.
 | severity | critical |
 | oracle | `specification` |
 | techniques | `faultInjection` |
-| needs | a http or queue boundary, an injectable seam |
+| needs | an injectable http or queue boundary |
 
 ### ORPHANED-AUTHORIZATION
 
@@ -681,7 +681,7 @@ manual investigation; the unsafe default costs a customer's money.
 | severity | high |
 | oracle | `specification` |
 | techniques | `table`, `faultInjection` |
-| needs | an injectable seam |
+| needs | an injectable http or queue boundary |
 
 ---
 
@@ -795,8 +795,8 @@ opens it.
 |---|---|
 | severity | critical |
 | oracle | `specification` |
-| techniques | `concurrency`, `narrowIntegration` |
-| needs | an injectable seam, an idempotency key |
+| techniques | `concurrency`, `narrowIntegration` (`concurrency`, medium, when round 1 says the key is a database constraint) |
+| needs | an injectable seam, an idempotency key; a real database when round 1 says the key is a database constraint |
 
 ### IDEM-CRASH-AT-STEP
 
@@ -1150,7 +1150,7 @@ only whether they are harmless when they do.
 | severity | high |
 | oracle | `invariant` |
 | techniques | `metamorphic`, `faultInjection` |
-| needs | a queue boundary, an injectable seam |
+| needs | an injectable queue boundary |
 
 ---
 
