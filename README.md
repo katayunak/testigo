@@ -4,10 +4,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 
-**testigo finds the bugs that lose money in Go payment code, then has an AI agent write the tests that prove them.**
+**testigo finds the bugs that lose money in Go payment code, then gets an AI agent to write the tests that prove them.**
 
-The Go compiler reads your code first, for free. The agent is asked only what
-the compiler cannot know, and every answer has to point at a file and line.
+It reads your code with the Go compiler first, which is free and exact. Then it asks
+an AI agent only what the compiler can't know, and every answer has to point at a
+file and a line.
 
 On the bundled wallet service, whose bugs were planted on purpose, one run wrote
 12 tests. All 12 fail, all 12 said in advance that they would, and each failure
@@ -29,15 +30,114 @@ Every answer, every test and the final report from that run are in
 go install github.com/katayunak/testigo/cmd/testigo@latest
 ```
 
-Go 1.25+. No API key, no network, no vendor lock — the prompts are markdown you can
-read before you spend anything.
+Go 1.25+. No API key, no network, no vendor lock-in. The prompts are plain markdown,
+so you can read them before you spend anything. It works with any agent through
+files, or as an [MCP server](#phase-2-as-mcp-tools) inside Claude Code or any other
+MCP client.
 
-Phase 2 runs two ways: as markdown files any agent can read, or as an
-[MCP server](#phase-2-as-mcp-tools) (`testigo mcp`) that an agent calls directly.
+## Why I built this
+
+Payment bugs are quiet. A retry charges a customer twice. A transfer fails halfway
+and the money is just gone. The test suite stays green the whole time, because it
+only ever tried the happy path.
+
+You can point an AI agent at the repo and ask it for tests. It will read everything,
+burn a lot of tokens, and write tests that check what the code does instead of what
+it should do. I wanted the opposite. Let the compiler do the reading. Use what the
+industry already knows about how payment systems break. Pay the model only for the
+few things a compiler can't see, and check its answers against the code.
+
+## What it can do
+
+**It reads code like a compiler, because it uses one.** testigo runs the Go type
+checker and SSA. Starting from your entry points, it finds every function the flow
+reaches and every call that leaves the process: database, HTTP, gRPC, a broker, a
+cache. It knows whether a test can fake each of those calls, which writes run inside
+a database transaction and which don't, every state machine and every line that
+changes a status, and which fields hold money. It reads your migrations too, so it
+knows which columns are really unique.
+
+**It finds a dozen kinds of money and transaction risks for free.** Money in a float.
+An idempotency key with no unique constraint behind it. A network call inside an open
+transaction. A transaction that never rolls back. No AI and no tokens for any of it.
+
+**It knows how payment systems break.** It works out what kind of system you have: a
+wallet, a double-entry ledger, a one-shot purchase, top-ups, payouts, escrow, with
+refunds, reconciliation or FX on top. Then it picks from a [catalog](CATALOG.md) of
+34 failure scenarios in 7 families. Much of it comes from how Stripe, Adyen, Airbnb,
+Uber, Monzo, Nubank and TigerBeetle say they test their own money flows.
+
+**It plans its questions the way Postgres plans a query.** It prices every question
+before asking it, skips anything no test needs, and shows you the plan and the bill
+first. More on that [below](#the-planner).
+
+**It asks questions that can be checked.** True or false wherever possible. Every
+answer cites a file and line, and testigo checks it against what the compiler
+proved. An answer that names a state that doesn't exist, leaves out a declared one,
+has no proof, or just sends back the prompt's own example is rejected with the
+reason.
+
+**It writes the tests, then runs them.** The agent writes Go tests. testigo puts them
+in your package, builds them, runs `go vet`, and runs them with `-race`. Small tests
+are checked mechanically: no sleeping, no wall clock, no sockets, no real database.
+Every test has to prove it reached the situation it was written for: the fake was
+called, the goroutines really collided. If the agent expects a test to fail, it has
+to say so before the test runs. If a test can't be written honestly, the agent marks
+it blocked and says why, instead of writing a weaker one.
+
+**It writes a report you can act on.** Every claim has a file and line, and every fix
+has to be safe for money: nothing that could charge twice, drop a payment or lose the
+audit trail.
+
+**It is cheap.** On a real payment service, one round of questions went from 123.9k
+to 30.7k weighted tokens without losing a single test. The
+[token story](#the-token-story) explains how.
+
+## The planner
+
+A database never runs a query the first way that comes to mind. Postgres looks at
+the query and its table statistics, prices each way of running it, and runs the
+cheapest. `EXPLAIN` shows you that plan before anything runs.
+
+testigo does the same thing with the questions it sends to the agent.
+
+| In Postgres | In testigo |
+|---|---|
+| the query | the tests worth writing here. The selector reads the facts from the scan and decides which of the 34 scenarios can run in this repository, and says why the others can't |
+| table statistics | what each answer is worth. A registry lists every answer field and the code that reads it. A field nothing reads is never paid for. Writing that registry down found 35 fields that were asked for on every run and read by nothing |
+| the cost model | the price of each question: the size of its prompt plus the answer it expects, with output counted five times, roughly how it's billed |
+| access paths | the ways to ask: skip it, verify it with true/false (about 5 output tokens), narrow it to a pick-one (about 15), or ask open free text (21 to 131, measured per kind) |
+| `EXPLAIN` | `testigo ask --explain` |
+| a cost limit | `--budget N`. The planner keeps the questions that serve the most scenarios per token and drops the rest, and tells you what it dropped |
+
+Here it is on the payment fixture with a budget that is too small for everything:
+
+```
+$ testigo ask --explain --budget 12000 --round 1 .
+ask plan   30 scenario(s) runnable, 4 blocked
+budget     12.0k weighted (output counted 5x)
+
+ASKED
+  mainEntity               free text    1.7k in + 512 out = 4.3k
+  stateRoles x2            free text    473 in + 524 out = 3.1k
+  moneyModel               free text    1.1k in + 308 out = 2.6k
+  externalEffect x5        true/false   1.3k in + 125 out = 1.9k
+
+NOT ASKED
+  questions                over the 12.0k budget; 11.9k already committed saves 6.3k
+  externalEffect x4        over the 12.0k budget; 11.9k already committed saves 3.1k
+
+cost       4.5k in + 1.5k out = 11.9k
+avoided    7.0k in + 500 out = 9.5k
+saving     44% of the unplanned cost
+```
+
+The planner decides what is worth asking. It never decides what is true. That is
+still the agent's job, and `testigo collect` checks the agent's work.
 
 ## How it works
 
-testigo starts with the entry points of your payment flow and figures out what kind of payment system you have — whether it's a credit system, wallet, PSP payment, or something else.
+testigo starts with the entry points of your payment flow and figures out what kind of payment system you have: a credit system, a wallet, a PSP payment, or something else.
 
 Then it reads your code and figures out what is actually happening inside the flow: how money moves, where state changes, what external systems are involved, what can go wrong, and what needs to be tested.
 
@@ -51,32 +151,50 @@ So instead of asking the agent to explore your codebase from scratch, testigo do
 
 The result is faster and more focused testing, fewer wasted tokens, and a detailed report showing what was tested and what happened.
 
----
-
-## Two phases, and why they are separate
+### Two phases, and why they are separate
 
 | Phase | Name | What it does | Cost |
 |---|---|---|---|
-| 1 | `ScanningTheFlow` | the Go type checker and SSA prove what is provable: reachable functions, seams, state machines, money fields, findings | **free**, no network |
-| 2 | `AskingTheAgent` | an agent answers only the residue, as bounded questions whose answers can be checked back against the code — through files, or through MCP tools | tokens |
+| 1 | `ScanningTheFlow` | the Go type checker and SSA prove what can be proved: reachable functions, seams, state machines, money fields, findings | **free**, no network |
+| 2 | `AskingTheAgent` | an agent answers only what is left, as bounded questions whose answers can be checked against the code, through files or MCP tools | tokens |
 
-The split is the whole design. A compiler is free, exact and has no opinion; a model
-is expensive, fallible and will answer anything you ask. So the compiler goes first
-and settles everything it can, and the model is asked only what is genuinely left —
+The split is the whole design. A compiler is free, exact and has no opinion. A model
+is expensive, can be wrong, and will answer anything you ask. So the compiler goes
+first and settles everything it can, and the model is asked only what is really left,
 in a form where a wrong answer can be caught.
 
 ---
 
-## The pipeline, on the bundled fixture
+## Step by step
 
-`testdata/paysvc` is a deliberately flawed payment service: nine functions, every
-defect planted on purpose. The output below is real.
+Steps 1 and 2 are free: no agent, no tokens. **Tokens start at step 3**, the moment
+an agent reads the questions.
 
-### 1. Tell it where money enters
+| Step | Command | Who does the work | Tokens |
+|---|---|---|---|
+| 1. Tell it where money enters | `testigo init`, `testigo entry` | you | none |
+| 2. Scan | `testigo scan` | the Go compiler | none |
+| 3. Round 1: answer the questions | `testigo ask --round 1`, then `testigo collect` | your agent answers, testigo checks | **yes** |
+| 4. Round 2: write the tests | `testigo ask --round 2`, then `testigo collect` | your agent writes tests, testigo builds and runs them | **yes** |
+| 5. The report | `testigo report --ask` | your agent writes `REPORT.md` | **yes** |
 
-testigo never guesses entry points. Which function begins a flow is something you
-know and the code does not say — and a guessed list invites someone to accept it
-without reading, which silently drops a whole path from the analysis.
+Free at any time: `testigo ask --explain` (the plan and its price), `testigo cases`
+(the test plan), `testigo report` (a printed summary) and `testigo flow` (the flow as
+a Mermaid diagram).
+
+On the wallet example, the three paid steps were about 14.6k, 28.1k and 5.8k tokens
+of prompt. That is testigo's own estimate from the files it wrote, not a bill.
+
+`testdata/paysvc` is the fixture for the steps below: a payment service with nine
+functions and every defect planted on purpose. The output is real.
+
+### Free: no agent, no tokens
+
+#### 1. Tell it where money enters
+
+testigo never guesses entry points. Which function starts a flow is something you
+know and the code doesn't say. A guessed list invites someone to accept it without
+reading, and that quietly drops a whole path from the analysis.
 
 ```sh
 testigo init .
@@ -87,7 +205,7 @@ The fixture declares three: the API handler, the provider webhook and the
 reconciliation job. Following only the API would miss the webhook, which is exactly
 where double-credit bugs live.
 
-### 2. Scan — the free part
+#### 2. Scan
 
 ```
 $ testigo scan .
@@ -113,55 +231,65 @@ still unknown (phase 2 asks an agent):
   - how the uninjectable seams behave under failure
 ```
 
-Writes `testigo/flow.json`. Your source files are never touched.
+It writes `testigo/flow.json` and never touches your source files. You can stop
+here: the findings alone are worth reading.
 
-### 3. Ask — see the plan and the price before you spend
+### Paid: your agent works from here
+
+#### 3. Round 1: the agent answers questions
 
 ```
-$ testigo ask --explain --round 1 .
-ask plan   30 scenario(s) runnable, 4 blocked
-budget     none; output counted 5x
-
-ASKED
-  questions                free text    5.9k in + 1.5k out = 13.6k
-  mainEntity               free text    1.7k in + 512 out = 4.3k
-  externalEffect x9        true/false   2.3k in + 225 out = 3.5k
-  stateRoles x2            free text    473 in + 524 out = 3.1k
-  moneyModel               free text    1.1k in + 308 out = 2.6k
-
-cost       11.5k in + 3.1k out = 27.1k
-
+$ testigo ask --round 1 .
+questions   14
 est. cost   ~15.9k tokens across 14 prompt(s)
             ~56.6k saved by hoisting the shared rules into PREAMBLE.md
 ```
 
-Writes markdown into `testigo/asks/`. Point your agent at
-`testigo/asks/INSTRUCTIONS.md`; it writes JSON into `testigo/answers/`.
-`--budget N` caps the weighted tokens the planner is allowed to commit.
-
-### 4. Collect — validate, then apply
+Writing the questions costs nothing. They go into `testigo/asks/` as markdown. The
+tokens are spent when your agent reads `testigo/asks/INSTRUCTIONS.md` and writes its
+answers as JSON into `testigo/answers/`. Run it with `--explain` first to see the
+[plan](#the-planner).
 
 ```sh
 testigo collect .
 ```
 
-Nothing here can tell whether an answer is *correct*. It can tell whether the answer
-is about this repository at all: a state that does not exist, a declared state left
-out, a claim with no `file:line`, or the prompt's own example sent back verbatim.
+`collect` can't tell whether an answer is *correct*. It can tell whether the answer
+is about this repository at all: a state that doesn't exist, a declared state left
+out, a claim with no `file:line`, or the prompt's own example sent back word for
+word. A bad answer comes back with the reason, so the agent fixes that one file
+instead of redoing the round.
 
-### 5. Cases — the test plan, priced, spending nothing
+#### 4. Round 2: the agent writes the tests
 
 ```sh
-testigo cases .
+testigo ask --round 2 .
+testigo collect .
 ```
 
-Read the *not applicable* list too. A scenario that cannot run here, with the reason
-it cannot, is information.
+Round 2 opens only after round 1 passes `collect`. The agent gets one brief per test
+case, with only the answers that case needs. `collect` then writes each test into
+your package as `*_testigo_test.go`, builds it, runs `go vet`, and runs it with
+`-race`. `testigo report` shows what happened:
 
-### 6. Report — one file, written by the agent
+```
+TESTS — round 2, written by the agent, run with -race
+  12 written: 0 passed, 12 failed
+  15 blocked
+  failed    DOUBLE-ENTRY-SUMS-TO-ZERO          api/double_entry_sums_to_zero_testigo_test.go  (expected)
+  failed    IDEM-CONCURRENT                    api/idem_concurrent_testigo_test.go  (expected)
+  failed    IDEM-CRASH-AT-STEP                 api/idem_crash_at_step_testigo_test.go  (expected)
+  failed    SELF-TRANSFER-REFUSED              api/self_transfer_refused_testigo_test.go  (expected)
+  failed    TRANSFER-IS-ATOMIC                 api/transfer_is_atomic_testigo_test.go  (expected)
+  ...
+```
+
+That is the wallet run. `(expected)` means the agent said before the run that the
+test would fail, and why. A red test like that is a finding, not a broken test.
+
+#### 5. The report
 
 ```sh
-testigo report .         # a summary, printed, free
 testigo report --ask .   # a prompt; the agent writes testigo/REPORT.md
 ```
 
@@ -171,10 +299,10 @@ constraint beats a check in Go, and the cost of the fix has to be stated.
 
 ### A complete run
 
-The steps above show the commands. For a run through every step with every output
-kept, on the second fixture, a wallet service, see [examples/walletsvc](examples/walletsvc):
-the round 1 answers, the 12 tests round 2 wrote (all red, each one a planted bug),
-the 15 cases it blocked and why, and the `REPORT.md` the agent wrote.
+For every step with every output kept, on the second fixture, a wallet service, see
+[examples/walletsvc](examples/walletsvc): the round 1 answers, the 12 tests round 2
+wrote (all red, each one a planted bug), the 15 cases it blocked and why, and the
+`REPORT.md` the agent wrote.
 
 ---
 
@@ -211,8 +339,8 @@ new.
 
 One lesson from building it: the Go MCP SDK builds each tool's JSON schema from the
 Go type. A field typed `json.RawMessage` turns into "an array of bytes", so every real
-call failed validation before reaching the handler. `go build` and `go vet` passed. Only
-a real call over stdio caught it.
+call failed validation before reaching the handler. `go build` and `go vet` passed.
+Only a real call over stdio caught it.
 
 ---
 
@@ -222,15 +350,15 @@ a real call over stdio caught it.
 |---|---|---|
 | `MONEY-FLOAT` | critical | An amount in a float. Binary floating point cannot hold `0.10` exactly, so sums drift and equal amounts compare unequal. Critical because it corrupts the amount itself, everywhere it flows. |
 | `IDEM-KEY-NOT-UNIQUE` | critical | A key meant to stop repeats, with no unique index behind it. Two identical requests both pass "have I seen this?" before either writes. That is the classic double charge. |
-| `TX-NET-CALL` | critical | A network call inside an open transaction. Locks are held for the provider's timeout, so a slow provider becomes a database outage — and a rollback cannot undo what the provider already did. |
+| `TX-NET-CALL` | critical | A network call inside an open transaction. Locks are held for the provider's timeout, so a slow provider becomes a database outage. And a rollback cannot undo what the provider already did. |
 | `SCHEMA-NOT-FOUND` | critical | The code talks to a database, but no schema was found. Every uniqueness claim is then held back instead of guessed. Critical because without the schema, nothing above can say whether the database refuses a duplicate. |
 | `MONEY-DIV` | high | Money divided with no rounding rule. Integer division drops the remainder, and a few lost minor units per operation become books that will not balance. |
-| `TX-NO-ROLLBACK` | high | A transaction with no rollback on its early-return paths. Leaks a connection and holds locks — an outage shape rather than a wrong amount. |
+| `TX-NO-ROLLBACK` | high | A transaction with no rollback on its early-return paths. It leaks a connection and holds locks: an outage, not a wrong amount. |
 | `TX-UNUSED` | high | A transaction is opened and committed, but no statement runs on it. Everything between begin and commit runs outside it, so nothing it was meant to protect is atomic. |
 | `TX-BYPASS` | high or medium | Database work runs beside the open transaction instead of in it. That work commits on its own: a rollback leaves it in place. High when the call is proved to be database work, medium when that is guessed from names. |
 | `SEAM-CONCRETE` | high | I/O on a concrete type, so no test can make it fail or time out. Most payment bugs only appear when something downstream fails, so those paths go untested. |
 | `MONEY-NO-CURRENCY` | medium | A bare integer amount with no currency beside it. Nothing stops adding EUR to USD. Cheap with one currency; expensive the day there are two. |
-| `STATE-NEVER-SET` | medium | A declared status nothing produces. Either it is dead, or something outside Go sets it — and either way nobody tests that transition. |
+| `STATE-NEVER-SET` | medium | A declared status nothing produces. Either it is dead, or something outside Go sets it. Either way, nobody tests that transition. |
 | `MIGRATION-NO-DOWN` | medium | Migrations with no down step, under a tool that expects one. A test that builds the database from migrations cannot tear it down between cases, and a bad migration has no rehearsed way back. |
 | `LOAD-ERROR` | info | A package did not type-check. Everything behind it is invisible: its findings are **missing, not absent**. |
 
@@ -239,7 +367,7 @@ whether another service writes that state. It reports the fact and leaves the
 judgement to you.
 
 Each finding also says how it was reached. `proved` means the type checker, SSA or
-the schema showed it. `heuristic` means it depends on names — that a field called
+the schema showed it. `heuristic` means it depends on names: that a field called
 `Amount` is money, or that `PSP.Authorize` is an HTTP call. A heuristic finding is
 wrong when the code is named unusually.
 
@@ -255,15 +383,15 @@ A call is first a *candidate* because of the package it lives in. It is kept onl
 the call graph shows it can actually reach a socket or a database round trip. On the
 way there, testigo refuses to follow:
 
-- **plumbing interfaces** — `error`, `io.Reader`/`io.Writer`, `context.Context`, `fmt.Stringer` — which resolve to every implementation in the program, including socket reads;
+- **plumbing interfaces** (`error`, `io.Reader`/`io.Writer`, `context.Context`, `fmt.Stringer`), which resolve to every implementation in the program, including socket reads;
 - **generic callbacks** such as `func(rune) rune`, which link to every function of that shape;
 - **library code calling back into your application**, since a library's own I/O cannot depend on the callbacks you register.
 
-Sends that hand work to a background goroutine — `Publish`, `Send`, `Request` — are
+Sends that hand work to a background goroutine (`Publish`, `Send`, `Request`) are
 kept by name, because their socket write is not on any static path at all.
 
 On a real service this took seams from **165 to 69**, and effect-seam targets from 35
-to 15. Every real seam survived — NATS publish, go-pg insert and select, the order
+to 15. Every real seam survived: NATS publish, go-pg insert and select, the order
 repository. The false ones did not: `grpc/status.New`, `metadata.MD.Get`, go-pg's
 query builders, `(error).Error`. These numbers were measured with testigo's own
 scanner, before it moved to gofacts, and have not been re-measured.
@@ -282,7 +410,7 @@ questions they cannot be written without. Nothing else is asked, ever.
 |---|---|
 | `moneyModel` | which field is money, which function moves it, which field is the idempotency key |
 | `mainEntity` | which struct the flow moves, and which identifier a client repeats on a retry |
-| `questions` | the scenario and technique questions — true/false wherever a boolean will do |
+| `questions` | the scenario and technique questions, true/false wherever a boolean will do |
 | `stateRoles` | the role of each state of one machine; testigo derives the legal transitions itself |
 | `externalEffect` | five verdicts about one seam: survives a rollback, observable after a timeout, deduplicated, moves money |
 
@@ -311,7 +439,7 @@ weighted tokens**, without dropping a single test:
 1. **Ask only what a runnable scenario requires.** The planner prices every candidate
    ask and skips any that no runnable scenario needs.
 2. **Never buy a field nothing reads.** A registry records, for every answer field,
-   what consumes it. A field with no reader should not exist — and 35 of them did.
+   what consumes it. A field with no reader should not exist, and 35 of them did.
 3. **Hoist everything repeated into one preamble.** Shared rules and the rendered
    flow are written once into `PREAMBLE.md`; each ask cites step numbers instead of
    reprinting them. On the fixture that is ~56.6k saved against ~15.9k actually sent.
@@ -319,8 +447,8 @@ weighted tokens**, without dropping a single test:
 4. **Prefer a boolean to a paragraph.** A true/false question costs about 5 output
    tokens; an open one costs 40 to 130. Most things worth knowing are decidable.
 
-The largest single win was deleting a feature. Per-function "notes" — what does this
-function do in business terms — cost **381k of 618k** weighted tokens in round one,
+The largest single win was deleting a feature. Per-function "notes" (what does this
+function do in business terms?) cost **381k of 618k** weighted tokens in round one,
 and no scenario required them. They are gone.
 
 See [studies/contextEngineering.md](studies/contextEngineering.md) for the full
@@ -333,7 +461,7 @@ argument and the measurements.
 | Term | Meaning |
 |---|---|
 | **Seam** | a call that leaves the process; injectable if it goes through an interface your repo defines |
-| **Scenario** | one of 34 catalogued ways a payment system breaks, in 7 families; declares what it `Requires` — see [CATALOG.md](CATALOG.md) |
+| **Scenario** | one of 34 catalogued ways a payment system breaks, in 7 families; declares what it `Requires`; see [CATALOG.md](CATALOG.md) |
 | **Technique** | how a scenario is expressed: fault injection, concurrency, property, table, fuzz, metamorphic, state machine, narrow integration… |
 | **Question** | one thing testigo cannot prove, with the problem it guards against and where the answer lives |
 | **Payment kind** | spine (double-entry, wallet, stateless), motions (top-up, payout, escrow…) and overlays (refund, reconciliation, FX) |
@@ -349,7 +477,7 @@ argument and the measurements.
 | `cmd/testigo` | the CLI: one function per command, plus the MCP server | [README](cmd/testigo/README.md) |
 | `internal/docs` | finds the repository's own markdown docs and ranks them for the round-one prompt | [README](internal/docs/README.md) |
 | `internal/testPlan` | the scenario catalogue, the plan types, and the selector | [README](internal/testPlan/README.md) |
-| `internal/agent` | phase 2 — plans asks, writes the pack, collects and validates answers | [README](internal/agent/README.md) |
+| `internal/agent` | phase 2: plans asks, writes the pack, collects and validates answers | [README](internal/agent/README.md) |
 | `internal/agent/domain` | the agent's vocabulary: questions, asks, answers, payment kinds | [README](internal/agent/domain/README.md) |
 | `internal/agent/planner` | demand, the consumer registry, the cost model, `--explain` | [README](internal/agent/planner/README.md) |
 | `internal/agent/prompts` | one file per prompt, plus the preamble | [README](internal/agent/prompts/README.md) |
@@ -358,8 +486,8 @@ argument and the measurements.
 
 9 packages, ~10.0k lines of Go and ~3.5k lines of tests.
 
-Phase 1 itself — SSA, the call graph, seams, transactions, state machines, the
-schema, money and the findings — is not in this repository. It is
+Phase 1 itself (SSA, the call graph, seams, transactions, state machines, the
+schema, money and the findings) is not in this repository. It is
 [gofacts](https://github.com/katayunak/gofacts), a library testigo shares with
 [1819](https://github.com/katayunak/1819), a code reviewer that checks diffs against
 the same facts. `cmd/testigo` calls it, and `flow.json` is its `fact.Flow` type.
@@ -401,7 +529,7 @@ stopped after five minutes.
 - The seam filter over-approximates: it walks the CHA call graph. gofacts also builds a VTA graph, but uses it only to decide which functions call which, not which calls reach I/O.
 - The roll-up into per-area claims counts only true/false verdicts. The per-seam verdicts and the money model reach cases directly, but they are not part of it.
 - Seven true/false questions are not rolled up, because a `true` or `false` alone does not say which way the system leans. `NotRolledUp` in `internal/agent/domain/featureCatalog.go` gives the reason for each.
-- Recheck questions — where the agent re-confirms a fact phase 1 proved, with the proof attached — are built and tested, but nothing currently produces one.
+- Recheck questions, where the agent re-confirms a fact phase 1 proved with the proof attached, are built and tested, but nothing produces one yet.
 - A round 1 answer that says a scenario does not apply here does not remove it from round 2. The agent marks it blocked instead, which costs a little output.
 - A `medium` case needs a database driver in the scanned module's `go.mod`. testigo does not check for one before planning the case, so without a driver the agent can only block it.
 
@@ -409,7 +537,7 @@ stopped after five minutes.
 
 ## Running medium and integration tests
 
-A case marked `medium` is allowed to open a real database — a small test is not.
+A case marked `medium` is allowed to open a real database. A small test is not.
 `docker-compose.yml` at the repo root brings up disposable Postgres, Redis, and
 Kafka for exactly that:
 
@@ -419,7 +547,7 @@ docker compose ps
 ```
 
 Every container has a healthcheck; wait for `healthy` before running anything
-against them. Nothing is persisted — no named volumes are declared, so
+against them. Nothing is persisted. No named volumes are declared, so
 `docker compose down` leaves no data behind and the next `up` starts clean.
 
 Connection details a generated `medium` test should use:
@@ -438,12 +566,12 @@ to keep them in sync by hand.
 
 ## Studies
 
-Every scenario testigo knows is listed in **[CATALOG.md](CATALOG.md)** — 34 of them,
+Every scenario testigo knows is listed in **[CATALOG.md](CATALOG.md)**: 34 of them,
 with what each needs, what passing means, and the specific wrong versions of each test.
 
 The research this is built on lives in [`studies/`](studies/).
 
-- [How real fintech systems test payment flows](studies/howRealFintechSystemsTestPaymentFlows.md) — 19 practices from Stripe, Adyen, Airbnb, Uber, Monzo, Starling, Nubank, Jepsen, TigerBeetle and others, each turned into a catalogue scenario.
-- [How tables are written, and how that breaks](studies/howTablesAreWrittenAndHowThatBreaks.md) — the write-pattern classifier behind scenarios like `LOST-UPDATE` and `UPSERT-HIDES-A-SECOND-EFFECT`.
-- [What Formance Ledger taught us](studies/whatFormanceLedgerTaughtUs.md) — reading a real open-source double-entry ledger end to end: one new scenario, three gaps we named instead of guessing at, and one thing even a mature ledger team leaves untested.
-- [Context engineering](studies/contextEngineering.md) — how to get a better answer from a model for fewer tokens, measured on this project.
+- [How real fintech systems test payment flows](studies/howRealFintechSystemsTestPaymentFlows.md): 19 practices from Stripe, Adyen, Airbnb, Uber, Monzo, Starling, Nubank, Jepsen, TigerBeetle and others, each turned into a catalogue scenario.
+- [How tables are written, and how that breaks](studies/howTablesAreWrittenAndHowThatBreaks.md): the write-pattern classifier behind scenarios like `LOST-UPDATE` and `UPSERT-HIDES-A-SECOND-EFFECT`.
+- [What Formance Ledger taught us](studies/whatFormanceLedgerTaughtUs.md): reading a real open-source double-entry ledger end to end: one new scenario, three gaps we named instead of guessing at, and one thing even a mature ledger team leaves untested.
+- [Context engineering](studies/contextEngineering.md): how to get a better answer from a model for fewer tokens, measured on this project.
